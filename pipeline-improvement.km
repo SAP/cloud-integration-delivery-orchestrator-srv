@@ -1,0 +1,2035 @@
+{
+    "root": {
+        "data": {
+            "id": "d1l2c9k0ymg0",
+            "created": 1716877670871,
+            "text": "New iflow Deployment",
+            "background": "#73a1bf"
+        },
+        "children": [
+            {
+                "data": {
+                    "id": "d1l2ckqc5m00",
+                    "created": 1716877695197,
+                    "text": "requirement",
+                    "expandState": "collapse",
+                    "background": "#73a1bf",
+                    "layout": null
+                },
+                "children": [
+                    {
+                        "data": {
+                            "id": "d1l2co0giu80",
+                            "created": 1716877702339,
+                            "text": "Separate the import of the IFlow to the system and the deployment",
+                            "background": "#73a1bf",
+                            "layout": null
+                        },
+                        "children": [
+                            {
+                                "data": {
+                                    "id": "d1l2dmhf27c0",
+                                    "created": 1716877777375,
+                                    "text": "use separate process to for different tasks",
+                                    "background": "#73a1bf",
+                                    "layout": null
+                                },
+                                "children": [
+                                    {
+                                        "data": {
+                                            "id": "d1l5v9g6chk0",
+                                            "created": 1716887622888,
+                                            "text": "Job Engine",
+                                            "background": "#73a1bf",
+                                            "layout": null
+                                        },
+                                        "children": []
+                                    },
+                                    {
+                                        "data": {
+                                            "id": "d1l6uc3c4n40",
+                                            "created": 1716890371387,
+                                            "text": "Scheduler",
+                                            "background": "#73a1bf",
+                                            "layout": null
+                                        },
+                                        "children": []
+                                    },
+                                    {
+                                        "data": {
+                                            "id": "d1l2duyilns0",
+                                            "created": 1716877795824,
+                                            "text": "import process",
+                                            "background": "#73a1bf",
+                                            "layout": null
+                                        },
+                                        "children": []
+                                    },
+                                    {
+                                        "data": {
+                                            "id": "d1l2dyhvkn40",
+                                            "created": 1716877803525,
+                                            "text": "deployment process",
+                                            "background": "#73a1bf",
+                                            "layout": null
+                                        },
+                                        "children": []
+                                    },
+                                    {
+                                        "data": {
+                                            "id": "d1l3fmxvav40",
+                                            "created": 1716880756208,
+                                            "text": "Message Queue",
+                                            "background": "#73a1bf",
+                                            "layout": null
+                                        },
+                                        "children": []
+                                    },
+                                    {
+                                        "data": {
+                                            "id": "d1l3fq9n7iw0",
+                                            "created": 1716880763451,
+                                            "text": "Database processing",
+                                            "background": "#73a1bf",
+                                            "layout": null
+                                        },
+                                        "children": []
+                                    },
+                                    {
+                                        "data": {
+                                            "id": "d1lwl8lud340",
+                                            "created": 1716963007379,
+                                            "text": "notification to specified users",
+                                            "background": "#73a1bf",
+                                            "layout": null
+                                        },
+                                        "children": []
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "data": {
+                            "id": "d1l2cuxv4z40",
+                            "created": 1716877717420,
+                            "text": "Allows to do the deployment by a predefined sequence",
+                            "background": "#73a1bf",
+                            "layout": null
+                        },
+                        "children": [
+                            {
+                                "data": {
+                                    "id": "d1l2eutmq5k0",
+                                    "created": 1716877873892,
+                                    "text": "who define the sequence",
+                                    "expandState": "expand",
+                                    "background": "#73a1bf",
+                                    "layout": null
+                                },
+                                "children": [
+                                    {
+                                        "data": {
+                                            "id": "d1l2ebfotkg0",
+                                            "created": 1716877831690,
+                                            "text": "prefined by user at execution time",
+                                            "background": "#73a1bf",
+                                            "layout": null
+                                        },
+                                        "children": []
+                                    },
+                                    {
+                                        "data": {
+                                            "id": "d1l2egit8hs0",
+                                            "created": 1716877842763,
+                                            "text": "predefined by this application",
+                                            "background": "#73a1bf",
+                                            "layout": null
+                                        },
+                                        "children": []
+                                    }
+                                ]
+                            },
+                            {
+                                "data": {
+                                    "id": "d1l2jcimokw0",
+                                    "created": 1716878225866,
+                                    "text": "we can define the sequence as a  job ",
+                                    "background": "#73a1bf",
+                                    "layout": null
+                                },
+                                "children": [
+                                    {
+                                        "data": {
+                                            "id": "d1l2juodaw80",
+                                            "created": 1716878265395,
+                                            "text": "only import",
+                                            "background": "#73a1bf",
+                                            "layout": null
+                                        },
+                                        "children": []
+                                    },
+                                    {
+                                        "data": {
+                                            "id": "d1l2k89sjao0",
+                                            "created": 1716878294989,
+                                            "text": "only deployment",
+                                            "background": "#73a1bf",
+                                            "layout": null
+                                        },
+                                        "children": []
+                                    },
+                                    {
+                                        "data": {
+                                            "id": "d1l2kabydtk0",
+                                            "created": 1716878299473,
+                                            "text": "both import and  deployment",
+                                            "background": "#73a1bf",
+                                            "layout": null
+                                        },
+                                        "children": []
+                                    },
+                                    {
+                                        "data": {
+                                            "id": "d1lwg8ivrvc0",
+                                            "created": 1716962615380,
+                                            "text": "undeployment",
+                                            "background": "#73a1bf",
+                                            "layout": null
+                                        },
+                                        "children": []
+                                    }
+                                ]
+                            },
+                            {
+                                "data": {
+                                    "id": "d1l3f2jpgaw0",
+                                    "created": 1716880711816,
+                                    "text": "job paramter",
+                                    "background": "#73a1bf",
+                                    "layout": null
+                                },
+                                "children": [
+                                    {
+                                        "data": {
+                                            "id": "d1l3f466jcg0",
+                                            "created": 1716880715352,
+                                            "text": "TRs",
+                                            "background": "#73a1bf",
+                                            "layout": null
+                                        },
+                                        "children": [
+                                            {
+                                                "data": {
+                                                    "id": "d1lwis0xgdk0",
+                                                    "created": 1716962814557,
+                                                    "text": "items in TR != Deployment itmes",
+                                                    "background": "#73a1bf",
+                                                    "layout": null
+                                                },
+                                                "children": []
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "data": {
+                                            "id": "d1l3f6jwkmw0",
+                                            "created": 1716880720536,
+                                            "text": "target system",
+                                            "background": "#73a1bf",
+                                            "layout": null
+                                        },
+                                        "children": []
+                                    },
+                                    {
+                                        "data": {
+                                            "id": "d1l3hed4p1k0",
+                                            "created": 1716880894268,
+                                            "text": "deployment Type",
+                                            "background": "#73a1bf",
+                                            "layout": null
+                                        },
+                                        "children": [
+                                            {
+                                                "data": {
+                                                    "id": "d1l3hgxsko00",
+                                                    "created": 1716880899871,
+                                                    "text": "import",
+                                                    "background": "#73a1bf",
+                                                    "layout": null
+                                                },
+                                                "children": []
+                                            },
+                                            {
+                                                "data": {
+                                                    "id": "d1l3hj1m7q80",
+                                                    "created": 1716880904456,
+                                                    "text": "deployment",
+                                                    "background": "#73a1bf",
+                                                    "layout": null
+                                                },
+                                                "children": []
+                                            },
+                                            {
+                                                "data": {
+                                                    "id": "d1l3hmvz0a00",
+                                                    "created": 1716880912822,
+                                                    "text": "both import and  deployment",
+                                                    "background": "#73a1bf",
+                                                    "layout": null
+                                                },
+                                                "children": []
+                                            },
+                                            {
+                                                "data": {
+                                                    "id": "d1lwgymaj7c0",
+                                                    "created": 1716962672181,
+                                                    "text": "undeployment",
+                                                    "background": "#73a1bf",
+                                                    "layout": null
+                                                },
+                                                "children": []
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "data": {
+                                            "id": "d1l6tvl2ezc0",
+                                            "created": 1716890335453,
+                                            "text": "Schedule",
+                                            "background": "#73a1bf",
+                                            "layout": null
+                                        },
+                                        "children": []
+                                    },
+                                    {
+                                        "data": {
+                                            "id": "d1lwzmvs4g80",
+                                            "created": 1716964135553,
+                                            "text": "the process of import TR and deployment will be decoupled",
+                                            "layout": null,
+                                            "background": "#73a1bf"
+                                        },
+                                        "children": [
+                                            {
+                                                "data": {
+                                                    "id": "d1lwzxrh38o0",
+                                                    "created": 1716964159237,
+                                                    "text": "import stage",
+                                                    "layout": null,
+                                                    "background": "#73a1bf"
+                                                },
+                                                "children": [
+                                                    {
+                                                        "data": {
+                                                            "id": "d1lx104317s0",
+                                                            "created": 1716964242717,
+                                                            "text": "get-all- tr-nodes",
+                                                            "layout": null,
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d1lx16p24jk0",
+                                                            "created": 1716964257046,
+                                                            "text": "select TR node",
+                                                            "layout": null,
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d1lx18ytqpk0",
+                                                            "created": 1716964261990,
+                                                            "text": "get all TR in this node",
+                                                            "layout": null,
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d1lx1dja5bk0",
+                                                            "created": 1716964271934,
+                                                            "text": "select TRs to import",
+                                                            "layout": null,
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d1lx1k0j38g0",
+                                                            "created": 1716964286038,
+                                                            "text": "import selected TR",
+                                                            "layout": null,
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d1lx1qg8fcg0",
+                                                            "created": 1716964300048,
+                                                            "text": "notification",
+                                                            "layout": null,
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "data": {
+                                                    "id": "d1lx067rd940",
+                                                    "created": 1716964177636,
+                                                    "text": "deployment stage",
+                                                    "layout": null,
+                                                    "background": "#73a1bf"
+                                                },
+                                                "children": [
+                                                    {
+                                                        "data": {
+                                                            "id": "d1lx1wkehj40",
+                                                            "created": 1716964313361,
+                                                            "text": "select iflow tenant",
+                                                            "layout": null,
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d1lx2cmh7fk0",
+                                                            "created": 1716964348315,
+                                                            "text": "get all packages",
+                                                            "layout": null,
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d1lx2f7vza00",
+                                                            "created": 1716964353963,
+                                                            "text": "select package",
+                                                            "layout": null,
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d1lx2hx4qd40",
+                                                            "created": 1716964359843,
+                                                            "text": "get all script and filow",
+                                                            "layout": null,
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d1lx2mmmidc0",
+                                                            "created": 1716964370092,
+                                                            "text": "select script and iflow",
+                                                            "layout": null,
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d1lx2s807pc0",
+                                                            "created": 1716964382268,
+                                                            "text": "undeploy",
+                                                            "layout": null,
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d1lx2yg9r2o0",
+                                                            "created": 1716964395829,
+                                                            "text": "deploy",
+                                                            "layout": null,
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d1lx31duls00",
+                                                            "created": 1716964402213,
+                                                            "text": "notfication",
+                                                            "layout": null,
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "data": {
+                            "id": "d1l2d0evkn40",
+                            "created": 1716877729333,
+                            "text": "Be able to select the iflows / scripts \nwhich needs to be deployed for the time",
+                            "background": "#73a1bf",
+                            "layout": null,
+                            "layout_right_offset": {
+                                "x": 34.49999994516372,
+                                "y": -4.999999992052722
+                            }
+                        },
+                        "children": [
+                            {
+                                "data": {
+                                    "id": "d1l2fubrawo0",
+                                    "created": 1716877951176,
+                                    "text": "one TR only have one item",
+                                    "background": "#73a1bf",
+                                    "layout": null
+                                },
+                                "children": []
+                            },
+                            {
+                                "data": {
+                                    "id": "d1l2g1eqb1s0",
+                                    "created": 1716877966593,
+                                    "text": "one TR have multiple Items",
+                                    "background": "#73a1bf",
+                                    "layout": null
+                                },
+                                "children": []
+                            },
+                            {
+                                "data": {
+                                    "id": "d1l3dsb02lc0",
+                                    "created": 1716880611158,
+                                    "text": "muitiple TRs",
+                                    "background": "#73a1bf",
+                                    "layout": null
+                                },
+                                "children": []
+                            }
+                        ]
+                    },
+                    {
+                        "data": {
+                            "id": "d1l2d3dkqmw0",
+                            "created": 1716877735784,
+                            "text": "Be able to select the deployment for specific target system.",
+                            "background": "#73a1bf",
+                            "layout": null
+                        },
+                        "children": [
+                            {
+                                "data": {
+                                    "id": "d1l2hcsvoxk0",
+                                    "created": 1716878069757,
+                                    "text": "if the sequence is defined by user at execution time, it is not required",
+                                    "background": "#73a1bf",
+                                    "layout": null
+                                },
+                                "children": []
+                            },
+                            {
+                                "data": {
+                                    "id": "d1l2hshehco0",
+                                    "created": 1716878103892,
+                                    "text": "if it is defined by application, it requires a skip operation",
+                                    "background": "#73a1bf",
+                                    "layout": null
+                                },
+                                "children": []
+                            },
+                            {
+                                "data": {
+                                    "id": "d1l2kob4ftc0",
+                                    "created": 1716878329898,
+                                    "text": "use database to store current target status, and update it at daily basis",
+                                    "background": "#73a1bf",
+                                    "layout": null
+                                },
+                                "children": []
+                            }
+                        ]
+                    },
+                    {
+                        "data": {
+                            "id": "d1l2d8p3l6g0",
+                            "created": 1716877747365,
+                            "text": "Should be able to check the deployment status afterwards",
+                            "background": "#73a1bf",
+                            "layout": null
+                        },
+                        "children": [
+                            {
+                                "data": {
+                                    "id": "d1l2idix6qo0",
+                                    "created": 1716878149696,
+                                    "text": "Continuous monitoring the import and deployment status",
+                                    "background": "#73a1bf",
+                                    "layout": null
+                                },
+                                "children": []
+                            }
+                        ]
+                    },
+                    {
+                        "data": {
+                            "id": "d1l2dbt6kkg0",
+                            "created": 1716877754142,
+                            "text": "Transport history should be there",
+                            "background": "#73a1bf",
+                            "layout": null
+                        },
+                        "children": [
+                            {
+                                "data": {
+                                    "id": "d1l2iq50bv40",
+                                    "created": 1716878177153,
+                                    "text": "keep history in a  database",
+                                    "background": "#73a1bf",
+                                    "layout": null
+                                },
+                                "children": []
+                            },
+                            {
+                                "data": {
+                                    "id": "d1l2j16yv2o0",
+                                    "created": 1716878201216,
+                                    "text": "also store the predefined sequence",
+                                    "background": "#73a1bf",
+                                    "layout": null
+                                },
+                                "children": []
+                            }
+                        ]
+                    },
+                    {
+                        "data": {
+                            "id": "d1l2m22u7y00",
+                            "created": 1716878438236,
+                            "text": "Be able to run multiple jobs simultaneously",
+                            "background": "#73a1bf",
+                            "layout": null
+                        },
+                        "children": [
+                            {
+                                "data": {
+                                    "id": "d1l2mel43vk0",
+                                    "created": 1716878465462,
+                                    "text": "use a MQ to store the job queues",
+                                    "background": "#73a1bf",
+                                    "layout": null
+                                },
+                                "children": []
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                "data": {
+                    "id": "d1l6pxyba080",
+                    "created": 1716890027151,
+                    "text": "architecture",
+                    "background": "#73a1bf",
+                    "layout": null
+                },
+                "children": [
+                    {
+                        "data": {
+                            "id": "d1l6q4esjg00",
+                            "created": 1716890041208,
+                            "text": "Front End",
+                            "background": "#73a1bf",
+                            "layout": null
+                        },
+                        "children": []
+                    },
+                    {
+                        "data": {
+                            "id": "d1l6q6v58s00",
+                            "created": 1716890046551,
+                            "text": "Backend",
+                            "background": "#73a1bf",
+                            "layout": null
+                        },
+                        "children": [
+                            {
+                                "data": {
+                                    "id": "d2am6um7jb40",
+                                    "created": 1719472667645,
+                                    "text": "api",
+                                    "layout": null,
+                                    "background": "#73a1bf"
+                                },
+                                "children": [
+                                    {
+                                        "data": {
+                                            "id": "d2am6zw2uw80",
+                                            "created": 1719472679126,
+                                            "text": "/api/v1/",
+                                            "layout": null,
+                                            "background": "#73a1bf"
+                                        },
+                                        "children": [
+                                            {
+                                                "data": {
+                                                    "id": "d2ap37e86zc0",
+                                                    "created": 1719480845334,
+                                                    "text": "auth",
+                                                    "background": "#73a1bf"
+                                                },
+                                                "children": [
+                                                    {
+                                                        "data": {
+                                                            "id": "d2ap38vq5zs0",
+                                                            "created": 1719480848569,
+                                                            "text": "login",
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2ap3c7xsw80",
+                                                            "created": 1719480855837,
+                                                            "text": "log out",
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "data": {
+                                                    "id": "d2am7enq5g00",
+                                                    "created": 1719472711272,
+                                                    "text": "job",
+                                                    "layout": null,
+                                                    "expandState": "expand",
+                                                    "background": "#73a1bf"
+                                                },
+                                                "children": [
+                                                    {
+                                                        "data": {
+                                                            "id": "d2am7gk1mzk0",
+                                                            "created": 1719472715403,
+                                                            "text": "get: get one job by id",
+                                                            "layout": null,
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2am9gwfs4g0",
+                                                            "created": 1719472872881,
+                                                            "text": "create: create a new job",
+                                                            "layout": null,
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2am7m8y00g0",
+                                                            "created": 1719472727793,
+                                                            "text": "delete: delete single job",
+                                                            "layout": null,
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2am7ptl1gw0",
+                                                            "created": 1719472735571,
+                                                            "text": "update: update job config",
+                                                            "layout": null,
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2am777msq80",
+                                                            "created": 1719472695062,
+                                                            "text": "get: get all jobs",
+                                                            "layout": null,
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "data": {
+                                                    "id": "d2bq94qgksw0",
+                                                    "created": 1719585690795,
+                                                    "text": "execution",
+                                                    "background": "#73a1bf"
+                                                },
+                                                "children": [
+                                                    {
+                                                        "data": {
+                                                            "id": "d2bq97t2k4o0",
+                                                            "created": 1719585697483,
+                                                            "text": "start: start to execute job",
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2bq9dxe2dk0",
+                                                            "created": 1719585710805,
+                                                            "text": "stop: stop a job execution",
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2bq9hk3e1c0",
+                                                            "created": 1719585718708,
+                                                            "text": "pause: pause a job execitopm",
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "data": {
+                                                    "id": "d2aq31fb6480",
+                                                    "created": 1719483653448,
+                                                    "text": "tms",
+                                                    "layout_right_offset": {
+                                                        "x": 23.49999996264785,
+                                                        "y": -6.499999989668538
+                                                    },
+                                                    "background": "#73a1bf"
+                                                },
+                                                "children": [
+                                                    {
+                                                        "data": {
+                                                            "id": "d2bqa2g19pc0",
+                                                            "created": 1719585764175,
+                                                            "text": "node: get nodes",
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2bqa6gl1ug0",
+                                                            "created": 1719585772915,
+                                                            "text": "TR: get TR from a node",
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "data": {
+                                                    "id": "d2aq348ash40",
+                                                    "created": 1719483659555,
+                                                    "text": "cpi",
+                                                    "background": "#73a1bf",
+                                                    "layout_right_offset": {
+                                                        "x": 6.999999988873697,
+                                                        "y": -1.4999999976158165
+                                                    }
+                                                },
+                                                "children": [
+                                                    {
+                                                        "data": {
+                                                            "id": "d2bqacpb18g0",
+                                                            "created": 1719585786503,
+                                                            "text": "package: get packages",
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2bqanut4fk0",
+                                                            "created": 1719585810781,
+                                                            "text": "iflows: get iflows of a package",
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2bqaubypkg0",
+                                                            "created": 1719585824879,
+                                                            "text": "scripts: get all script collections of a package",
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "data": {
+                                                    "id": "d2am81hjvoo0",
+                                                    "created": 1719472760965,
+                                                    "text": "config",
+                                                    "expandState": "expand",
+                                                    "layout": null,
+                                                    "background": "#73a1bf"
+                                                },
+                                                "children": [
+                                                    {
+                                                        "data": {
+                                                            "id": "d2am97n3nhc0",
+                                                            "created": 1719472852726,
+                                                            "text": "get: get all config",
+                                                            "layout": null,
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2am9us4mfc0",
+                                                            "created": 1719472903096,
+                                                            "text": "tms",
+                                                            "layout": null,
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": [
+                                                            {
+                                                                "data": {
+                                                                    "id": "d2am9w9lysg0",
+                                                                    "created": 1719472906329,
+                                                                    "text": "get: get config",
+                                                                    "layout": null,
+                                                                    "background": "#73a1bf"
+                                                                },
+                                                                "children": []
+                                                            },
+                                                            {
+                                                                "data": {
+                                                                    "id": "d2amat60mo80",
+                                                                    "created": 1719472977946,
+                                                                    "text": "create: create config",
+                                                                    "layout": null,
+                                                                    "background": "#73a1bf"
+                                                                },
+                                                                "children": []
+                                                            }
+                                                        ]
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2amafdvsbs0",
+                                                            "created": 1719472947947,
+                                                            "text": "cpi",
+                                                            "layout": null,
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": [
+                                                            {
+                                                                "data": {
+                                                                    "id": "d2amai44hl40",
+                                                                    "created": 1719472953887,
+                                                                    "text": "get: get conifg",
+                                                                    "layout": null,
+                                                                    "background": "#73a1bf"
+                                                                },
+                                                                "children": []
+                                                            },
+                                                            {
+                                                                "data": {
+                                                                    "id": "d2amalcihjs0",
+                                                                    "created": 1719472960924,
+                                                                    "text": "create: create config",
+                                                                    "layout": null,
+                                                                    "background": "#73a1bf"
+                                                                },
+                                                                "children": []
+                                                            },
+                                                            {
+                                                                "data": {
+                                                                    "id": "d2amaojhg680",
+                                                                    "created": 1719472967876,
+                                                                    "text": "delete: delete conifg",
+                                                                    "layout": null,
+                                                                    "background": "#73a1bf"
+                                                                },
+                                                                "children": []
+                                                            }
+                                                        ]
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2apz7c1kvc0",
+                                                            "created": 1719483352855,
+                                                            "text": "ping",
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": [
+                                                            {
+                                                                "data": {
+                                                                    "id": "d2apz9a99680",
+                                                                    "created": 1719483357100,
+                                                                    "text": "check connection",
+                                                                    "background": "#73a1bf"
+                                                                },
+                                                                "children": []
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "data": {
+                                    "id": "d2ap3qrux1c0",
+                                    "created": 1719480887517,
+                                    "text": "monitor",
+                                    "background": "#73a1bf"
+                                },
+                                "children": [
+                                    {
+                                        "data": {
+                                            "id": "d2ap3upqp000",
+                                            "created": 1719480896096,
+                                            "text": "prometheus endpoint",
+                                            "background": "#73a1bf"
+                                        },
+                                        "children": []
+                                    },
+                                    {
+                                        "data": {
+                                            "id": "d2ap424ml540",
+                                            "created": 1719480912233,
+                                            "text": "traces",
+                                            "background": "#73a1bf"
+                                        },
+                                        "children": []
+                                    }
+                                ]
+                            },
+                            {
+                                "data": {
+                                    "id": "d2ambkuwz080",
+                                    "created": 1719473038225,
+                                    "text": "import module",
+                                    "layout": null,
+                                    "background": "#73a1bf"
+                                },
+                                "children": [
+                                    {
+                                        "data": {
+                                            "id": "d2ambsurl400",
+                                            "created": 1719473055630,
+                                            "text": "node:",
+                                            "layout": null,
+                                            "background": "#73a1bf"
+                                        },
+                                        "children": [
+                                            {
+                                                "data": {
+                                                    "id": "d2ambytmm5c0",
+                                                    "created": 1719473068622,
+                                                    "text": "getall: get node list",
+                                                    "layout": null,
+                                                    "background": "#73a1bf"
+                                                },
+                                                "children": []
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "data": {
+                                            "id": "d2amc9h0mcg0",
+                                            "created": 1719473091804,
+                                            "text": "TR",
+                                            "layout": null,
+                                            "background": "#73a1bf"
+                                        },
+                                        "children": [
+                                            {
+                                                "data": {
+                                                    "id": "d2amccf73b40",
+                                                    "created": 1719473098224,
+                                                    "text": "failed",
+                                                    "layout": null,
+                                                    "background": "#73a1bf"
+                                                },
+                                                "children": []
+                                            },
+                                            {
+                                                "data": {
+                                                    "id": "d2amcggh33c0",
+                                                    "created": 1719473107008,
+                                                    "text": "initial",
+                                                    "layout": null,
+                                                    "background": "#73a1bf"
+                                                },
+                                                "children": []
+                                            },
+                                            {
+                                                "data": {
+                                                    "id": "d2amcm0yy3k0",
+                                                    "created": 1719473119132,
+                                                    "text": "succeed",
+                                                    "layout": null,
+                                                    "background": "#73a1bf"
+                                                },
+                                                "children": []
+                                            },
+                                            {
+                                                "data": {
+                                                    "id": "d2amcnqznag0",
+                                                    "created": 1719473122882,
+                                                    "text": "fetal",
+                                                    "layout": null,
+                                                    "background": "#73a1bf"
+                                                },
+                                                "children": []
+                                            },
+                                            {
+                                                "data": {
+                                                    "id": "d2amcrogok00",
+                                                    "created": 1719473131436,
+                                                    "text": "not found",
+                                                    "layout": null,
+                                                    "background": "#73a1bf"
+                                                },
+                                                "children": []
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "data": {
+                                    "id": "d2amf7v4na80",
+                                    "created": 1719473323396,
+                                    "text": "deploy module",
+                                    "layout": null,
+                                    "background": "#73a1bf"
+                                },
+                                "children": [
+                                    {
+                                        "data": {
+                                            "id": "d2amfaapfs80",
+                                            "created": 1719473328691,
+                                            "text": "package",
+                                            "layout": null,
+                                            "background": "#73a1bf"
+                                        },
+                                        "children": [
+                                            {
+                                                "data": {
+                                                    "id": "d2amffkg4r40",
+                                                    "created": 1719473340164,
+                                                    "text": "get: get all packages",
+                                                    "layout": null,
+                                                    "background": "#73a1bf"
+                                                },
+                                                "children": []
+                                            },
+                                            {
+                                                "data": {
+                                                    "id": "d2amgoqrkwg0",
+                                                    "created": 1719473438502,
+                                                    "text": "deploy status: check status",
+                                                    "layout": null,
+                                                    "background": "#73a1bf"
+                                                },
+                                                "children": []
+                                            },
+                                            {
+                                                "data": {
+                                                    "id": "d2amfs2zbe00",
+                                                    "created": 1719473367406,
+                                                    "text": "iflow",
+                                                    "layout": null,
+                                                    "background": "#73a1bf"
+                                                },
+                                                "children": [
+                                                    {
+                                                        "data": {
+                                                            "id": "d2amfvlt5y00",
+                                                            "created": 1719473375075,
+                                                            "text": "get: get all iflows",
+                                                            "layout": null,
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2amfyov7mg0",
+                                                            "created": 1719473381790,
+                                                            "text": "delete: undeploy iflow",
+                                                            "layout": null,
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2amg748ptc0",
+                                                            "created": 1719473400134,
+                                                            "text": "deploy: deploy iflow",
+                                                            "layout": null,
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2aq269wwxk0",
+                                                            "created": 1719483585642,
+                                                            "text": "get: get single iflow",
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "data": {
+                                                    "id": "d2amgg4nx5s0",
+                                                    "created": 1719473419751,
+                                                    "text": "script",
+                                                    "layout": null,
+                                                    "background": "#73a1bf"
+                                                },
+                                                "children": [
+                                                    {
+                                                        "data": {
+                                                            "id": "d2amght8g1s0",
+                                                            "created": 1719473423413,
+                                                            "text": "get: get all  script",
+                                                            "layout": null,
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2amgjitlug0",
+                                                            "created": 1719473427137,
+                                                            "text": "delete:",
+                                                            "layout": null,
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2amglb0meo0",
+                                                            "created": 1719473431019,
+                                                            "text": "deploy",
+                                                            "layout": null,
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2aq2coae7s0",
+                                                            "created": 1719483599572,
+                                                            "text": "getL get single script",
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "data": {
+                                    "id": "d2amoxgnhao0",
+                                    "created": 1719474084394,
+                                    "text": "auth module",
+                                    "background": "#73a1bf",
+                                    "layout": null
+                                },
+                                "children": [
+                                    {
+                                        "data": {
+                                            "id": "d2ampvuxqow0",
+                                            "created": 1719474159269,
+                                            "text": "JWT TOKEN",
+                                            "background": "#73a1bf",
+                                            "layout": null
+                                        },
+                                        "children": []
+                                    },
+                                    {
+                                        "data": {
+                                            "id": "d2bqbn6u5080",
+                                            "created": 1719585887695,
+                                            "text": "SAML2",
+                                            "background": "#73a1bf"
+                                        },
+                                        "children": []
+                                    },
+                                    {
+                                        "data": {
+                                            "id": "d2bqfqt39tk0",
+                                            "created": 1719586209028,
+                                            "text": "oauth2",
+                                            "background": "#73a1bf"
+                                        },
+                                        "children": []
+                                    }
+                                ]
+                            },
+                            {
+                                "data": {
+                                    "id": "d2anb22y8zk0",
+                                    "created": 1719475818461,
+                                    "text": "session management",
+                                    "background": "#73a1bf",
+                                    "layout": null
+                                },
+                                "children": [
+                                    {
+                                        "data": {
+                                            "id": "d2anbc02ntk0",
+                                            "created": 1719475840055,
+                                            "text": "redis",
+                                            "background": "#73a1bf",
+                                            "layout": null
+                                        },
+                                        "children": []
+                                    },
+                                    {
+                                        "data": {
+                                            "id": "d2anbd3k4vc0",
+                                            "created": 1719475842443,
+                                            "text": "pgsql",
+                                            "background": "#73a1bf",
+                                            "layout": null
+                                        },
+                                        "children": []
+                                    }
+                                ]
+                            },
+                            {
+                                "data": {
+                                    "id": "d2anzg32s6w0",
+                                    "created": 1719477729684,
+                                    "text": "ORM",
+                                    "layout": null,
+                                    "background": "#73a1bf"
+                                },
+                                "children": [
+                                    {
+                                        "data": {
+                                            "id": "d2anzhn836w0",
+                                            "created": 1719477733079,
+                                            "text": "PgSQL",
+                                            "layout": null,
+                                            "background": "#73a1bf"
+                                        },
+                                        "children": []
+                                    },
+                                    {
+                                        "data": {
+                                            "id": "d2anzjmh5c80",
+                                            "created": 1719477737387,
+                                            "text": "MySQL",
+                                            "layout": null,
+                                            "background": "#73a1bf"
+                                        },
+                                        "children": []
+                                    }
+                                ]
+                            },
+                            {
+                                "data": {
+                                    "id": "d2amhnc15280",
+                                    "created": 1719473513798,
+                                    "text": "Tech stack",
+                                    "background": "#73a1bf",
+                                    "layout": null
+                                },
+                                "children": [
+                                    {
+                                        "data": {
+                                            "id": "d2amhpsixls0",
+                                            "created": 1719473519149,
+                                            "text": "gin",
+                                            "background": "#73a1bf",
+                                            "layout": null
+                                        },
+                                        "children": [
+                                            {
+                                                "data": {
+                                                    "id": "d2an6x419x40",
+                                                    "created": 1719475494186,
+                                                    "text": "https://github.com/gin-gonic/gin",
+                                                    "background": "#73a1bf",
+                                                    "layout": null
+                                                },
+                                                "children": []
+                                            },
+                                            {
+                                                "data": {
+                                                    "id": "d2antthqvvc0",
+                                                    "created": 1719477288684,
+                                                    "text": "github.com/appleboy/gin-jwt/v2",
+                                                    "background": "#73a1bf",
+                                                    "layout": null
+                                                },
+                                                "children": []
+                                            },
+                                            {
+                                                "data": {
+                                                    "id": "d2anbjrqocw0",
+                                                    "created": 1719475856966,
+                                                    "text": "https://github.com/gin-contrib/sessions",
+                                                    "background": "#73a1bf",
+                                                    "layout": null
+                                                },
+                                                "children": []
+                                            },
+                                            {
+                                                "data": {
+                                                    "id": "d2anf7w30i00",
+                                                    "created": 1719476144564,
+                                                    "text": "https://github.com/Depado/gin-auth-example/",
+                                                    "background": "#73a1bf",
+                                                    "layout": null
+                                                },
+                                                "children": []
+                                            },
+                                            {
+                                                "data": {
+                                                    "id": "d2bqenrk0ko0",
+                                                    "created": 1719586124041,
+                                                    "text": "gorm",
+                                                    "background": "#73a1bf"
+                                                },
+                                                "children": []
+                                            },
+                                            {
+                                                "data": {
+                                                    "id": "d2bqeqn8bnk0",
+                                                    "created": 1719586130309,
+                                                    "text": "logrus",
+                                                    "background": "#73a1bf"
+                                                },
+                                                "children": []
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "data": {
+                            "id": "d1l6s6v5vyg0",
+                            "created": 1716890203280,
+                            "text": "Database",
+                            "background": "#73a1bf",
+                            "layout": null
+                        },
+                        "children": [
+                            {
+                                "data": {
+                                    "id": "d1l6sk2awxs0",
+                                    "created": 1716890232010,
+                                    "text": "PgSQL",
+                                    "background": "#73a1bf",
+                                    "layout": null
+                                },
+                                "children": [
+                                    {
+                                        "data": {
+                                            "id": "d2anuo402e80",
+                                            "created": 1719477355333,
+                                            "text": "tables",
+                                            "background": "#73a1bf",
+                                            "layout": null
+                                        },
+                                        "children": [
+                                            {
+                                                "data": {
+                                                    "id": "d2anvj15vqo0",
+                                                    "created": 1719477422642,
+                                                    "text": "users",
+                                                    "background": "#73a1bf",
+                                                    "layout": null
+                                                },
+                                                "children": [
+                                                    {
+                                                        "data": {
+                                                            "id": "d2anw0exgps0",
+                                                            "created": 1719477460480,
+                                                            "text": "id",
+                                                            "background": "#73a1bf",
+                                                            "layout": null
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2anw1wfq3s0",
+                                                            "created": 1719477463715,
+                                                            "text": "username",
+                                                            "background": "#73a1bf",
+                                                            "layout": null
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2anw4aeoe80",
+                                                            "created": 1719477468913,
+                                                            "text": "password",
+                                                            "background": "#73a1bf",
+                                                            "layout": null
+                                                        },
+                                                        "children": []
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "data": {
+                                                    "id": "d2anupda3bs0",
+                                                    "created": 1719477358071,
+                                                    "text": "config",
+                                                    "background": "#73a1bf",
+                                                    "layout": null
+                                                },
+                                                "children": [
+                                                    {
+                                                        "data": {
+                                                            "id": "d2anur2d2c00",
+                                                            "created": 1719477361765,
+                                                            "text": "id",
+                                                            "background": "#73a1bf",
+                                                            "layout": null
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2any5bt31c0",
+                                                            "created": 1719477627903,
+                                                            "text": "name",
+                                                            "background": "#73a1bf",
+                                                            "layout": null
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2anusivfaw0",
+                                                            "created": 1719477364940,
+                                                            "text": "api url",
+                                                            "background": "#73a1bf",
+                                                            "layout": null
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2apid6rzfk0",
+                                                            "created": 1719482033406,
+                                                            "text": "uaa url",
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2anvt9gojc0",
+                                                            "created": 1719477444912,
+                                                            "text": "clientid",
+                                                            "background": "#73a1bf",
+                                                            "layout": null
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2anvuzpog80",
+                                                            "created": 1719477448676,
+                                                            "text": "client secret",
+                                                            "background": "#73a1bf",
+                                                            "layout": null
+                                                        },
+                                                        "children": []
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "data": {
+                                                    "id": "d2anwecb2740",
+                                                    "created": 1719477490796,
+                                                    "text": "jobs",
+                                                    "background": "#73a1bf",
+                                                    "layout": null
+                                                },
+                                                "children": [
+                                                    {
+                                                        "data": {
+                                                            "id": "d2anwkl6iew0",
+                                                            "created": 1719477504393,
+                                                            "text": "id",
+                                                            "background": "#73a1bf",
+                                                            "layout": null
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2anxeg1cz40",
+                                                            "created": 1719477569386,
+                                                            "text": "status",
+                                                            "background": "#73a1bf",
+                                                            "layout": null
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2anwnjqgx40",
+                                                            "created": 1719477510836,
+                                                            "text": "stages（array）",
+                                                            "background": "#73a1bf",
+                                                            "layout": null
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2aoxwy555k0",
+                                                            "created": 1719480430773,
+                                                            "text": "timestamp",
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": [
+                                                            {
+                                                                "data": {
+                                                                    "id": "d2bqcm429ds0",
+                                                                    "created": 1719585963715,
+                                                                    "text": "creation time",
+                                                                    "background": "#73a1bf"
+                                                                },
+                                                                "children": []
+                                                            },
+                                                            {
+                                                                "data": {
+                                                                    "id": "d2bqcpbhum00",
+                                                                    "created": 1719585970695,
+                                                                    "text": "start execution time",
+                                                                    "background": "#73a1bf"
+                                                                },
+                                                                "children": []
+                                                            },
+                                                            {
+                                                                "data": {
+                                                                    "id": "d2bqcvyvl4o0",
+                                                                    "created": 1719585985169,
+                                                                    "text": "end execution time",
+                                                                    "background": "#73a1bf"
+                                                                },
+                                                                "children": []
+                                                            },
+                                                            {
+                                                                "data": {
+                                                                    "id": "d2bqd4ij8tc0",
+                                                                    "created": 1719586003772,
+                                                                    "text": "pause execution time",
+                                                                    "background": "#73a1bf"
+                                                                },
+                                                                "children": []
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "data": {
+                                                    "id": "d2anx5fatjs0",
+                                                    "created": 1719477549751,
+                                                    "text": "stages",
+                                                    "background": "#73a1bf",
+                                                    "layout_right_offset": {
+                                                        "x": 75.99999987920114,
+                                                        "y": -23.99999996185352
+                                                    },
+                                                    "layout": null
+                                                },
+                                                "children": [
+                                                    {
+                                                        "data": {
+                                                            "id": "d2anx7pgrog0",
+                                                            "created": 1719477554718,
+                                                            "text": "id",
+                                                            "background": "#73a1bf",
+                                                            "layout": null
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2anx8q6g4w0",
+                                                            "created": 1719477556938,
+                                                            "text": "job id",
+                                                            "background": "#73a1bf",
+                                                            "layout": null
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2aod77fiyo0",
+                                                            "created": 1719478807455,
+                                                            "text": "action type name",
+                                                            "layout": null,
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": [
+                                                            {
+                                                                "data": {
+                                                                    "id": "d2aplkp0icw0",
+                                                                    "created": 1719482284839,
+                                                                    "text": "import",
+                                                                    "background": "#73a1bf"
+                                                                },
+                                                                "children": []
+                                                            },
+                                                            {
+                                                                "data": {
+                                                                    "id": "d2aplln4np40",
+                                                                    "created": 1719482286902,
+                                                                    "text": "undeploy",
+                                                                    "background": "#73a1bf"
+                                                                },
+                                                                "children": []
+                                                            },
+                                                            {
+                                                                "data": {
+                                                                    "id": "d2aplnlfzc00",
+                                                                    "created": 1719482291154,
+                                                                    "text": "deploy",
+                                                                    "background": "#73a1bf"
+                                                                },
+                                                                "children": []
+                                                            }
+                                                        ]
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2apr9johkw0",
+                                                            "created": 1719482730757,
+                                                            "text": "config id",
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2aowx5hrwo0",
+                                                            "created": 1719480352853,
+                                                            "text": "list",
+                                                            "expandState": "expand",
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": [
+                                                            {
+                                                                "data": {
+                                                                    "id": "d2aoe0ewsgw0",
+                                                                    "created": 1719478871033,
+                                                                    "text": "TR List",
+                                                                    "layout": null,
+                                                                    "background": "#73a1bf"
+                                                                },
+                                                                "children": []
+                                                            },
+                                                            {
+                                                                "data": {
+                                                                    "id": "d2aonoczkvk0",
+                                                                    "created": 1719479628437,
+                                                                    "text": "Iflow list",
+                                                                    "background": "#73a1bf"
+                                                                },
+                                                                "children": []
+                                                            },
+                                                            {
+                                                                "data": {
+                                                                    "id": "d2aonr2b7gw0",
+                                                                    "created": 1719479634322,
+                                                                    "text": "script list",
+                                                                    "background": "#73a1bf"
+                                                                },
+                                                                "children": []
+                                                            }
+                                                        ]
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2anxhy0w800",
+                                                            "created": 1719477577004,
+                                                            "text": "status",
+                                                            "background": "#73a1bf",
+                                                            "layout": null
+                                                        },
+                                                        "children": []
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "data": {
+                                                    "id": "d2aoffplnj40",
+                                                    "created": 1719478982696,
+                                                    "text": "TR lists",
+                                                    "layout_right_offset": {
+                                                        "x": 46.66666659249199,
+                                                        "y": -3.3333333280352235
+                                                    },
+                                                    "layout": null,
+                                                    "background": "#73a1bf"
+                                                },
+                                                "children": [
+                                                    {
+                                                        "data": {
+                                                            "id": "d2aofohw9pc0",
+                                                            "created": 1719479001821,
+                                                            "text": "id",
+                                                            "layout": null,
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2aofpk0xx40",
+                                                            "created": 1719479004126,
+                                                            "text": "TR node",
+                                                            "layout": null,
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2aofrrl5ns0",
+                                                            "created": 1719479008937,
+                                                            "text": "TRs(array)",
+                                                            "layout": null,
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "data": {
+                                                    "id": "d2aohke0h0g0",
+                                                    "created": 1719479149607,
+                                                    "text": "iflow List",
+                                                    "layout_right_offset": {
+                                                        "x": 11.333333315319692,
+                                                        "y": -0.6666666656069538
+                                                    },
+                                                    "layout": null,
+                                                    "background": "#73a1bf"
+                                                },
+                                                "children": [
+                                                    {
+                                                        "data": {
+                                                            "id": "d2aohnnsf2o0",
+                                                            "created": 1719479156729,
+                                                            "text": "id",
+                                                            "layout": null,
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2aohole7k00",
+                                                            "created": 1719479158761,
+                                                            "text": "iflow package id",
+                                                            "layout": null,
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2aohsf9b9s0",
+                                                            "created": 1719479167097,
+                                                            "text": "iflows (array)",
+                                                            "layout": null,
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "data": {
+                                                    "id": "d2aohx8idag0",
+                                                    "created": 1719479177573,
+                                                    "text": "script list",
+                                                    "layout_right_offset": {
+                                                        "x": 16.666666640175777,
+                                                        "y": 0.6666666656074085
+                                                    },
+                                                    "layout": null,
+                                                    "background": "#73a1bf"
+                                                },
+                                                "children": [
+                                                    {
+                                                        "data": {
+                                                            "id": "d2aohzib1940",
+                                                            "created": 1719479182519,
+                                                            "text": "id",
+                                                            "layout": null,
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2aoi04xyo80",
+                                                            "created": 1719479183887,
+                                                            "text": "script package id",
+                                                            "layout": null,
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2aoi3oo3xk0",
+                                                            "created": 1719479191611,
+                                                            "text": "scripts (array)",
+                                                            "layout": null,
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "data": {
+                                                    "id": "d2ao05cduio0",
+                                                    "created": 1719477784666,
+                                                    "text": "Log",
+                                                    "background": "#73a1bf",
+                                                    "layout": null
+                                                },
+                                                "children": [
+                                                    {
+                                                        "data": {
+                                                            "id": "d2ao0d7enxk0",
+                                                            "created": 1719477801780,
+                                                            "text": "id",
+                                                            "background": "#73a1bf",
+                                                            "layout": null
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2ao0g6pms80",
+                                                            "created": 1719477808268,
+                                                            "text": "job id",
+                                                            "background": "#73a1bf",
+                                                            "layout": null
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2ao0miaf400",
+                                                            "created": 1719477822029,
+                                                            "text": "log",
+                                                            "background": "#73a1bf",
+                                                            "layout": null
+                                                        },
+                                                        "children": [
+                                                            {
+                                                                "data": {
+                                                                    "id": "d2apuda3k9c0",
+                                                                    "created": 1719482973977,
+                                                                    "text": "local log",
+                                                                    "background": "#73a1bf"
+                                                                },
+                                                                "children": []
+                                                            },
+                                                            {
+                                                                "data": {
+                                                                    "id": "d2apugse4wo0",
+                                                                    "created": 1719482981614,
+                                                                    "text": "cpi deploy log",
+                                                                    "background": "#73a1bf"
+                                                                },
+                                                                "children": []
+                                                            },
+                                                            {
+                                                                "data": {
+                                                                    "id": "d2apujgxz3c0",
+                                                                    "created": 1719482987452,
+                                                                    "text": "tms import log",
+                                                                    "background": "#73a1bf"
+                                                                },
+                                                                "children": []
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "data": {
+                                    "id": "d1l6sez1xsw0",
+                                    "created": 1716890220930,
+                                    "text": "MySQL",
+                                    "background": "#73a1bf",
+                                    "layout": null
+                                },
+                                "children": []
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+    },
+    "template": "right",
+    "theme": "fresh-blue",
+    "version": "1.4.43"
+}

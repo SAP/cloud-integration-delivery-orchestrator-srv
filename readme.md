@@ -7,3 +7,4 @@
 - https://github.com/markbates/goth
 - https://github.com/crewjam/saml
 - https://github.com/russellhaering/gosaml2
+- github.com/appleboy/gin-jwt/v2
