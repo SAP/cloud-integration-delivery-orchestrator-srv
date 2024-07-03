@@ -781,7 +781,8 @@
                                                     "id": "d2bq94qgksw0",
                                                     "created": 1719585690795,
                                                     "text": "execution",
-                                                    "background": "#73a1bf"
+                                                    "background": "#73a1bf",
+                                                    "expandState": "expand"
                                                 },
                                                 "children": [
                                                     {
@@ -1005,6 +1006,100 @@
                             },
                             {
                                 "data": {
+                                    "id": "d2epd045rs80",
+                                    "created": 1719887852956,
+                                    "text": "admin",
+                                    "background": "#73a1bf"
+                                },
+                                "children": [
+                                    {
+                                        "data": {
+                                            "id": "d2epd1624200",
+                                            "created": 1719887855247,
+                                            "text": "initialize ",
+                                            "background": "#73a1bf"
+                                        },
+                                        "children": [
+                                            {
+                                                "data": {
+                                                    "id": "d2epd7l9l4o0",
+                                                    "created": 1719887869228,
+                                                    "text": "oauth",
+                                                    "background": "#73a1bf"
+                                                },
+                                                "children": []
+                                            },
+                                            {
+                                                "data": {
+                                                    "id": "d2epdf2ft7k0",
+                                                    "created": 1719887885504,
+                                                    "text": "saml",
+                                                    "background": "#73a1bf"
+                                                },
+                                                "children": []
+                                            },
+                                            {
+                                                "data": {
+                                                    "id": "d2epdgnbl480",
+                                                    "created": 1719887888943,
+                                                    "text": "database",
+                                                    "background": "#73a1bf"
+                                                },
+                                                "children": []
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "data": {
+                                            "id": "d2epeiljinc0",
+                                            "created": 1719887971553,
+                                            "text": "user",
+                                            "background": "#73a1bf"
+                                        },
+                                        "children": [
+                                            {
+                                                "data": {
+                                                    "id": "d2epev5ybew0",
+                                                    "created": 1719887998909,
+                                                    "text": "sync from IDP",
+                                                    "background": "#73a1bf"
+                                                },
+                                                "children": []
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "data": {
+                                            "id": "d2epeks16ls0",
+                                            "created": 1719887976299,
+                                            "text": "team",
+                                            "background": "#73a1bf"
+                                        },
+                                        "children": [
+                                            {
+                                                "data": {
+                                                    "id": "d2epez4y3mo0",
+                                                    "created": 1719888007555,
+                                                    "text": "sync from IDP",
+                                                    "background": "#73a1bf"
+                                                },
+                                                "children": []
+                                            },
+                                            {
+                                                "data": {
+                                                    "id": "d2epurc9fow0",
+                                                    "created": 1719889244410,
+                                                    "text": "create at app side",
+                                                    "background": "#73a1bf"
+                                                },
+                                                "children": []
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "data": {
                                     "id": "d2ap3qrux1c0",
                                     "created": 1719480887517,
                                     "text": "monitor",
@@ -1028,6 +1123,15 @@
                                             "background": "#73a1bf"
                                         },
                                         "children": []
+                                    },
+                                    {
+                                        "data": {
+                                            "id": "d2epys31rrk0",
+                                            "created": 1719889559486,
+                                            "text": "context",
+                                            "background": "#73a1bf"
+                                        },
+                                        "children": []
                                     }
                                 ]
                             },
@@ -1044,7 +1148,7 @@
                                         "data": {
                                             "id": "d2ambsurl400",
                                             "created": 1719473055630,
-                                            "text": "node:",
+                                            "text": "node",
                                             "layout": null,
                                             "background": "#73a1bf"
                                         },
@@ -1116,6 +1220,34 @@
                                                     "created": 1719473131436,
                                                     "text": "not found",
                                                     "layout": null,
+                                                    "background": "#73a1bf"
+                                                },
+                                                "children": []
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "data": {
+                                            "id": "d2eq3j67cgw0",
+                                            "created": 1719889931907,
+                                            "text": "action",
+                                            "background": "#73a1bf"
+                                        },
+                                        "children": [
+                                            {
+                                                "data": {
+                                                    "id": "d2eq45g8wvs0",
+                                                    "created": 1719889980403,
+                                                    "text": "import",
+                                                    "background": "#73a1bf"
+                                                },
+                                                "children": []
+                                            },
+                                            {
+                                                "data": {
+                                                    "id": "d2eq47s4b8g0",
+                                                    "created": 1719889985474,
+                                                    "text": "reset",
                                                     "background": "#73a1bf"
                                                 },
                                                 "children": []
@@ -1261,6 +1393,34 @@
                                                         "children": []
                                                     }
                                                 ]
+                                            },
+                                            {
+                                                "data": {
+                                                    "id": "d2eq3r2va9s0",
+                                                    "created": 1719889949119,
+                                                    "text": "action",
+                                                    "background": "#73a1bf"
+                                                },
+                                                "children": [
+                                                    {
+                                                        "data": {
+                                                            "id": "d2eq3vqfbnc0",
+                                                            "created": 1719889959251,
+                                                            "text": "deploy",
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2eq3wpv5go0",
+                                                            "created": 1719889961394,
+                                                            "text": "delete/undeploy",
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    }
+                                                ]
                                             }
                                         ]
                                     }
@@ -1354,16 +1514,6 @@
                                             "background": "#73a1bf"
                                         },
                                         "children": []
-                                    },
-                                    {
-                                        "data": {
-                                            "id": "d2anzjmh5c80",
-                                            "created": 1719477737387,
-                                            "text": "MySQL",
-                                            "layout": null,
-                                            "background": "#73a1bf"
-                                        },
-                                        "children": []
                                     }
                                 ]
                             },
@@ -1429,10 +1579,29 @@
                                                 "data": {
                                                     "id": "d2bqenrk0ko0",
                                                     "created": 1719586124041,
-                                                    "text": "gorm",
+                                                    "text": "orm",
                                                     "background": "#73a1bf"
                                                 },
-                                                "children": []
+                                                "children": [
+                                                    {
+                                                        "data": {
+                                                            "id": "d2epvbtnwjs0",
+                                                            "created": 1719889288998,
+                                                            "text": "gorm",
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    },
+                                                    {
+                                                        "data": {
+                                                            "id": "d2epvie0xsg0",
+                                                            "created": 1719889303289,
+                                                            "text": "sqlc",
+                                                            "background": "#73a1bf"
+                                                        },
+                                                        "children": []
+                                                    }
+                                                ]
                                             },
                                             {
                                                 "data": {
@@ -2012,16 +2181,6 @@
                                         ]
                                     }
                                 ]
-                            },
-                            {
-                                "data": {
-                                    "id": "d1l6sez1xsw0",
-                                    "created": 1716890220930,
-                                    "text": "MySQL",
-                                    "background": "#73a1bf",
-                                    "layout": null
-                                },
-                                "children": []
                             }
                         ]
                     }
