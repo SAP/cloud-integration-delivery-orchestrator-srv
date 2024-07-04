@@ -48,12 +48,7 @@ func GetUsersHandler(ctx *gin.Context) {
 	if errUer != nil {
 		ctx.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "user not found"})
 	} else {
-		if users == nil {
-			ctx.JSON(http.StatusOK, gin.H{"code": 200, "result": "{}"})
-		} else {
-			ctx.JSON(http.StatusOK, gin.H{"code": 200, "result": users})
-		}
-
+		ctx.JSON(http.StatusOK, gin.H{"code": 200, "result": users})
 	}
 
 }
@@ -65,8 +60,8 @@ func main() {
 	router.Static("/static", "static")
 
 	router.GET("/", RootHandler)
-	router.GET("/user/*username", GetUserInfoHandler)
-	router.GET("/users", GetUsersHandler)
+	router.GET("/api/v1/users", GetUsersHandler)
+	router.GET("/api/v1/user/*username", GetUserInfoHandler)
 	router.Run(":9000")
 
 }
