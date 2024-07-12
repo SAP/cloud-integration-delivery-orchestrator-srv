@@ -78,15 +78,56 @@ type PackageResponseItem struct {
 	LineOfBusiness    string `json:"LineOfBusiness"`
 }
 
-type PackageResponse struct {
+type PackagesResponse struct {
 	D struct {
 		Results []PackageResponseItem `json:"results"`
 	} `json:"d"`
 }
 
-func (c *CPIClient) GetPackage() (PackageResponse, error) {
-	fullURL := fmt.Sprintf("%s%s", c.CpiAPI, "/IntegrationPackages")
-	fmt.Printf("Starting to get package from cpi tenant %s\n", fullURL)
+func (c *CPIClient) GetPackages() (PackagesResponse, error) {
+	fullURL := fmt.Sprintf("%s/IntegrationPackages", c.CpiAPI)
+	fmt.Printf("Starting to get all packages from cpi tenant %s\n", fullURL)
+
+	childCtx, cancel := context.WithCancel(c.context)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(childCtx, http.MethodGet, fullURL, nil)
+	tokenHeaderVal := fmt.Sprintf("Bearer %s", c.AccessToken)
+	req.Header.Add("Authorization", tokenHeaderVal)
+	req.Header.Add("Accept", "application/json")
+	resp, errReq := c.HttpClient.Do(req)
+	fmt.Printf("resp status code %d\n", resp.StatusCode)
+	if errReq != nil {
+		fmt.Errorf("Error when getting response from api, the error message is %s", errReq)
+		return PackagesResponse{}, errReq
+	}
+
+	defer resp.Body.Close()
+
+	respBodyContent, errIOreader := io.ReadAll(resp.Body)
+
+	if errIOreader != nil {
+		fmt.Errorf("Error when getting content from response, error message %s", errIOreader)
+		return PackagesResponse{}, errIOreader
+	}
+
+	var packcageResp PackagesResponse
+	jsonUnmarshalError := json.Unmarshal(respBodyContent, &packcageResp)
+
+	if jsonUnmarshalError != nil {
+		fmt.Errorf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
+		return PackagesResponse{}, jsonUnmarshalError
+	}
+
+	return packcageResp, nil
+}
+
+type PackageResponse struct {
+	D PackageResponseItem `json:"d"`
+}
+
+func (c *CPIClient) GetPackage(packageID string) (PackageResponse, error) {
+	fullURL := fmt.Sprintf("%s/IntegrationPackages('%s')", c.CpiAPI, packageID)
+	fmt.Printf("Starting to get all packages from cpi tenant %s\n", fullURL)
 
 	childCtx, cancel := context.WithCancel(c.context)
 	defer cancel()
