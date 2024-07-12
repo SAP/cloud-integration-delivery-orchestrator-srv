@@ -134,7 +134,7 @@ type PackageResponse struct {
 
 func (c *CPIClient) GetPackage(packageID string) (PackageResponse, error) {
 	fullURL := fmt.Sprintf("%s/IntegrationPackages('%s')", c.CpiAPI, packageID)
-	log.Printf("Starting to get all packages from cpi tenant %s\n", fullURL)
+	log.Printf("Starting to get packages %s from cpi tenant %s\n", packageID, fullURL)
 
 	respBodyContent, errReq := c.Do(fullURL, http.MethodGet)
 	if errReq != nil {
@@ -180,7 +180,7 @@ type IflowsResp struct {
 func (c *CPIClient) GetIflows(packageID string) (IflowsResp, error) {
 
 	fullURL := fmt.Sprintf("%s/IntegrationPackages('%s')/IntegrationDesigntimeArtifacts", c.CpiAPI, packageID)
-	log.Printf("Starting to get all packages from cpi tenant %s\n", fullURL)
+	log.Printf("Starting to get all iflows in package %s from cpi tenant %s\n", packageID, fullURL)
 
 	respBodyContent, errReq := c.Do(fullURL, http.MethodGet)
 	if errReq != nil {
@@ -205,7 +205,7 @@ type IflowResp struct {
 func (c *CPIClient) GetIflow(packageID string, iflowID string, iflowVersion string) (IflowResp, error) {
 
 	fullURL := fmt.Sprintf("%s/IntegrationPackages('%s')/IntegrationDesigntimeArtifacts(Id='%s',Version='%s')", c.CpiAPI, packageID, iflowID, iflowVersion)
-	log.Printf("Starting to get all packages from cpi tenant %s\n", fullURL)
+	log.Printf("Starting to get iflow %s in package %s from cpi tenant %s\n", iflowID, packageID, fullURL)
 
 	respBodyContent, errReq := c.Do(fullURL, http.MethodGet)
 	if errReq != nil {
@@ -223,9 +223,122 @@ func (c *CPIClient) GetIflow(packageID string, iflowID string, iflowVersion stri
 	return iflowResp, nil
 }
 
-func (c *CPIClient) DeployIflow(packageID string, iflowID string, iflowVersion string) (IflowResp, error) {
+func (c *CPIClient) DeployIflow(packageID string, iflowID string, iflowVersion string) (string, error) {
+
+	fullURL := fmt.Sprintf("%s/DeployIntegrationDesigntimeArtifact?Id='%s'&Version='%s'", c.CpiAPI, iflowID, iflowVersion)
+	log.Printf("Starting to deploy iflow %s  in package %s on tenant %s\n", iflowID, packageID, fullURL)
+
+	respBodyContent, errReq := c.Do(fullURL, http.MethodPost)
+	if errReq != nil {
+		log.Printf("Error when getting response  content, the error message is %s", errReq)
+		return "", errReq
+	}
+	taskID := string(respBodyContent)
+	return taskID, nil
 }
 
-func (c *CPIClient) GetScripts() {
+type DeployStatus struct {
+	D struct {
+		Metadata struct {
+			ID   string `json:"id"`
+			URI  string `json:"uri"`
+			Type string `json:"type"`
+		} `json:"__metadata"`
+		TaskID string `json:"TaskId"`
+		Status string `json:"Status"`
+	} `json:"d"`
+}
 
+func (c *CPIClient) CheckDeployStatus(taskID string) (string, error) {
+	fullURL := fmt.Sprintf("%s/BuildAndDeployStatus(TaskId='%s')", c.CpiAPI, taskID)
+	log.Printf("Checking the deploy status for task id  %s on tenant %s\n", taskID, fullURL)
+
+	respBodyContent, errReq := c.Do(fullURL, http.MethodGet)
+	if errReq != nil {
+		log.Printf("Error when getting response  content, the error message is %s", errReq)
+		return "", errReq
+	}
+	var deployStatus DeployStatus
+	jsonUnmarshalError := json.Unmarshal(respBodyContent, &deployStatus)
+
+	if jsonUnmarshalError != nil {
+		log.Printf("Error when unmarshal from json, error message %s\n", jsonUnmarshalError)
+		return "", jsonUnmarshalError
+	}
+
+	return deployStatus.D.Status, nil
+
+}
+
+func (c *CPIClient) DeleteIflow(packageID string, iflowID string, iflowVersion string) error {
+	fullURL := fmt.Sprintf("%s/IntegrationDesigntimeArtifacts(Id='%s',Version='%s')", c.CpiAPI, iflowID, iflowVersion)
+	log.Printf("Starting to delete iflow %s in package %s on tenant %s\n", iflowID, packageID, fullURL)
+
+	_, errReq := c.Do(fullURL, http.MethodDelete)
+	if errReq != nil {
+		log.Printf("Error when getting response  content, the error message is %s", errReq)
+		return errReq
+	}
+
+	return nil
+
+}
+
+type ScriptCollectionItem struct {
+	ID              string `json:"Id"`
+	Version         string `json:"Version"`
+	PackageID       string `json:"PackageId"`
+	Name            string `json:"Name"`
+	Description     string `json:"Description"`
+	ArtifactContent string `json:"ArtifactContent"`
+}
+type ScriptCollectionsResp struct {
+	D struct {
+		Results []ScriptCollectionItem `json:"results"`
+	} `json:"d"`
+}
+
+func (c *CPIClient) GetScripts(packageID string) (ScriptCollectionsResp, error) {
+	fullURL := fmt.Sprintf("%s/IntegrationPackages('%s')/IntegrationDesigntimeArtifacts", c.CpiAPI, packageID)
+	log.Printf("Starting to get all iflows in package %s from cpi tenant %s\n", packageID, fullURL)
+
+	respBodyContent, errReq := c.Do(fullURL, http.MethodGet)
+	if errReq != nil {
+		log.Printf("Error when getting response  content, the error message is %s", errReq)
+		return ScriptCollectionsResp{}, errReq
+	}
+	var scriptCollectionsResp ScriptCollectionsResp
+	jsonUnmarshalError := json.Unmarshal(respBodyContent, &scriptCollectionsResp)
+
+	if jsonUnmarshalError != nil {
+		log.Printf("Error when unmarshal from json, error message %s\n", jsonUnmarshalError)
+		return ScriptCollectionsResp{}, jsonUnmarshalError
+	}
+
+	return scriptCollectionsResp, nil
+}
+
+type ScriptCollectionResp struct {
+	D ScriptCollectionItem `json:"d"`
+}
+
+func (c *CPIClient) GetScript(scriptCollectionID string, scriptCollectionVersion string) (ScriptCollectionResp, error) {
+
+	fullURL := fmt.Sprintf("%s/ScriptCollectionDesigntimeArtifacts(Id='%s',Version='%s')", c.CpiAPI, scriptCollectionID, scriptCollectionVersion)
+	log.Printf("Starting to get script collection %s in package from cpi tenant %s\n", scriptCollectionID, fullURL)
+
+	respBodyContent, errReq := c.Do(fullURL, http.MethodGet)
+	if errReq != nil {
+		log.Printf("Error when getting response  content, the error message is %s", errReq)
+		return ScriptCollectionResp{}, errReq
+	}
+	var scriptCollectionResp ScriptCollectionResp
+	jsonUnmarshalError := json.Unmarshal(respBodyContent, &scriptCollectionResp)
+
+	if jsonUnmarshalError != nil {
+		log.Printf("Error when unmarshal from json, error message %s\n", jsonUnmarshalError)
+		return ScriptCollectionResp{}, jsonUnmarshalError
+	}
+
+	return scriptCollectionResp, nil
 }
