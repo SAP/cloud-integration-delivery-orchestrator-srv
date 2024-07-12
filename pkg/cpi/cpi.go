@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 )
@@ -31,24 +32,23 @@ func NewCPIClient(ctx context.Context, clientID string, clientSecret string, cpi
 	req.Header.Add("content-type", "application/x-www-form-urlencoded")
 	httpClient := http.DefaultClient
 
-	res, err := httpClient.Do(req)
-	if err != nil {
-		fmt.Errorf("Error when get the response, %s", err)
-		return &CPIClient{}, err
+	res, errReq := httpClient.Do(req)
+	if errReq != nil {
+		log.Printf("Error when get the response, %s", errReq)
+		return &CPIClient{}, errReq
 	}
 	defer res.Body.Close()
-	body, err := io.ReadAll(res.Body)
-	if err != nil {
-		fmt.Errorf("Error when reading body from response, %s", err)
-		return &CPIClient{}, err
-
+	body, errIOReader := io.ReadAll(res.Body)
+	if errIOReader != nil {
+		log.Printf("Error when reading body from response, %s", errIOReader)
+		return &CPIClient{}, errIOReader
 	}
 
 	var oauthResp OauthResp
 	jsonUnmarshalErr := json.Unmarshal(body, &oauthResp)
 	if jsonUnmarshalErr != nil {
-		fmt.Errorf("Error when extract jsib data from response, %s", jsonUnmarshalErr)
-		return &CPIClient{}, err
+		log.Printf("Error when extract jsib data from response, %s", jsonUnmarshalErr)
+		return &CPIClient{}, jsonUnmarshalErr
 	}
 	return &CPIClient{
 		context:     ctx,
@@ -56,6 +56,30 @@ func NewCPIClient(ctx context.Context, clientID string, clientSecret string, cpi
 		AccessToken: oauthResp.AccessToken,
 		CpiAPI:      cpiURL,
 	}, nil
+}
+
+func (c *CPIClient) Do(apiURL string, method string) ([]byte, error) {
+	childCtx, cancel := context.WithCancel(c.context)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(childCtx, method, apiURL, nil)
+	tokenHeaderVal := fmt.Sprintf("Bearer %s", c.AccessToken)
+	req.Header.Add("Authorization", tokenHeaderVal)
+	req.Header.Add("Accept", "application/json")
+	resp, errReq := c.HttpClient.Do(req)
+
+	if errReq != nil {
+		log.Printf("Error when getting response from api, the error message is %s", errReq)
+		return []byte{}, errReq
+	}
+	defer resp.Body.Close()
+
+	respBodyContent, errIOreader := io.ReadAll(resp.Body)
+
+	if errIOreader != nil {
+		log.Printf("Error when getting  content from response, the error message is %s", errReq)
+		return []byte{}, errIOreader
+	}
+	return respBodyContent, nil
 }
 
 type PackageResponseItem struct {
@@ -86,28 +110,11 @@ type PackagesResponse struct {
 
 func (c *CPIClient) GetPackages() (PackagesResponse, error) {
 	fullURL := fmt.Sprintf("%s/IntegrationPackages", c.CpiAPI)
-	fmt.Printf("Starting to get all packages from cpi tenant %s\n", fullURL)
-
-	childCtx, cancel := context.WithCancel(c.context)
-	defer cancel()
-	req, _ := http.NewRequestWithContext(childCtx, http.MethodGet, fullURL, nil)
-	tokenHeaderVal := fmt.Sprintf("Bearer %s", c.AccessToken)
-	req.Header.Add("Authorization", tokenHeaderVal)
-	req.Header.Add("Accept", "application/json")
-	resp, errReq := c.HttpClient.Do(req)
-	fmt.Printf("resp status code %d\n", resp.StatusCode)
+	log.Printf("Starting to get all packages from cpi tenant %s\n", fullURL)
+	respBodyContent, errReq := c.Do(fullURL, http.MethodGet)
 	if errReq != nil {
-		fmt.Errorf("Error when getting response from api, the error message is %s", errReq)
+		log.Printf("Error when getting response  content, the error message is %s", errReq)
 		return PackagesResponse{}, errReq
-	}
-
-	defer resp.Body.Close()
-
-	respBodyContent, errIOreader := io.ReadAll(resp.Body)
-
-	if errIOreader != nil {
-		fmt.Errorf("Error when getting content from response, error message %s", errIOreader)
-		return PackagesResponse{}, errIOreader
 	}
 
 	var packcageResp PackagesResponse
@@ -127,30 +134,13 @@ type PackageResponse struct {
 
 func (c *CPIClient) GetPackage(packageID string) (PackageResponse, error) {
 	fullURL := fmt.Sprintf("%s/IntegrationPackages('%s')", c.CpiAPI, packageID)
-	fmt.Printf("Starting to get all packages from cpi tenant %s\n", fullURL)
+	log.Printf("Starting to get all packages from cpi tenant %s\n", fullURL)
 
-	childCtx, cancel := context.WithCancel(c.context)
-	defer cancel()
-	req, _ := http.NewRequestWithContext(childCtx, http.MethodGet, fullURL, nil)
-	tokenHeaderVal := fmt.Sprintf("Bearer %s", c.AccessToken)
-	req.Header.Add("Authorization", tokenHeaderVal)
-	req.Header.Add("Accept", "application/json")
-	resp, errReq := c.HttpClient.Do(req)
-	fmt.Printf("resp status code %d\n", resp.StatusCode)
+	respBodyContent, errReq := c.Do(fullURL, http.MethodGet)
 	if errReq != nil {
-		fmt.Errorf("Error when getting response from api, the error message is %s", errReq)
+		log.Printf("Error when getting response  content, the error message is %s", errReq)
 		return PackageResponse{}, errReq
 	}
-
-	defer resp.Body.Close()
-
-	respBodyContent, errIOreader := io.ReadAll(resp.Body)
-
-	if errIOreader != nil {
-		fmt.Errorf("Error when getting content from response, error message %s", errIOreader)
-		return PackageResponse{}, errIOreader
-	}
-
 	var packcageResp PackageResponse
 	jsonUnmarshalError := json.Unmarshal(respBodyContent, &packcageResp)
 
@@ -162,13 +152,80 @@ func (c *CPIClient) GetPackage(packageID string) (PackageResponse, error) {
 	return packcageResp, nil
 }
 
-func (c *CPIClient) GetIflows() {
-
+type IflowItem struct {
+	ID              string      `json:"Id"`
+	Version         string      `json:"Version"`
+	PackageID       string      `json:"PackageId"`
+	Name            string      `json:"Name"`
+	Description     string      `json:"Description"`
+	ArtifactContent interface{} `json:"ArtifactContent"`
+	Configurations  struct {
+		Deferred struct {
+			URI string `json:"uri"`
+		} `json:"__deferred"`
+	} `json:"Configurations"`
+	Resources struct {
+		Deferred struct {
+			URI string `json:"uri"`
+		} `json:"__deferred"`
+	} `json:"Resources"`
 }
 
-func (c *CPIClient) CheckIflows() {
-
+type IflowsResp struct {
+	D struct {
+		Results []IflowItem `json:"results"`
+	} `json:"d"`
 }
+
+func (c *CPIClient) GetIflows(packageID string) (IflowsResp, error) {
+
+	fullURL := fmt.Sprintf("%s/IntegrationPackages('%s')/IntegrationDesigntimeArtifacts", c.CpiAPI, packageID)
+	log.Printf("Starting to get all packages from cpi tenant %s\n", fullURL)
+
+	respBodyContent, errReq := c.Do(fullURL, http.MethodGet)
+	if errReq != nil {
+		log.Printf("Error when getting response  content, the error message is %s", errReq)
+		return IflowsResp{}, errReq
+	}
+	var iflowsResp IflowsResp
+	jsonUnmarshalError := json.Unmarshal(respBodyContent, &iflowsResp)
+
+	if jsonUnmarshalError != nil {
+		log.Printf("Error when unmarshal from json, error message %s\n", jsonUnmarshalError)
+		return IflowsResp{}, jsonUnmarshalError
+	}
+
+	return iflowsResp, nil
+}
+
+type IflowResp struct {
+	D IflowItem `json:"d"`
+}
+
+func (c *CPIClient) GetIflow(packageID string, iflowID string, iflowVersion string) (IflowResp, error) {
+
+	fullURL := fmt.Sprintf("%s/IntegrationPackages('%s')/IntegrationDesigntimeArtifacts(Id='%s',Version='%s')", c.CpiAPI, packageID, iflowID, iflowVersion)
+	log.Printf("Starting to get all packages from cpi tenant %s\n", fullURL)
+
+	respBodyContent, errReq := c.Do(fullURL, http.MethodGet)
+	if errReq != nil {
+		log.Printf("Error when getting response  content, the error message is %s", errReq)
+		return IflowResp{}, errReq
+	}
+	var iflowResp IflowResp
+	jsonUnmarshalError := json.Unmarshal(respBodyContent, &iflowResp)
+
+	if jsonUnmarshalError != nil {
+		log.Printf("Error when unmarshal from json, error message %s\n", jsonUnmarshalError)
+		return IflowResp{}, jsonUnmarshalError
+	}
+
+	return iflowResp, nil
+}
+
+func (c *CPIClient) DeployIflow(packageID string, iflowID string, iflowVersion string) (IflowResp, error) {
+}
+
 func (c *CPIClient) GetScripts() {
 
 }
