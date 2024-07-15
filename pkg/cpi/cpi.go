@@ -121,7 +121,7 @@ func (c *CPIClient) GetPackages() (PackagesResponse, error) {
 	jsonUnmarshalError := json.Unmarshal(respBodyContent, &packcageResp)
 
 	if jsonUnmarshalError != nil {
-		fmt.Errorf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
+		log.Printf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
 		return PackagesResponse{}, jsonUnmarshalError
 	}
 
@@ -145,7 +145,7 @@ func (c *CPIClient) GetPackage(packageID string) (PackageResponse, error) {
 	jsonUnmarshalError := json.Unmarshal(respBodyContent, &packcageResp)
 
 	if jsonUnmarshalError != nil {
-		fmt.Errorf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
+		log.Printf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
 		return PackageResponse{}, jsonUnmarshalError
 	}
 
@@ -224,16 +224,16 @@ func (c *CPIClient) GetIflow(packageID string, iflowID string, iflowVersion stri
 }
 
 func (c *CPIClient) DeployIflow(packageID string, iflowID string, iflowVersion string) (string, error) {
-
+	var taskID string
 	fullURL := fmt.Sprintf("%s/DeployIntegrationDesigntimeArtifact?Id='%s'&Version='%s'", c.CpiAPI, iflowID, iflowVersion)
 	log.Printf("Starting to deploy iflow %s  in package %s on tenant %s\n", iflowID, packageID, fullURL)
 
 	respBodyContent, errReq := c.Do(fullURL, http.MethodPost)
 	if errReq != nil {
 		log.Printf("Error when getting response  content, the error message is %s", errReq)
-		return "", errReq
+		return taskID, errReq
 	}
-	taskID := string(respBodyContent)
+	taskID = string(respBodyContent)
 	return taskID, nil
 }
 
@@ -341,4 +341,32 @@ func (c *CPIClient) GetScript(scriptCollectionID string, scriptCollectionVersion
 	}
 
 	return scriptCollectionResp, nil
+}
+
+func (c *CPIClient) DeployScriptCollection(packageID string, scriptCollectionID string, scriptCollectionVersion string) (string, error) {
+	var taskID string
+	fullURL := fmt.Sprintf("%s/DeployScriptCollectionDesigntimeArtifact(Id='%s',Version='%s')", c.CpiAPI, scriptCollectionID, scriptCollectionVersion)
+	log.Printf("Starting to deploy script collection %s in package from cpi tenant %s\n", scriptCollectionID, fullURL)
+
+	respBodyContent, errReq := c.Do(fullURL, http.MethodPost)
+	if errReq != nil {
+		log.Printf("Error when getting response  content, the error message is %s", errReq)
+		return "", errReq
+	}
+	taskID = string(respBodyContent)
+	return taskID, nil
+}
+
+func (c *CPIClient) DeleteScriptCollection(packageID string, scriptCollectionID string, scriptCollectionVersion string) error {
+
+	fullURL := fmt.Sprintf("%s/ScriptCollectionDesigntimeArtifacts(Id='%s',Version='%s')", c.CpiAPI, scriptCollectionID, scriptCollectionVersion)
+	log.Printf("Starting to delete script collection %s in package %s on tenant %s\n", scriptCollectionID, packageID, fullURL)
+
+	_, errReq := c.Do(fullURL, http.MethodDelete)
+	if errReq != nil {
+		log.Printf("Error when getting response  content, the error message is %s", errReq)
+		return errReq
+	}
+	return nil
+
 }
