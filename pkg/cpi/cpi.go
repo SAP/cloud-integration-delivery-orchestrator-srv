@@ -82,7 +82,7 @@ func (c *CPIClient) Do(apiURL string, method string) ([]byte, error) {
 	return respBodyContent, nil
 }
 
-type PackageResponseItem struct {
+type CPIPackage struct {
 	ID                string `json:"Id"`
 	Name              string `json:"Name"`
 	Description       string `json:"Description"`
@@ -104,17 +104,17 @@ type PackageResponseItem struct {
 
 type PackagesResponse struct {
 	D struct {
-		Results []PackageResponseItem `json:"results"`
+		Results []CPIPackage `json:"results"`
 	} `json:"d"`
 }
 
-func (c *CPIClient) GetPackages() (PackagesResponse, error) {
+func (c *CPIClient) GetPackages() ([]CPIPackage, error) {
 	fullURL := fmt.Sprintf("%s/IntegrationPackages", c.CpiAPI)
 	log.Printf("Starting to get all packages from cpi tenant %s\n", fullURL)
 	respBodyContent, errReq := c.Do(fullURL, http.MethodGet)
 	if errReq != nil {
 		log.Printf("Error when getting response  content, the error message is %s", errReq)
-		return PackagesResponse{}, errReq
+		return []CPIPackage{}, errReq
 	}
 
 	var packcageResp PackagesResponse
@@ -122,34 +122,34 @@ func (c *CPIClient) GetPackages() (PackagesResponse, error) {
 
 	if jsonUnmarshalError != nil {
 		log.Printf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
-		return PackagesResponse{}, jsonUnmarshalError
+		return []CPIPackage{}, jsonUnmarshalError
 	}
 
-	return packcageResp, nil
+	return packcageResp.D.Results, nil
 }
 
 type PackageResponse struct {
-	D PackageResponseItem `json:"d"`
+	D CPIPackage `json:"d"`
 }
 
-func (c *CPIClient) GetPackage(packageID string) (PackageResponse, error) {
+func (c *CPIClient) GetPackage(packageID string) (CPIPackage, error) {
 	fullURL := fmt.Sprintf("%s/IntegrationPackages('%s')", c.CpiAPI, packageID)
 	log.Printf("Starting to get packages %s from cpi tenant %s\n", packageID, fullURL)
 
 	respBodyContent, errReq := c.Do(fullURL, http.MethodGet)
 	if errReq != nil {
 		log.Printf("Error when getting response  content, the error message is %s", errReq)
-		return PackageResponse{}, errReq
+		return CPIPackage{}, errReq
 	}
 	var packcageResp PackageResponse
 	jsonUnmarshalError := json.Unmarshal(respBodyContent, &packcageResp)
 
 	if jsonUnmarshalError != nil {
 		log.Printf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
-		return PackageResponse{}, jsonUnmarshalError
+		return CPIPackage{}, jsonUnmarshalError
 	}
 
-	return packcageResp, nil
+	return packcageResp.D, nil
 }
 
 type IflowItem struct {
@@ -177,7 +177,7 @@ type IflowsResp struct {
 	} `json:"d"`
 }
 
-func (c *CPIClient) GetIflows(packageID string) (IflowsResp, error) {
+func (c *CPIClient) GetIflows(packageID string) ([]IflowItem, error) {
 
 	fullURL := fmt.Sprintf("%s/IntegrationPackages('%s')/IntegrationDesigntimeArtifacts", c.CpiAPI, packageID)
 	log.Printf("Starting to get all iflows in package %s from cpi tenant %s\n", packageID, fullURL)
@@ -185,24 +185,24 @@ func (c *CPIClient) GetIflows(packageID string) (IflowsResp, error) {
 	respBodyContent, errReq := c.Do(fullURL, http.MethodGet)
 	if errReq != nil {
 		log.Printf("Error when getting response  content, the error message is %s", errReq)
-		return IflowsResp{}, errReq
+		return []IflowItem{}, errReq
 	}
 	var iflowsResp IflowsResp
 	jsonUnmarshalError := json.Unmarshal(respBodyContent, &iflowsResp)
 
 	if jsonUnmarshalError != nil {
 		log.Printf("Error when unmarshal from json, error message %s\n", jsonUnmarshalError)
-		return IflowsResp{}, jsonUnmarshalError
+		return []IflowItem{}, jsonUnmarshalError
 	}
 
-	return iflowsResp, nil
+	return iflowsResp.D.Results, nil
 }
 
 type IflowResp struct {
 	D IflowItem `json:"d"`
 }
 
-func (c *CPIClient) GetIflow(packageID string, iflowID string, iflowVersion string) (IflowResp, error) {
+func (c *CPIClient) GetIflow(packageID string, iflowID string, iflowVersion string) (IflowItem, error) {
 
 	fullURL := fmt.Sprintf("%s/IntegrationPackages('%s')/IntegrationDesigntimeArtifacts(Id='%s',Version='%s')", c.CpiAPI, packageID, iflowID, iflowVersion)
 	log.Printf("Starting to get iflow %s in package %s from cpi tenant %s\n", iflowID, packageID, fullURL)
@@ -210,17 +210,17 @@ func (c *CPIClient) GetIflow(packageID string, iflowID string, iflowVersion stri
 	respBodyContent, errReq := c.Do(fullURL, http.MethodGet)
 	if errReq != nil {
 		log.Printf("Error when getting response  content, the error message is %s", errReq)
-		return IflowResp{}, errReq
+		return IflowItem{}, errReq
 	}
 	var iflowResp IflowResp
 	jsonUnmarshalError := json.Unmarshal(respBodyContent, &iflowResp)
 
 	if jsonUnmarshalError != nil {
 		log.Printf("Error when unmarshal from json, error message %s\n", jsonUnmarshalError)
-		return IflowResp{}, jsonUnmarshalError
+		return IflowItem{}, jsonUnmarshalError
 	}
 
-	return iflowResp, nil
+	return iflowResp.D, nil
 }
 
 func (c *CPIClient) DeployIflow(packageID string, iflowID string, iflowVersion string) (string, error) {
@@ -298,31 +298,31 @@ type ScriptCollectionsResp struct {
 	} `json:"d"`
 }
 
-func (c *CPIClient) GetScripts(packageID string) (ScriptCollectionsResp, error) {
+func (c *CPIClient) GetScripts(packageID string) ([]ScriptCollectionItem, error) {
 	fullURL := fmt.Sprintf("%s/IntegrationPackages('%s')/IntegrationDesigntimeArtifacts", c.CpiAPI, packageID)
 	log.Printf("Starting to get all iflows in package %s from cpi tenant %s\n", packageID, fullURL)
 
 	respBodyContent, errReq := c.Do(fullURL, http.MethodGet)
 	if errReq != nil {
 		log.Printf("Error when getting response  content, the error message is %s", errReq)
-		return ScriptCollectionsResp{}, errReq
+		return []ScriptCollectionItem{}, errReq
 	}
 	var scriptCollectionsResp ScriptCollectionsResp
 	jsonUnmarshalError := json.Unmarshal(respBodyContent, &scriptCollectionsResp)
 
 	if jsonUnmarshalError != nil {
 		log.Printf("Error when unmarshal from json, error message %s\n", jsonUnmarshalError)
-		return ScriptCollectionsResp{}, jsonUnmarshalError
+		return []ScriptCollectionItem{}, jsonUnmarshalError
 	}
 
-	return scriptCollectionsResp, nil
+	return scriptCollectionsResp.D.Results, nil
 }
 
 type ScriptCollectionResp struct {
 	D ScriptCollectionItem `json:"d"`
 }
 
-func (c *CPIClient) GetScript(scriptCollectionID string, scriptCollectionVersion string) (ScriptCollectionResp, error) {
+func (c *CPIClient) GetScript(scriptCollectionID string, scriptCollectionVersion string) (ScriptCollectionItem, error) {
 
 	fullURL := fmt.Sprintf("%s/ScriptCollectionDesigntimeArtifacts(Id='%s',Version='%s')", c.CpiAPI, scriptCollectionID, scriptCollectionVersion)
 	log.Printf("Starting to get script collection %s in package from cpi tenant %s\n", scriptCollectionID, fullURL)
@@ -330,17 +330,17 @@ func (c *CPIClient) GetScript(scriptCollectionID string, scriptCollectionVersion
 	respBodyContent, errReq := c.Do(fullURL, http.MethodGet)
 	if errReq != nil {
 		log.Printf("Error when getting response  content, the error message is %s", errReq)
-		return ScriptCollectionResp{}, errReq
+		return ScriptCollectionItem{}, errReq
 	}
 	var scriptCollectionResp ScriptCollectionResp
 	jsonUnmarshalError := json.Unmarshal(respBodyContent, &scriptCollectionResp)
 
 	if jsonUnmarshalError != nil {
 		log.Printf("Error when unmarshal from json, error message %s\n", jsonUnmarshalError)
-		return ScriptCollectionResp{}, jsonUnmarshalError
+		return ScriptCollectionItem{}, jsonUnmarshalError
 	}
 
-	return scriptCollectionResp, nil
+	return scriptCollectionResp.D, nil
 }
 
 func (c *CPIClient) DeployScriptCollection(packageID string, scriptCollectionID string, scriptCollectionVersion string) (string, error) {
