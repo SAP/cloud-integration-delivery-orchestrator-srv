@@ -2,15 +2,16 @@ package cpi
 
 import (
 	"context"
+	"os"
 	"testing"
 )
 
 func TestCPIPackages(t *testing.T) {
 	ctx := context.Background()
-	clientID := "sb-8baf396e-a220-4936-a560-f16c898890b6!b486442|it!b410603"
-	clientSecret := "REDACTED"
-	cpiAuthURL := "https://cpi-mmt-preprod.authentication.eu10.hana.ondemand.com/oauth/token"
-	cpiURL := "https://cpi-mmt-preprod.it-cpi026.cfapps.eu10-002.hana.ondemand.com/api/v1"
+	clientID, _ := os.LookupEnv("CPI_AUTH_CLIENT_ID")
+	clientSecret, _ := os.LookupEnv("CPI_AUTH_CLIENT_SECRET")
+	cpiAuthURL, _ := os.LookupEnv("CPI_AUTH_URL")
+	cpiURL, _ := os.LookupEnv("CPI_API_URL")
 	client, err1 := NewCPIClient(ctx, clientID, clientSecret, cpiAuthURL, cpiURL)
 	if err1 != nil {
 		t.Fatalf("error when authenticating, %v\n  ", err1)
