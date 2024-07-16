@@ -11,8 +11,8 @@ func TestCPIPackages(t *testing.T) {
 	clientID, _ := os.LookupEnv("CPI_AUTH_CLIENT_ID")
 	clientSecret, _ := os.LookupEnv("CPI_AUTH_CLIENT_SECRET")
 	cpiAuthURL, _ := os.LookupEnv("CPI_AUTH_URL")
-	cpiURL, _ := os.LookupEnv("CPI_API_URL")
-	client, err1 := NewCPIClient(ctx, clientID, clientSecret, cpiAuthURL, cpiURL)
+	cpiApiURL, _ := os.LookupEnv("CPI_API_URL")
+	client, err1 := NewCPIClient(ctx, clientID, clientSecret, cpiAuthURL, cpiApiURL)
 	if err1 != nil {
 		t.Fatalf("error when authenticating, %v\n  ", err1)
 	}

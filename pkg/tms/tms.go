@@ -16,8 +16,7 @@ type TMSClient struct {
 	context     context.Context
 	HTTPClient  *http.Client
 	AccessToken string
-	TmsV1API    string
-	TmsV2API    string
+	TmsApiURL   string
 }
 type OauthResp struct {
 	AccessToken string `json:"access_token"`
@@ -27,7 +26,7 @@ type OauthResp struct {
 	Jti         string `json:"jti"`
 }
 
-func NewTMSClient(ctx context.Context, clientID string, clientSecret string, tmsAuthURL string, tmsV2URL string, tmsV1URL string) (*TMSClient, error) {
+func NewTMSClient(ctx context.Context, clientID string, clientSecret string, tmsAuthURL string, TmsApiURL string) (*TMSClient, error) {
 	log.Printf("Getting access token from %s\n", tmsAuthURL)
 	payload := strings.NewReader(fmt.Sprintf("grant_type=client_credentials&client_id=%s&client_secret=%s", clientID, clientSecret))
 
@@ -57,8 +56,7 @@ func NewTMSClient(ctx context.Context, clientID string, clientSecret string, tms
 		context:     ctx,
 		HTTPClient:  httpClient,
 		AccessToken: oauthResp.AccessToken,
-		TmsV1API:    tmsV1URL,
-		TmsV2API:    tmsV2URL,
+		TmsApiURL:   TmsApiURL,
 	}, nil
 }
 
@@ -137,7 +135,7 @@ type TMSNodesResp struct {
 func (t *TMSClient) GetNodes() ([]TMSNode, error) {
 	ctx, cancel := context.WithCancel(t.context)
 	defer cancel()
-	fullURL := fmt.Sprintf("%s/nodes", t.TmsV2API)
+	fullURL := fmt.Sprintf("%s/nodes", t.TmsApiURL)
 	log.Printf("Starting to get all tms nodes from %s\n", fullURL)
 	respBodyContent, errReq := t.Get(ctx, fullURL)
 	if errReq != nil {
@@ -177,7 +175,7 @@ func (t *TMSClient) GetNode(nodeID int) (TMSNode, error) {
 	childCtx, cancel := context.WithCancel(t.context)
 	defer cancel()
 
-	fullURL := fmt.Sprintf("%s/nodes/%d", t.TmsV2API, nodeID)
+	fullURL := fmt.Sprintf("%s/nodes/%d", t.TmsApiURL, nodeID)
 	log.Printf("Starting to get tms node from  %s\n", fullURL)
 	respBodyContent, errReq := t.Get(childCtx, fullURL)
 	if errReq != nil {
@@ -235,7 +233,7 @@ func (t *TMSClient) GetNodeTransportRequests(nodeID string) ([]NodeTransportRequ
 	childCtx, cancel := context.WithCancel(t.context)
 	defer cancel()
 
-	fullURL := fmt.Sprintf("%s/nodes/%s/transportRequests?status=in,re,er,fa", t.TmsV2API, nodeID)
+	fullURL := fmt.Sprintf("%s/nodes/%s/transportRequests?status=in,re,er,fa", t.TmsApiURL, nodeID)
 	log.Printf("Starting to get tranport requests for node %s from  %s\n", nodeID, fullURL)
 	respBodyContent, errReq := t.Get(childCtx, fullURL)
 	if errReq != nil {
@@ -254,69 +252,6 @@ func (t *TMSClient) GetNodeTransportRequests(nodeID string) ([]NodeTransportRequ
 	return nodeTransportRequestsResp.TransportRequests, nil
 }
 
-type SystemTransportRequest struct {
-	ID                 int       `json:"id"`
-	Description        string    `json:"description"`
-	CreatedAt          time.Time `json:"createdAt"`
-	CreatedBy          string    `json:"createdBy"`
-	CreatedByNamedUser string    `json:"createdByNamedUser"`
-	Size               int       `json:"size"`
-	Deleted            bool      `json:"deleted"`
-	Archived           bool      `json:"archived"`
-	Nodes              []struct {
-		ID   int    `json:"id"`
-		Name string `json:"name"`
-	} `json:"nodes"`
-	DeletionPermitted bool `json:"deletionPermitted"`
-}
-
-func (t *TMSClient) GetTransportRequests() ([]SystemTransportRequest, error) {
-	childCtx, cancel := context.WithCancel(t.context)
-	defer cancel()
-
-	fullURL := fmt.Sprintf("%s/transport_requests", t.TmsV1API)
-	log.Printf("Starting to get all transport requests from %s\n", fullURL)
-	respBodyContent, errReq := t.Get(childCtx, fullURL)
-	if errReq != nil {
-		log.Printf("Error when getting response  content, the error message is %s", errReq)
-		return []SystemTransportRequest{}, errReq
-	}
-
-	var systemTransportRequests []SystemTransportRequest
-	jsonUnmarshalError := json.Unmarshal(respBodyContent, &systemTransportRequests)
-
-	if jsonUnmarshalError != nil {
-		log.Printf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
-		return []SystemTransportRequest{}, jsonUnmarshalError
-	}
-
-	return systemTransportRequests, nil
-
-}
-
-func (t *TMSClient) GetTransportRequest(transportRequestID string) (SystemTransportRequest, error) {
-	childCtx, cancel := context.WithCancel(t.context)
-	defer cancel()
-	fullURL := fmt.Sprintf("%s/transport_requests/%s", t.TmsV1API, transportRequestID)
-	log.Printf("Starting to get transport request from %s\n", fullURL)
-	respBodyContent, errReq := t.Get(childCtx, fullURL)
-	if errReq != nil {
-		log.Printf("Error when getting response  content, the error message is %s", errReq)
-		return SystemTransportRequest{}, errReq
-	}
-
-	var systemTransportRequest SystemTransportRequest
-	jsonUnmarshalError := json.Unmarshal(respBodyContent, &systemTransportRequest)
-
-	if jsonUnmarshalError != nil {
-		log.Printf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
-		return SystemTransportRequest{}, jsonUnmarshalError
-	}
-
-	return systemTransportRequest, nil
-
-}
-
 type ReqImportTransportRequests struct {
 	TransportRequests []int `json:"transportRequests"`
 }
@@ -330,7 +265,7 @@ func (t *TMSClient) ImportTransportRequest(nodeID string, transportRequestIDs []
 	childCtx, cancel := context.WithCancel(t.context)
 	defer cancel()
 
-	fullURL := fmt.Sprintf("%s/nodes/%s/transportRequests/import", t.TmsV2API, nodeID)
+	fullURL := fmt.Sprintf("%s/nodes/%s/transportRequests/import", t.TmsApiURL, nodeID)
 	var actionID string
 	requestBodyContent := ReqImportTransportRequests{
 		TransportRequests: transportRequestIDs,
