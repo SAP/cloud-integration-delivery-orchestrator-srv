@@ -8,6 +8,15 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type Config struct {
+	ID               int32  `db:"id" json:"id"`
+	ConfigName       string `db:"config_name" json:"config_name"`
+	AuthUrl          string `db:"auth_url" json:"auth_url"`
+	ApiUrl           string `db:"api_url" json:"api_url"`
+	AuthClientID     string `db:"auth_client_id" json:"auth_client_id"`
+	AuthClientSecret string `db:"auth_client_secret" json:"auth_client_secret"`
+}
+
 type Group struct {
 	ID        int32  `db:"id" json:"id"`
 	GroupName string `db:"group_name" json:"group_name"`

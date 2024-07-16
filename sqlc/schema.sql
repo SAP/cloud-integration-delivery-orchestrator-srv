@@ -12,3 +12,13 @@ CREATE TABLE "groups" (
   "id" SERIAL PRIMARY KEY,
   "group_name" varchar NOT NULL
 );
+
+
+CREATE TABLE "config" (
+  "id" SERIAL PRIMARY KEY,
+  "config_name" varchar not NULL,
+  "auth_url" varchar not NULL,
+  "api_url" varchar not NULL,
+  "auth_client_id" varchar not NULL,
+  "auth_client_secret" varchar not NULL
+);

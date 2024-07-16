@@ -2,7 +2,7 @@ version: "2"
 sql:
   - engine: "postgresql"
     queries: "query.sql"
-    schema: "users-schema.sql"
+    schema: "schema.sql"
     database:
       uri: "postgres://postgres:passw0rd@127.0.0.1:5432/macodeploy?sslmode=disable"
     gen:

@@ -9,6 +9,46 @@ import (
 	"context"
 )
 
+const createConfig = `-- name: CreateConfig :one
+INSERT INTO config (
+  config_name,
+  auth_url,
+  api_url,
+  auth_client_id,
+  auth_client_secret
+) VALUES (
+  $1, $2, $3, $4, $5
+) RETURNING id, config_name, auth_url, api_url, auth_client_id, auth_client_secret
+`
+
+type CreateConfigParams struct {
+	ConfigName       string `db:"config_name" json:"config_name"`
+	AuthUrl          string `db:"auth_url" json:"auth_url"`
+	ApiUrl           string `db:"api_url" json:"api_url"`
+	AuthClientID     string `db:"auth_client_id" json:"auth_client_id"`
+	AuthClientSecret string `db:"auth_client_secret" json:"auth_client_secret"`
+}
+
+func (q *Queries) CreateConfig(ctx context.Context, arg CreateConfigParams) (Config, error) {
+	row := q.db.QueryRow(ctx, createConfig,
+		arg.ConfigName,
+		arg.AuthUrl,
+		arg.ApiUrl,
+		arg.AuthClientID,
+		arg.AuthClientSecret,
+	)
+	var i Config
+	err := row.Scan(
+		&i.ID,
+		&i.ConfigName,
+		&i.AuthUrl,
+		&i.ApiUrl,
+		&i.AuthClientID,
+		&i.AuthClientSecret,
+	)
+	return i, err
+}
+
 const createGroup = `-- name: CreateGroup :one
 INSERT INTO groups (
   group_name
@@ -58,6 +98,25 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.Email,
 		&i.PasswordChangedAt,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getConfig = `-- name: GetConfig :one
+SELECT id, config_name, auth_url, api_url, auth_client_id, auth_client_secret FROM config
+WHERE config_name = $1 LIMIT 1
+`
+
+func (q *Queries) GetConfig(ctx context.Context, configName string) (Config, error) {
+	row := q.db.QueryRow(ctx, getConfig, configName)
+	var i Config
+	err := row.Scan(
+		&i.ID,
+		&i.ConfigName,
+		&i.AuthUrl,
+		&i.ApiUrl,
+		&i.AuthClientID,
+		&i.AuthClientSecret,
 	)
 	return i, err
 }
