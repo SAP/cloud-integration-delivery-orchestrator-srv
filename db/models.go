@@ -11,6 +11,7 @@ import (
 type Config struct {
 	ID               int32  `db:"id" json:"id"`
 	ConfigName       string `db:"config_name" json:"config_name"`
+	Type             string `db:"type" json:"type"`
 	AuthUrl          string `db:"auth_url" json:"auth_url"`
 	ApiUrl           string `db:"api_url" json:"api_url"`
 	AuthClientID     string `db:"auth_client_id" json:"auth_client_id"`

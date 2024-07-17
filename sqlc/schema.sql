@@ -17,6 +17,7 @@ CREATE TABLE "groups" (
 CREATE TABLE "config" (
   "id" SERIAL PRIMARY KEY,
   "config_name" varchar not NULL,
+  "type" varchar not NULL,
   "auth_url" varchar not NULL,
   "api_url" varchar not NULL,
   "auth_client_id" varchar not NULL,

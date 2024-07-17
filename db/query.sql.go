@@ -18,7 +18,7 @@ INSERT INTO config (
   auth_client_secret
 ) VALUES (
   $1, $2, $3, $4, $5
-) RETURNING id, config_name, auth_url, api_url, auth_client_id, auth_client_secret
+) RETURNING id, config_name, type, auth_url, api_url, auth_client_id, auth_client_secret
 `
 
 type CreateConfigParams struct {
@@ -41,6 +41,7 @@ func (q *Queries) CreateConfig(ctx context.Context, arg CreateConfigParams) (Con
 	err := row.Scan(
 		&i.ID,
 		&i.ConfigName,
+		&i.Type,
 		&i.AuthUrl,
 		&i.ApiUrl,
 		&i.AuthClientID,
@@ -103,7 +104,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 }
 
 const getConfig = `-- name: GetConfig :one
-SELECT id, config_name, auth_url, api_url, auth_client_id, auth_client_secret FROM config
+SELECT id, config_name, type, auth_url, api_url, auth_client_id, auth_client_secret FROM config
 WHERE config_name = $1 LIMIT 1
 `
 
@@ -113,6 +114,7 @@ func (q *Queries) GetConfig(ctx context.Context, configName string) (Config, err
 	err := row.Scan(
 		&i.ID,
 		&i.ConfigName,
+		&i.Type,
 		&i.AuthUrl,
 		&i.ApiUrl,
 		&i.AuthClientID,
