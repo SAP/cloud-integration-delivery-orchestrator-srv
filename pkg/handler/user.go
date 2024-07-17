@@ -1,8 +1,9 @@
 package handler
 
 import (
-	"log"
 	"net/http"
+
+	log "github.com/sirupsen/logrus"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
