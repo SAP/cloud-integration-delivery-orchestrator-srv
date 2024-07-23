@@ -3,6 +3,8 @@ package handler
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"os"
 
 	log "github.com/sirupsen/logrus"
 
@@ -13,10 +15,35 @@ import (
 	"github.wdf.sap.corp/maco-mmt/maco-deploy/db"
 )
 
-const (
-	dbDriver = "postgres"
-	dbSource = "postgres://postgres:passw0rd@127.0.0.1:5432/macodeploy?sslmode=disable"
-)
+var dbSource string
+
+const dbDriver = "postgres"
+
+func init() {
+	db_host, ok := os.LookupEnv("DB_HOST")
+	if !ok {
+		log.Fatal("error when looking up env DB_HOST")
+	}
+	db_port, ok := os.LookupEnv("DB_PORT")
+	if !ok {
+		log.Fatal("error when looking up env DB_PORT")
+	}
+	db_name, ok := os.LookupEnv("DB_NAME")
+	if !ok {
+		log.Fatal("error when looking up env DB_NAME")
+	}
+
+	db_user, ok := os.LookupEnv("DB_USER")
+	if !ok {
+		log.Fatal("error when looking up env DB_USER")
+	}
+	db_password, ok := os.LookupEnv("DB_PASSWORD")
+	if !ok {
+		log.Fatal("error when looking up env DB_PASSWORD")
+	}
+	dbSource = fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable", db_user, db_password, db_host, db_port, db_name)
+
+}
 
 type DBClient struct {
 	ctx    context.Context

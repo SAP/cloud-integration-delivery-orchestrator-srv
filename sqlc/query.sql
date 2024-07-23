@@ -34,14 +34,17 @@ ORDER BY group_name;
 -- name: CreateConfig :one
 INSERT INTO config (
   config_name,
+  type,
   auth_url,
   api_url,
   auth_client_id,
   auth_client_secret
 ) VALUES (
-  $1, $2, $3, $4, $5
+  $1, $2, $3, $4, $5,$6
 ) RETURNING *;
 
 -- name: GetConfig :one
 SELECT * FROM config
 WHERE config_name = $1 LIMIT 1;
+-- name: GetConfigs :many
+SELECT * FROM config WHERE type = $1;

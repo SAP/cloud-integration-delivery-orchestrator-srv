@@ -1,3 +1,5 @@
 build/
 coverage.txt
 .history/
+.env
+*.json

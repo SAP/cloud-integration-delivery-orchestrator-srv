@@ -22,6 +22,9 @@ func main() {
 	router.GET("/api/v1/users", handler.GetUserInfoHandler)
 	router.GET("/api/v1/user/*username", handler.GetUsersHandler)
 	router.POST("/api/v1/user", handler.CreateUsersHandler)
+	router.GET("/api/v1/cpiconfigs", handler.GetCpiConfigs)
+	router.GET("/api/v1/cpiconfig", handler.GetCpiConfig)
+	router.POST("/api/v1/cpiconfig", handler.CreateCpiConfig)
 	router.Run(":9000")
 
 }

@@ -12,17 +12,19 @@ import (
 const createConfig = `-- name: CreateConfig :one
 INSERT INTO config (
   config_name,
+  type,
   auth_url,
   api_url,
   auth_client_id,
   auth_client_secret
 ) VALUES (
-  $1, $2, $3, $4, $5
+  $1, $2, $3, $4, $5,$6
 ) RETURNING id, config_name, type, auth_url, api_url, auth_client_id, auth_client_secret
 `
 
 type CreateConfigParams struct {
 	ConfigName       string `db:"config_name" json:"config_name"`
+	Type             string `db:"type" json:"type"`
 	AuthUrl          string `db:"auth_url" json:"auth_url"`
 	ApiUrl           string `db:"api_url" json:"api_url"`
 	AuthClientID     string `db:"auth_client_id" json:"auth_client_id"`
@@ -32,6 +34,7 @@ type CreateConfigParams struct {
 func (q *Queries) CreateConfig(ctx context.Context, arg CreateConfigParams) (Config, error) {
 	row := q.db.QueryRow(ctx, createConfig,
 		arg.ConfigName,
+		arg.Type,
 		arg.AuthUrl,
 		arg.ApiUrl,
 		arg.AuthClientID,
@@ -121,6 +124,38 @@ func (q *Queries) GetConfig(ctx context.Context, configName string) (Config, err
 		&i.AuthClientSecret,
 	)
 	return i, err
+}
+
+const getConfigs = `-- name: GetConfigs :many
+SELECT id, config_name, type, auth_url, api_url, auth_client_id, auth_client_secret FROM config WHERE type = $1
+`
+
+func (q *Queries) GetConfigs(ctx context.Context, type_ string) ([]Config, error) {
+	rows, err := q.db.Query(ctx, getConfigs, type_)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Config{}
+	for rows.Next() {
+		var i Config
+		if err := rows.Scan(
+			&i.ID,
+			&i.ConfigName,
+			&i.Type,
+			&i.AuthUrl,
+			&i.ApiUrl,
+			&i.AuthClientID,
+			&i.AuthClientSecret,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getGroup = `-- name: GetGroup :one

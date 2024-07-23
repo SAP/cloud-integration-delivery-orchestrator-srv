@@ -1,0 +1,7 @@
+{
+  "config_name": "NODE_PRE_PROD",
+  "auth_url": "https://cpi-mmt-preprod.authentication.eu10.hana.ondemand.com/oauth/token",
+  "api_url": "https://cpi-mmt-preprod.it-cpi026.cfapps.eu10-002.hana.ondemand.com/api/v1",
+  "auth_client_id": "xxxx",
+  "auth_client_secret": "xxxx"
+}
