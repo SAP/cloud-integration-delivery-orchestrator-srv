@@ -17,6 +17,9 @@
     - make sure to config env  `GOPROXY` to an accessible site, such as `https://goproxy.cn`
     - make sure docker engine and docker-compose are installed
 2. start postgresql locally with [docker-compose-db.yml](./docker-compose-db.yml)
+  ```
+  docker compose -f docker-compose-db.yml up -d
+  ```
 3. connect to db, and create required tables from [schema.sql](./sqlc/schema.sql)
 4. add sample data
 4. start application locally, it will listen at `0.0.0.0:9000`
