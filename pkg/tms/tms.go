@@ -291,3 +291,93 @@ func (t *TMSClient) ImportTransportRequest(nodeID string, transportRequestIDs []
 	actionID = reqImportTransportResp.ActionID
 	return actionID, nil
 }
+
+type ActionResultResp struct {
+	ID                   int    `json:"id"`
+	Type                 string `json:"type"`
+	Status               string `json:"status"`
+	StartedAt            string `json:"startedAt"`
+	EndedAt              string `json:"endedAt"`
+	TriggeredBy          string `json:"triggeredBy"`
+	TriggeredByNamedUser string `json:"triggeredByNamedUser"`
+	NodeName             string `json:"nodeName"`
+	TransportRequests    []struct {
+		ID       int    `json:"id"`
+		Status   string `json:"status"`
+		Entities []struct {
+			ID       int    `json:"id"`
+			FileName string `json:"fileName"`
+			URI      string `json:"uri"`
+			Status   string `json:"status"`
+		} `json:"entities"`
+	} `json:"transportRequests"`
+}
+
+func (t *TMSClient) GetActionResult(actionID string) (string, error) {
+
+	childCtx, cancel := context.WithCancel(t.context)
+	defer cancel()
+	fullURL := fmt.Sprintf("%s/actions/%s", t.TmsApiURL, actionID)
+	respBodyContent, errReq := t.Get(childCtx, fullURL)
+
+	if errReq != nil {
+		log.Printf("Error when getting response  content, the error message is %s", errReq)
+		return "", errReq
+
+	}
+	var actionResultResp ActionResultResp
+	jsonUnmarshalError := json.Unmarshal(respBodyContent, &actionResultResp)
+	if jsonUnmarshalError != nil {
+		log.Printf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
+		return "", jsonUnmarshalError
+	}
+	return actionResultResp.Status, nil
+}
+
+type ActionLogResp struct {
+	Logs []struct {
+		TransportRequestID int    `json:"transportRequestId"`
+		Status             string `json:"status"`
+		Messages           []struct {
+			ID        int    `json:"id"`
+			MessageID string `json:"messageId"`
+			Severity  string `json:"severity"`
+			Message   string `json:"message"`
+			CreatedAt string `json:"createdAt"`
+		} `json:"messages"`
+		Entities []struct {
+			ID       int    `json:"id"`
+			URI      string `json:"uri"`
+			FileName string `json:"fileName"`
+			Status   string `json:"status"`
+			Messages []struct {
+				ID        int    `json:"id"`
+				MessageID string `json:"messageId"`
+				Severity  string `json:"severity"`
+				Message   string `json:"message"`
+				CreatedAt string `json:"createdAt"`
+			} `json:"messages"`
+		} `json:"entities"`
+	} `json:"logs"`
+}
+
+func (t *TMSClient) GetActionResultLog(actionID string) (ActionLogResp, error) {
+
+	childCtx, cancel := context.WithCancel(t.context)
+	defer cancel()
+	fullURL := fmt.Sprintf("%s/actions/%s/logs", t.TmsApiURL, actionID)
+	respBodyContent, errReq := t.Get(childCtx, fullURL)
+
+	if errReq != nil {
+		log.Printf("Error when getting response  content, the error message is %s", errReq)
+		return ActionLogResp{}, errReq
+
+	}
+	var actionLogResp ActionLogResp
+	jsonUnmarshalError := json.Unmarshal(respBodyContent, &actionLogResp)
+	if jsonUnmarshalError != nil {
+		log.Printf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
+		return ActionLogResp{}, jsonUnmarshalError
+	}
+	return actionLogResp, nil
+}
