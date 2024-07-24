@@ -9,8 +9,8 @@ import (
 )
 
 type Config struct {
-	ID               int32  `db:"id" json:"id"`
-	ConfigName       string `db:"config_name" json:"config_name"`
+	ID               int    `db:"id" json:"id"`
+	Name             string `db:"name" json:"name"`
 	Type             string `db:"type" json:"type"`
 	AuthUrl          string `db:"auth_url" json:"auth_url"`
 	ApiUrl           string `db:"api_url" json:"api_url"`
@@ -19,12 +19,12 @@ type Config struct {
 }
 
 type Group struct {
-	ID        int32  `db:"id" json:"id"`
+	ID        int    `db:"id" json:"id"`
 	GroupName string `db:"group_name" json:"group_name"`
 }
 
 type User struct {
-	ID                int32              `db:"id" json:"id"`
+	ID                int                `db:"id" json:"id"`
 	Username          string             `db:"username" json:"username"`
 	HashedPassword    string             `db:"hashed_password" json:"hashed_password"`
 	FullName          string             `db:"full_name" json:"full_name"`

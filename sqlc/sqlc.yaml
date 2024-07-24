@@ -13,3 +13,8 @@ sql:
         emit_json_tags: true
         emit_db_tags: true
         emit_empty_slices: true
+        overrides:
+          - db_type: "serial"
+            go_type: "int"
+          - db_type: "in32"
+            go_type: "int"

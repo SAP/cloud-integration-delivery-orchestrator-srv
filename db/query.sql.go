@@ -11,7 +11,7 @@ import (
 
 const createConfig = `-- name: CreateConfig :one
 INSERT INTO config (
-  config_name,
+  name,
   type,
   auth_url,
   api_url,
@@ -19,11 +19,11 @@ INSERT INTO config (
   auth_client_secret
 ) VALUES (
   $1, $2, $3, $4, $5,$6
-) RETURNING id, config_name, type, auth_url, api_url, auth_client_id, auth_client_secret
+) RETURNING id, name, type, auth_url, api_url, auth_client_id, auth_client_secret
 `
 
 type CreateConfigParams struct {
-	ConfigName       string `db:"config_name" json:"config_name"`
+	Name             string `db:"name" json:"name"`
 	Type             string `db:"type" json:"type"`
 	AuthUrl          string `db:"auth_url" json:"auth_url"`
 	ApiUrl           string `db:"api_url" json:"api_url"`
@@ -33,7 +33,7 @@ type CreateConfigParams struct {
 
 func (q *Queries) CreateConfig(ctx context.Context, arg CreateConfigParams) (Config, error) {
 	row := q.db.QueryRow(ctx, createConfig,
-		arg.ConfigName,
+		arg.Name,
 		arg.Type,
 		arg.AuthUrl,
 		arg.ApiUrl,
@@ -43,7 +43,7 @@ func (q *Queries) CreateConfig(ctx context.Context, arg CreateConfigParams) (Con
 	var i Config
 	err := row.Scan(
 		&i.ID,
-		&i.ConfigName,
+		&i.Name,
 		&i.Type,
 		&i.AuthUrl,
 		&i.ApiUrl,
@@ -106,17 +106,57 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 	return i, err
 }
 
-const getConfig = `-- name: GetConfig :one
-SELECT id, config_name, type, auth_url, api_url, auth_client_id, auth_client_secret FROM config
-WHERE config_name = $1 LIMIT 1
+const deleteConfigByID = `-- name: DeleteConfigByID :one
+delete  FROM config
+WHERE id = $1 RETURNING id, name, type, auth_url, api_url, auth_client_id, auth_client_secret
 `
 
-func (q *Queries) GetConfig(ctx context.Context, configName string) (Config, error) {
-	row := q.db.QueryRow(ctx, getConfig, configName)
+func (q *Queries) DeleteConfigByID(ctx context.Context, id int32) (Config, error) {
+	row := q.db.QueryRow(ctx, deleteConfigByID, id)
 	var i Config
 	err := row.Scan(
 		&i.ID,
-		&i.ConfigName,
+		&i.Name,
+		&i.Type,
+		&i.AuthUrl,
+		&i.ApiUrl,
+		&i.AuthClientID,
+		&i.AuthClientSecret,
+	)
+	return i, err
+}
+
+const getConfigByID = `-- name: GetConfigByID :one
+SELECT id, name, type, auth_url, api_url, auth_client_id, auth_client_secret FROM config
+WHERE id = $1 LIMIT 1
+`
+
+func (q *Queries) GetConfigByID(ctx context.Context, id int32) (Config, error) {
+	row := q.db.QueryRow(ctx, getConfigByID, id)
+	var i Config
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Type,
+		&i.AuthUrl,
+		&i.ApiUrl,
+		&i.AuthClientID,
+		&i.AuthClientSecret,
+	)
+	return i, err
+}
+
+const getConfigByName = `-- name: GetConfigByName :one
+SELECT id, name, type, auth_url, api_url, auth_client_id, auth_client_secret FROM config
+WHERE name = $1 LIMIT 1
+`
+
+func (q *Queries) GetConfigByName(ctx context.Context, name string) (Config, error) {
+	row := q.db.QueryRow(ctx, getConfigByName, name)
+	var i Config
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
 		&i.Type,
 		&i.AuthUrl,
 		&i.ApiUrl,
@@ -127,7 +167,8 @@ func (q *Queries) GetConfig(ctx context.Context, configName string) (Config, err
 }
 
 const getConfigs = `-- name: GetConfigs :many
-SELECT id, config_name, type, auth_url, api_url, auth_client_id, auth_client_secret FROM config WHERE type = $1
+SELECT id, name, type, auth_url, api_url, auth_client_id, auth_client_secret FROM config
+WHERE type = $1
 `
 
 func (q *Queries) GetConfigs(ctx context.Context, type_ string) ([]Config, error) {
@@ -141,7 +182,7 @@ func (q *Queries) GetConfigs(ctx context.Context, type_ string) ([]Config, error
 		var i Config
 		if err := rows.Scan(
 			&i.ID,
-			&i.ConfigName,
+			&i.Name,
 			&i.Type,
 			&i.AuthUrl,
 			&i.ApiUrl,
