@@ -10,8 +10,10 @@ import (
 	"strings"
 	"time"
 
-	log "github.com/sirupsen/logrus"
+	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/log"
 )
+
+var logger = log.NewLogger()
 
 type TMSClient struct {
 	context     context.Context
@@ -28,7 +30,7 @@ type OauthResp struct {
 }
 
 func NewTMSClient(ctx context.Context, clientID string, clientSecret string, tmsAuthURL string, TmsApiURL string) (*TMSClient, error) {
-	log.Printf("Getting access token from %s\n", tmsAuthURL)
+	logger.Printf("Getting access token from %s\n", tmsAuthURL)
 	payload := strings.NewReader(fmt.Sprintf("grant_type=client_credentials&client_id=%s&client_secret=%s", clientID, clientSecret))
 
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, tmsAuthURL, payload)
@@ -37,20 +39,20 @@ func NewTMSClient(ctx context.Context, clientID string, clientSecret string, tms
 
 	res, errReq := httpClient.Do(req)
 	if errReq != nil {
-		log.Printf("Error when get the response, %s", errReq)
+		logger.Printf("Error when get the response, %s", errReq)
 		return &TMSClient{}, errReq
 	}
 	defer res.Body.Close()
 	body, errIOReader := io.ReadAll(res.Body)
 	if errIOReader != nil {
-		log.Printf("Error when reading body from response, %s", errIOReader)
+		logger.Printf("Error when reading body from response, %s", errIOReader)
 		return &TMSClient{}, errIOReader
 	}
 
 	var oauthResp OauthResp
 	jsonUnmarshalErr := json.Unmarshal(body, &oauthResp)
 	if jsonUnmarshalErr != nil {
-		log.Printf("Error when extract json data from response, %s", jsonUnmarshalErr)
+		logger.Printf("Error when extract json data from response, %s", jsonUnmarshalErr)
 		return &TMSClient{}, jsonUnmarshalErr
 	}
 	return &TMSClient{
@@ -71,7 +73,7 @@ func (t *TMSClient) Get(ctx context.Context, apiURL string) ([]byte, error) {
 	resp, errReq := t.HTTPClient.Do(req)
 
 	if errReq != nil {
-		log.Printf("Error when getting response from api, the error message is %s", errReq)
+		logger.Printf("Error when getting response from api, the error message is %s", errReq)
 		return []byte{}, errReq
 	}
 	defer resp.Body.Close()

@@ -43,16 +43,14 @@ INSERT INTO config (
   $1, $2, $3, $4, $5,$6
 ) RETURNING *;
 
--- name: GetConfigByName :one
-SELECT * FROM config
-WHERE name = $1 LIMIT 1;
-
 -- name: GetConfigByID :one
 SELECT * FROM config
 WHERE id = $1 LIMIT 1;
--- name: GetConfigs :many
+-- name: GetConfigsByType :many
 SELECT * FROM config
-WHERE type = $1;
+WHERE type = $1 ;
+-- name: GetConfigsAll :many
+SELECT * FROM config ;
 -- name: DeleteConfigByID :one
 delete  FROM config
-WHERE id = $1 RETURNING *;
+WHERE id = $1  RETURNING *;

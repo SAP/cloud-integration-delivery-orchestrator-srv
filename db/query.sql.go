@@ -108,7 +108,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 
 const deleteConfigByID = `-- name: DeleteConfigByID :one
 delete  FROM config
-WHERE id = $1 RETURNING id, name, type, auth_url, api_url, auth_client_id, auth_client_secret
+WHERE id = $1  RETURNING id, name, type, auth_url, api_url, auth_client_id, auth_client_secret
 `
 
 func (q *Queries) DeleteConfigByID(ctx context.Context, id int32) (Config, error) {
@@ -146,33 +146,45 @@ func (q *Queries) GetConfigByID(ctx context.Context, id int32) (Config, error) {
 	return i, err
 }
 
-const getConfigByName = `-- name: GetConfigByName :one
+const getConfigsAll = `-- name: GetConfigsAll :many
 SELECT id, name, type, auth_url, api_url, auth_client_id, auth_client_secret FROM config
-WHERE name = $1 LIMIT 1
 `
 
-func (q *Queries) GetConfigByName(ctx context.Context, name string) (Config, error) {
-	row := q.db.QueryRow(ctx, getConfigByName, name)
-	var i Config
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Type,
-		&i.AuthUrl,
-		&i.ApiUrl,
-		&i.AuthClientID,
-		&i.AuthClientSecret,
-	)
-	return i, err
+func (q *Queries) GetConfigsAll(ctx context.Context) ([]Config, error) {
+	rows, err := q.db.Query(ctx, getConfigsAll)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Config{}
+	for rows.Next() {
+		var i Config
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Type,
+			&i.AuthUrl,
+			&i.ApiUrl,
+			&i.AuthClientID,
+			&i.AuthClientSecret,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
-const getConfigs = `-- name: GetConfigs :many
+const getConfigsByType = `-- name: GetConfigsByType :many
 SELECT id, name, type, auth_url, api_url, auth_client_id, auth_client_secret FROM config
 WHERE type = $1
 `
 
-func (q *Queries) GetConfigs(ctx context.Context, type_ string) ([]Config, error) {
-	rows, err := q.db.Query(ctx, getConfigs, type_)
+func (q *Queries) GetConfigsByType(ctx context.Context, type_ string) ([]Config, error) {
+	rows, err := q.db.Query(ctx, getConfigsByType, type_)
 	if err != nil {
 		return nil, err
 	}

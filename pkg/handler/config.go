@@ -6,129 +6,125 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
-	log "github.com/sirupsen/logrus"
 	"github.wdf.sap.corp/maco-mmt/maco-deploy/db"
 )
 
-func GetCpiConfig(ctx *gin.Context) {
+func GetConfigs(ctx *gin.Context) {
 
 	context := ctx.Request.Context()
 	dbConn, errDBconn := pgx.Connect(context, dbSource)
-
 	if errDBconn != nil {
-		log.Printf("bad request, error message is%s", errDBconn)
-		ctx.JSON(http.StatusBadRequest, gin.H{
-			"msg":  "failed",
-			"code": http.StatusBadRequest,
+		logger.Printf("error when connecting to the database, please contact your system administrator, error message is %s", errDBconn)
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{
+			"status": "failed",
+			"msg":    "error when connecting to the database, please contact your system administrator",
+			"code":   http.StatusServiceUnavailable,
 		})
-	} else {
-		query := db.New(dbConn)
-		if configName := ctx.Query("name"); configName != "" {
-			config, error2 := query.GetConfigByName(context, configName)
-			if error2 != nil {
-				log.Printf("Error when retrieve config from database, error message is %s", error2)
-				ctx.JSON(http.StatusServiceUnavailable, gin.H{
-					"msg":  "failed",
-					"code": http.StatusServiceUnavailable,
-				})
-			} else {
-				var maskConfig = config
-				maskConfig.AuthClientSecret = "encrypted"
-				ctx.JSON(http.StatusOK, gin.H{
-					"msg":    "success",
-					"code":   200,
-					"result": maskConfig,
-				})
-			}
-		}
-		if id := ctx.Query("id"); id != "" {
-			idnumber, _ := strconv.Atoi(id)
-			config, error2 := query.GetConfigByID(context, int32(idnumber))
-			if error2 != nil {
-				log.Printf("Error when retrieve config from database, error message is %s", error2)
-				ctx.JSON(http.StatusServiceUnavailable, gin.H{
-					"msg":  "failed",
-					"code": http.StatusServiceUnavailable,
-				})
-			} else {
-				var maskConfig = config
-				maskConfig.AuthClientSecret = "encrypted"
-				ctx.JSON(http.StatusOK, gin.H{
-					"msg":    "success",
-					"code":   200,
-					"result": maskConfig,
-				})
-			}
-		}
-
+		return
 	}
+	query := db.New(dbConn)
+	var config db.Config
+	var configs []db.Config
+	var errorConfigRetrieve error
+	configType := ctx.Query("type")
+	id := ctx.Query("id")
 
-}
-
-func GetCpiConfigs(ctx *gin.Context) {
-
-	context := ctx.Request.Context()
-	dbConn, errDBconn := pgx.Connect(context, dbSource)
-	if errDBconn != nil {
-		log.Printf("bad request, error message is %s", errDBconn)
-		ctx.JSON(http.StatusBadRequest, gin.H{
-			"msg":  "failed",
-			"code": http.StatusBadRequest,
-		})
-	} else {
-		query := db.New(dbConn)
-		configs, error2 := query.GetConfigs(context, "cpi")
-		if error2 != nil {
-			log.Printf("Error when retrieve config from database, error message is %s", error2)
+	if configType == "" && id == "" {
+		logger.Printf("getting config without id and type")
+		configs, errorConfigRetrieve = query.GetConfigsAll(context)
+		if errorConfigRetrieve != nil {
+			logger.Printf("Error when retrieve config from database, error message is %s", errorConfigRetrieve)
 			ctx.JSON(http.StatusServiceUnavailable, gin.H{
-				"msg":  "failed",
-				"code": http.StatusServiceUnavailable,
+				"status": "failed",
+				"msg":    "Error when retrieve config from database",
+				"code":   http.StatusServiceUnavailable,
 			})
-		} else {
-			var maskConfig []db.Config
-			for _, conf := range configs {
-				conf.AuthClientSecret = "encrypted"
-				maskConfig = append(maskConfig, conf)
-			}
-			ctx.JSON(http.StatusOK, gin.H{
-				"msg":    "success",
-				"code":   200,
-				"result": maskConfig,
+			return
+		}
+
+	}
+	if id != "" {
+		idnumber, _ := strconv.Atoi(id)
+		logger.Printf("getting config with id %d", idnumber)
+		config, errorConfigRetrieve = query.GetConfigByID(context, int32(idnumber))
+		if errorConfigRetrieve != nil {
+			logger.Printf("Error when retrieve config from database, error message is %s", errorConfigRetrieve)
+			ctx.JSON(http.StatusServiceUnavailable, gin.H{
+				"status": "failed",
+				"msg":    "Error when retrieve config from database",
+				"code":   http.StatusServiceUnavailable,
 			})
+			return
+		}
+		configs = append(configs, config)
+		logger.Printf("configs %v  with id %d", configs, idnumber)
+	}
+	if id == "" && configType != "" {
+		logger.Printf("getting config with type")
+		configs, errorConfigRetrieve = query.GetConfigsByType(context, configType)
+		if errorConfigRetrieve != nil {
+			logger.Printf("Error when retrieve config from database, error message is %s", errorConfigRetrieve)
+			ctx.JSON(http.StatusServiceUnavailable, gin.H{
+				"status": "failed",
+				"msg":    "Error when retrieve config from database",
+				"code":   http.StatusServiceUnavailable,
+			})
+			return
+
 		}
 	}
 
+	var maskConfig []db.Config
+	for _, conf := range configs {
+		conf.AuthClientSecret = "encrypted"
+		maskConfig = append(maskConfig, conf)
+	}
+	ctx.JSON(http.StatusOK, gin.H{
+		"status": "success",
+		"code":   200,
+		"result": maskConfig,
+	})
 }
-func CreateCpiConfig(ctx *gin.Context) {
+
+func CreateConfig(ctx *gin.Context) {
 
 	context := ctx.Request.Context()
 	var config db.CreateConfigParams
 	err := ctx.BindJSON(&config)
 	if err != nil {
+		logger.Printf("invalid request, error message is %s", err)
 		ctx.JSON(http.StatusBadRequest, gin.H{
-			"msg":  "failed",
-			"code": http.StatusBadRequest,
+			"status": "failed",
+			"msg":    "invalid request",
+			"code":   http.StatusBadRequest,
 		})
-		log.Printf("invalid request, error message is %s", err)
+		return
 	} else {
-		config.Type = "cpi"
 		dbConn, errDBconn := pgx.Connect(context, dbSource)
 		if errDBconn != nil {
-			log.Printf("error connecting to db, error message is %s", errDBconn)
+			logger.Printf("error when connecting to the database, please contact your system administrator, error message is %s", errDBconn)
+			ctx.JSON(http.StatusServiceUnavailable, gin.H{
+				"status": "failed",
+				"msg":    "error when connecting to the database",
+				"code":   http.StatusServiceUnavailable,
+			})
+			return
 		}
 		query := db.New(dbConn)
 		configResp, error2 := query.CreateConfig(context, config)
 		if error2 != nil {
-			log.Printf("Error when retrieve config from database, error message is %s", error2)
+			logger.Printf("Error when retrieve config from database, error message is %s", error2)
 			ctx.JSON(http.StatusServiceUnavailable, gin.H{
-				"msg":  "faild",
-				"code": http.StatusServiceUnavailable,
+				"status": "failed",
+				"msg":    "Error when retrieve config from database",
+				"code":   http.StatusServiceUnavailable,
 			})
+			return
 		} else {
 			var maskConfig = configResp
 			maskConfig.AuthClientSecret = "encrypted"
 			ctx.JSON(http.StatusOK, gin.H{
-				"msg":    "success",
+				"status": "success",
 				"code":   200,
 				"result": maskConfig,
 			})
@@ -136,35 +132,47 @@ func CreateCpiConfig(ctx *gin.Context) {
 	}
 }
 
-func DeleteCpiConfig(ctx *gin.Context) {
+func DeleteConfig(ctx *gin.Context) {
 
 	context := ctx.Request.Context()
 	dbConn, errDBconn := pgx.Connect(context, dbSource)
 	if errDBconn != nil {
-		log.Printf("bad request, error message is %s", errDBconn)
-		ctx.JSON(http.StatusBadRequest, gin.H{
-			"msg":  "failed",
-			"code": http.StatusBadRequest,
+		logger.Printf("error when connecting to the database, please contact your system administrator, error message is %s", errDBconn)
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{
+			"status": "failed",
+			"msg":    "error when connecting to the database, please contact your system administrator",
+			"code":   http.StatusServiceUnavailable,
 		})
-	} else {
-		query := db.New(dbConn)
-		if id := ctx.Query("id"); id != "" {
-			idnumber, _ := strconv.Atoi(id)
-			config, error2 := query.DeleteConfigByID(context, int32(idnumber))
-			if error2 != nil {
-				log.Printf("Error when retrieve config from database, error message is %s", error2)
-				ctx.JSON(http.StatusServiceUnavailable, gin.H{
-					"msg":  "failed",
-					"code": http.StatusServiceUnavailable,
-				})
-			} else {
-				ctx.JSON(http.StatusOK, gin.H{
-					"msg":  "success",
-					"code": 200,
-					"id":   config.ID,
-				})
-			}
-		}
-
+		return
 	}
+
+	query := db.New(dbConn)
+	id := ctx.Query("id")
+	if id == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"status": "failed",
+			"msg":    "no id available, please specify the id of config",
+			"code":   http.StatusBadRequest,
+		})
+		return
+	}
+	idnumber, _ := strconv.Atoi(id)
+
+	config, error2 := query.DeleteConfigByID(context, int32(idnumber))
+	if error2 != nil {
+		logger.Printf("Error when retrieve config from database, error message is %s", error2)
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{
+			"status": "failed",
+			"msg":    "Error when retrieve config from database",
+			"code":   http.StatusServiceUnavailable,
+		})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{
+		"status": "success",
+		"msg":    "deleted",
+		"code":   http.StatusOK,
+		"id":     config.ID,
+	})
+
 }

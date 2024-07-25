@@ -3,8 +3,6 @@ package handler
 import (
 	"net/http"
 
-	log "github.com/sirupsen/logrus"
-
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 	"github.wdf.sap.corp/maco-mmt/maco-deploy/db"
@@ -15,7 +13,7 @@ func GetGroupInfoHandler(ctx *gin.Context) {
 	context := ctx.Request.Context()
 	dbConn, errDBconn := pgx.Connect(context, dbSource)
 	if errDBconn != nil {
-		log.Fatal("error connecting to db,", errDBconn)
+		logger.Fatal("error connecting to db,", errDBconn)
 	}
 	query := db.New(dbConn)
 	user, errUer := query.GetUser(context, name)
@@ -32,7 +30,7 @@ func GetGroupsHandler(ctx *gin.Context) {
 	context := ctx.Request.Context()
 	dbConn, errDBconn := pgx.Connect(context, dbSource)
 	if errDBconn != nil {
-		log.Fatal("error connecting to db,", errDBconn)
+		logger.Fatal("error connecting to db,", errDBconn)
 	}
 	query := db.New(dbConn)
 	users, errUer := query.GetUsers(context)

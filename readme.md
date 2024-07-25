@@ -30,8 +30,9 @@
 
 ## APIs
 - config api
-  - /api/v1/cpiconfigs, method `GET`, return all cpi configs
-  - /api/v1/cpiconfig?id=xxxx, method `GET`, return cpi config with name `id`
+  - /api/v1/config, method `GET`, return all cpi configs
+  - /api/v1/cpiconfig?id=xxxx, method `GET`, return cpi config with id `id`
+  - /api/v1/cpiconfig?type=xxx, method `GET`, return cpi config with type `type`,can be cpi or tms
   - /api/v1/cpiconfig, method `POST` with data like [cpi-config.json](testData/cpi-config.json)
   - /api/v1/cpiconfig?id=xxx, method `DELETE`, will delete the config, return the deleted config id
 ## URL

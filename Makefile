@@ -2,7 +2,7 @@
 
 GO           ?= go
 GOFMT        ?= $(GO)fmt
-SQLC = ~/go/bin/sqlc
+SQLC = sqlc
 FIRST_GOPATH := $(firstword $(subst :, ,$(shell $(GO) env GOPATH)))
 BIN_DIR ?= $(shell pwd)/build
 

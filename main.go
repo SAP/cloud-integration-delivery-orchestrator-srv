@@ -4,7 +4,9 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/sirupsen/logrus"
 	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/handler"
+	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/log"
 )
 
 func RootHandler(ctx *gin.Context) {
@@ -14,18 +16,20 @@ func RootHandler(ctx *gin.Context) {
 
 func main() {
 	//engine := gin.New()
+	gin.New(opts ...gin.OptionFunc)
+	gin.OptionFunc{}
 	router := gin.Default()
+	var logger = log.NewLogger()
+	logger.SetFormatter(&logrus.JSONFormatter{})
 	router.LoadHTMLGlob("templates/**/*")
 	router.Static("/static", "static")
-
 	router.GET("/", RootHandler)
 	router.GET("/api/v1/users", handler.GetUserInfoHandler)
 	router.GET("/api/v1/user/*username", handler.GetUsersHandler)
 	router.POST("/api/v1/user", handler.CreateUsersHandler)
-	router.GET("/api/v1/cpiconfigs", handler.GetCpiConfigs)
-	router.GET("/api/v1/cpiconfig", handler.GetCpiConfig)
-	router.DELETE("/api/v1/cpiconfig", handler.DeleteCpiConfig)
-	router.POST("/api/v1/cpiconfig", handler.CreateCpiConfig)
+	router.GET("/api/v1/config", handler.GetConfigs)
+	router.DELETE("/api/v1/config", handler.DeleteConfig)
+	router.POST("/api/v1/config", handler.CreateConfig)
 	router.Run(":9000")
 
 }
