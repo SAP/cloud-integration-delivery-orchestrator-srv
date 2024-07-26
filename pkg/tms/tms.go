@@ -81,7 +81,7 @@ func (t *TMSClient) Get(ctx context.Context, apiURL string) ([]byte, error) {
 	respBodyContent, errIOreader := io.ReadAll(resp.Body)
 
 	if errIOreader != nil {
-		log.Printf("Error when getting  content from response, the error message is %s", errReq)
+		logger.Printf("Error when getting  content from response, the error message is %s", errReq)
 		return []byte{}, errIOreader
 	}
 	return respBodyContent, nil
@@ -97,7 +97,7 @@ func (t *TMSClient) Post(ctx context.Context, apiURL string, requestBody *bytes.
 	resp, errReq := t.HTTPClient.Do(req)
 
 	if errReq != nil {
-		log.Printf("Error when getting response from api, the error message is %s", errReq)
+		logger.Printf("Error when getting response from api, the error message is %s", errReq)
 		return []byte{}, errReq
 	}
 	defer resp.Body.Close()
@@ -105,7 +105,7 @@ func (t *TMSClient) Post(ctx context.Context, apiURL string, requestBody *bytes.
 	respBodyContent, errIOreader := io.ReadAll(resp.Body)
 
 	if errIOreader != nil {
-		log.Printf("Error when getting  content from response, the error message is %s", errReq)
+		logger.Printf("Error when getting  content from response, the error message is %s", errReq)
 		return []byte{}, errIOreader
 	}
 	return respBodyContent, nil
@@ -139,10 +139,10 @@ func (t *TMSClient) GetNodes() ([]TMSNode, error) {
 	ctx, cancel := context.WithCancel(t.context)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/nodes", t.TmsApiURL)
-	log.Printf("Starting to get all tms nodes from %s\n", fullURL)
+	logger.Printf("Starting to get all tms nodes from %s\n", fullURL)
 	respBodyContent, errReq := t.Get(ctx, fullURL)
 	if errReq != nil {
-		log.Printf("Error when getting response  content, the error message is %s", errReq)
+		logger.Printf("Error when getting response  content, the error message is %s", errReq)
 		return []TMSNode{}, errReq
 	}
 
@@ -150,7 +150,7 @@ func (t *TMSClient) GetNodes() ([]TMSNode, error) {
 	jsonUnmarshalError := json.Unmarshal(respBodyContent, &tmsNodesResp)
 
 	if jsonUnmarshalError != nil {
-		log.Printf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
+		logger.Printf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
 		return []TMSNode{}, jsonUnmarshalError
 	}
 
@@ -162,7 +162,7 @@ func (t *TMSClient) GetNodeID(nodeName string) int {
 	var nodeID int
 	nodes, err := t.GetNodes()
 	if err != nil {
-		log.Printf("Error when getting nodes, the error message is %s", err)
+		logger.Printf("Error when getting nodes, the error message is %s", err)
 		return nodeID
 	}
 
@@ -179,10 +179,10 @@ func (t *TMSClient) GetNode(nodeID int) (TMSNode, error) {
 	defer cancel()
 
 	fullURL := fmt.Sprintf("%s/nodes/%d", t.TmsApiURL, nodeID)
-	log.Printf("Starting to get tms node from  %s\n", fullURL)
+	logger.Printf("Starting to get tms node from  %s\n", fullURL)
 	respBodyContent, errReq := t.Get(childCtx, fullURL)
 	if errReq != nil {
-		log.Printf("Error when getting response  content, the error message is %s", errReq)
+		logger.Printf("Error when getting response  content, the error message is %s", errReq)
 		return TMSNode{}, errReq
 	}
 
@@ -190,7 +190,7 @@ func (t *TMSClient) GetNode(nodeID int) (TMSNode, error) {
 	jsonUnmarshalError := json.Unmarshal(respBodyContent, &tmsNodeResp)
 
 	if jsonUnmarshalError != nil {
-		log.Printf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
+		logger.Printf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
 		return TMSNode{}, jsonUnmarshalError
 	}
 
@@ -201,7 +201,7 @@ func (t *TMSClient) GetNodeName(nodeID int) string {
 	var nodeName string
 	node, err := t.GetNode(nodeID)
 	if err != nil {
-		log.Printf("Error when getting node by id, the error message is %s", err)
+		logger.Printf("Error when getting node by id, the error message is %s", err)
 		return nodeName
 	}
 	nodeName = node.Name
@@ -237,10 +237,10 @@ func (t *TMSClient) GetNodeTransportRequests(nodeID string) ([]NodeTransportRequ
 	defer cancel()
 
 	fullURL := fmt.Sprintf("%s/nodes/%s/transportRequests?status=in,re,er,fa", t.TmsApiURL, nodeID)
-	log.Printf("Starting to get tranport requests for node %s from  %s\n", nodeID, fullURL)
+	logger.Printf("Starting to get tranport requests for node %s from  %s\n", nodeID, fullURL)
 	respBodyContent, errReq := t.Get(childCtx, fullURL)
 	if errReq != nil {
-		log.Printf("Error when getting response  content, the error message is %s", errReq)
+		logger.Printf("Error when getting response  content, the error message is %s", errReq)
 		return []NodeTransportRequest{}, errReq
 	}
 
@@ -248,7 +248,7 @@ func (t *TMSClient) GetNodeTransportRequests(nodeID string) ([]NodeTransportRequ
 	jsonUnmarshalError := json.Unmarshal(respBodyContent, &nodeTransportRequestsResp)
 
 	if jsonUnmarshalError != nil {
-		log.Printf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
+		logger.Printf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
 		return []NodeTransportRequest{}, jsonUnmarshalError
 	}
 
@@ -276,10 +276,10 @@ func (t *TMSClient) ImportTransportRequest(nodeID string, transportRequestIDs []
 
 	requestBodyJson, _ := json.Marshal(requestBodyContent)
 
-	log.Printf("Starting to get all packages from cpi tenant %s\n", fullURL)
+	logger.Printf("Starting to get all packages from cpi tenant %s\n", fullURL)
 	respBodyContent, errReq := t.Post(childCtx, fullURL, bytes.NewBuffer(requestBodyJson))
 	if errReq != nil {
-		log.Printf("Error when getting response  content, the error message is %s", errReq)
+		logger.Printf("Error when getting response  content, the error message is %s", errReq)
 		return actionID, errReq
 	}
 
@@ -287,7 +287,7 @@ func (t *TMSClient) ImportTransportRequest(nodeID string, transportRequestIDs []
 	jsonUnmarshalError := json.Unmarshal(respBodyContent, &reqImportTransportResp)
 
 	if jsonUnmarshalError != nil {
-		log.Printf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
+		logger.Printf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
 		return actionID, jsonUnmarshalError
 	}
 	actionID = reqImportTransportResp.ActionID
@@ -323,14 +323,14 @@ func (t *TMSClient) GetActionResult(actionID string) (string, error) {
 	respBodyContent, errReq := t.Get(childCtx, fullURL)
 
 	if errReq != nil {
-		log.Printf("Error when getting response  content, the error message is %s", errReq)
+		logger.Printf("Error when getting response  content, the error message is %s", errReq)
 		return "", errReq
 
 	}
 	var actionResultResp ActionResultResp
 	jsonUnmarshalError := json.Unmarshal(respBodyContent, &actionResultResp)
 	if jsonUnmarshalError != nil {
-		log.Printf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
+		logger.Printf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
 		return "", jsonUnmarshalError
 	}
 	return actionResultResp.Status, nil
@@ -371,14 +371,14 @@ func (t *TMSClient) GetActionResultLog(actionID string) (ActionLogResp, error) {
 	respBodyContent, errReq := t.Get(childCtx, fullURL)
 
 	if errReq != nil {
-		log.Printf("Error when getting response  content, the error message is %s", errReq)
+		logger.Printf("Error when getting response  content, the error message is %s", errReq)
 		return ActionLogResp{}, errReq
 
 	}
 	var actionLogResp ActionLogResp
 	jsonUnmarshalError := json.Unmarshal(respBodyContent, &actionLogResp)
 	if jsonUnmarshalError != nil {
-		log.Printf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
+		logger.Printf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
 		return ActionLogResp{}, jsonUnmarshalError
 	}
 	return actionLogResp, nil

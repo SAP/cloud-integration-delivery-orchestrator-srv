@@ -16,8 +16,6 @@ func RootHandler(ctx *gin.Context) {
 
 func main() {
 	//engine := gin.New()
-	gin.New(opts ...gin.OptionFunc)
-	gin.OptionFunc{}
 	router := gin.Default()
 	var logger = log.NewLogger()
 	logger.SetFormatter(&logrus.JSONFormatter{})
