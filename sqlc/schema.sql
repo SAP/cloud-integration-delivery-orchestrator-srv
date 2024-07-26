@@ -23,3 +23,45 @@ CREATE TABLE "config" (
   "auth_client_id" varchar not NULL,
   "auth_client_secret" varchar not NULL
 );
+
+CREATE TABLE "job" (
+  "id" SERIAL PRIMARY KEY,
+  "name" varchar not NULL,
+  "steps" integer[] not NULL,
+  "status" varchar not NULL
+);
+
+CREATE TABLE "step" (
+  "id" SERIAL PRIMARY KEY,
+  "job_id" integer not NULL,
+  "name" varchar not NULL,
+  "templ_type" varchar not NULL,
+  "templ_id" integer not NULL,
+  "status" varchar not NULL
+);
+
+CREATE TABLE "tmstmpl" (
+    "id" SERIAL PRIMARY KEY,
+    "step_id" integer not NULL,
+    "tms_config_id" integer not NULL,
+    "tms_node_id" integer not NULL,
+    "tms_tr_ids" integer[] not null,
+    "status" varchar not NULL
+);
+
+CREATE TABLE "cpitmpl" (
+      "id" SERIAL PRIMARY KEY,
+      "step_id" integer not NULL,
+      "cpi_config_id" integer not NULL,
+      "cpi_package_ids" varchar[] not NULL,
+      "cpi_iflow_ids" varchar[] not NULL,
+      "cpi_script_ids" varchar[] not NULL,
+      "status" varchar not NULL
+);
+
+CREATE TABLE "execution" (
+  "id" SERIAL PRIMARY KEY,
+  "job_id" integer not NULL,
+  "status" varchar not NULL,
+  "logs" json
+);

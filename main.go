@@ -2,9 +2,10 @@ package main
 
 import (
 	"net/http"
+	"time"
 
+	ginzap "github.com/gin-contrib/zap"
 	"github.com/gin-gonic/gin"
-	"github.com/sirupsen/logrus"
 	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/handler"
 	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/log"
 )
@@ -16,9 +17,10 @@ func RootHandler(ctx *gin.Context) {
 
 func main() {
 	//engine := gin.New()
-	router := gin.Default()
+	router := gin.New()
 	var logger = log.NewLogger()
-	logger.SetFormatter(&logrus.JSONFormatter{})
+	router.Use(ginzap.Ginzap(logger, time.RFC3339, true))
+	router.Use(ginzap.RecoveryWithZap(logger, true))
 	router.LoadHTMLGlob("templates/**/*")
 	router.Static("/static", "static")
 	router.GET("/", RootHandler)

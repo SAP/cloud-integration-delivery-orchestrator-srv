@@ -13,7 +13,7 @@ func GetUserInfoHandler(ctx *gin.Context) {
 	context := ctx.Request.Context()
 	dbConn, errDBconn := pgx.Connect(context, dbSource)
 	if errDBconn != nil {
-		logger.Fatal("error connecting to db,", errDBconn)
+		logger.Errorf("error connecting to db, %s", errDBconn)
 	}
 	query := db.New(dbConn)
 	user, errUer := query.GetUser(context, name)
@@ -30,7 +30,7 @@ func GetUsersHandler(ctx *gin.Context) {
 	context := ctx.Request.Context()
 	dbConn, errDBconn := pgx.Connect(context, dbSource)
 	if errDBconn != nil {
-		logger.Fatal("error connecting to db,", errDBconn)
+		logger.Errorf("error connecting to db, %s", errDBconn)
 	}
 	query := db.New(dbConn)
 	users, errUer := query.GetUsers(context)
@@ -46,7 +46,7 @@ func CreateUsersHandler(ctx *gin.Context) {
 	context := ctx.Request.Context()
 	dbConn, errDBconn := pgx.Connect(context, dbSource)
 	if errDBconn != nil {
-		logger.Fatal("error connecting to db,", errDBconn)
+		logger.Errorf("error connecting to db,%s", errDBconn)
 	}
 	query := db.New(dbConn)
 	var user db.CreateUserParams

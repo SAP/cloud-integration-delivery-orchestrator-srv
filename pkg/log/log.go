@@ -3,35 +3,38 @@ package log
 import (
 	"os"
 
-	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
-var logLevel log.Level
+var logLevel zapcore.Level
 
 func init() {
 	log_level, ok := os.LookupEnv("LOG_LEVEL")
 	if !ok {
-		log.Fatal("error when looking up env LOG_LEVEL")
+		zap.L().Fatal("error when looking up env LOG_LEVEL")
 	}
 	switch log_level {
 	case "debug":
-		logLevel = log.DebugLevel
+		logLevel = zap.DebugLevel
 	case "info":
-		logLevel = log.InfoLevel
-	case "trace":
-		logLevel = log.TraceLevel
+		logLevel = zap.InfoLevel
 	case "warn":
-		logLevel = log.WarnLevel
+		logLevel = zap.WarnLevel
 	case "error":
-		logLevel = log.ErrorLevel
+		logLevel = zap.ErrorLevel
 	}
 }
-func NewLogger() *log.Logger {
+func NewLogger() *zap.Logger {
+	levelConfig := zap.NewAtomicLevel()
+	levelConfig.SetLevel(logLevel)
 
-	logger := log.New()
-	logger.SetFormatter(&log.JSONFormatter{})
+	config := zap.NewProductionEncoderConfig()
 
-	logger.SetLevel(logLevel)
+	config.EncodeTime = zapcore.RFC3339TimeEncoder
+	fileEncoder := zapcore.NewJSONEncoder(config)
+	core := zapcore.NewTee(zapcore.NewCore(fileEncoder, zapcore.AddSync(os.Stdout), logLevel))
+	logger := zap.New(core)
 
 	return logger
 }
