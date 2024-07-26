@@ -43,7 +43,7 @@ func init() {
 	context := context.Background()
 	_, errDBconn := pgx.Connect(context, dbSource)
 	if errDBconn != nil {
-		logger.Fatalf("Failed to connect to database, error message is", errDBconn)
+		logger.Fatalf("Failed to connect to database, error message is %s", errDBconn)
 	}
 
 }
