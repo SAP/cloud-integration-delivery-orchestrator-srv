@@ -54,3 +54,7 @@ SELECT * FROM config ;
 -- name: DeleteConfigByID :one
 delete  FROM config
 WHERE id = $1  RETURNING *;
+-- name: UpdateConfigByID :one
+update   config
+SET name = $2, type=$3, auth_url=$4, api_url = $5, auth_client_id=$6, auth_client_secret=$7
+WHERE id = $1  RETURNING *;

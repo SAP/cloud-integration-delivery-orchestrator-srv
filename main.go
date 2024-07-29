@@ -30,6 +30,7 @@ func main() {
 	router.GET("/api/v1/config", handler.GetConfigs)
 	router.DELETE("/api/v1/config", handler.DeleteConfig)
 	router.POST("/api/v1/config", handler.CreateConfig)
+	router.POST("/api/v1/config", handler.UpdateConfig)
 	router.Run(":9000")
 
 }

@@ -300,3 +300,42 @@ func (q *Queries) GetUsers(ctx context.Context) ([]User, error) {
 	}
 	return items, nil
 }
+
+const updateConfigByID = `-- name: UpdateConfigByID :one
+update   config
+SET name = $2, type=$3, auth_url=$4, api_url = $5, auth_client_id=$6, auth_client_secret=$7
+WHERE id = $1  RETURNING id, name, type, auth_url, api_url, auth_client_id, auth_client_secret
+`
+
+type UpdateConfigByIDParams struct {
+	ID               int32  `db:"id" json:"id"`
+	Name             string `db:"name" json:"name"`
+	Type             string `db:"type" json:"type"`
+	AuthUrl          string `db:"auth_url" json:"auth_url"`
+	ApiUrl           string `db:"api_url" json:"api_url"`
+	AuthClientID     string `db:"auth_client_id" json:"auth_client_id"`
+	AuthClientSecret string `db:"auth_client_secret" json:"auth_client_secret"`
+}
+
+func (q *Queries) UpdateConfigByID(ctx context.Context, arg UpdateConfigByIDParams) (Config, error) {
+	row := q.db.QueryRow(ctx, updateConfigByID,
+		arg.ID,
+		arg.Name,
+		arg.Type,
+		arg.AuthUrl,
+		arg.ApiUrl,
+		arg.AuthClientID,
+		arg.AuthClientSecret,
+	)
+	var i Config
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Type,
+		&i.AuthUrl,
+		&i.ApiUrl,
+		&i.AuthClientID,
+		&i.AuthClientSecret,
+	)
+	return i, err
+}
