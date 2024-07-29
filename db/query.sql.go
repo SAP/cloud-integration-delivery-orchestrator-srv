@@ -7,7 +7,53 @@ package db
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
+
+const createCPItmpl = `-- name: CreateCPItmpl :one
+INSERT  INTO cpitmpl (
+step_id,
+cpi_config_id,
+cpi_package_ids,
+cpi_iflow_ids,
+cpi_script_ids,
+status
+) VALUES (
+$1, $2, $3, $4, $5, $6
+)RETURNING id, step_id, cpi_config_id, cpi_package_ids, cpi_iflow_ids, cpi_script_ids, status
+`
+
+type CreateCPItmplParams struct {
+	StepID        int32       `db:"step_id" json:"step_id"`
+	CpiConfigID   int32       `db:"cpi_config_id" json:"cpi_config_id"`
+	CpiPackageIds []string    `db:"cpi_package_ids" json:"cpi_package_ids"`
+	CpiIflowIds   []string    `db:"cpi_iflow_ids" json:"cpi_iflow_ids"`
+	CpiScriptIds  []string    `db:"cpi_script_ids" json:"cpi_script_ids"`
+	Status        pgtype.Text `db:"status" json:"status"`
+}
+
+func (q *Queries) CreateCPItmpl(ctx context.Context, arg CreateCPItmplParams) (Cpitmpl, error) {
+	row := q.db.QueryRow(ctx, createCPItmpl,
+		arg.StepID,
+		arg.CpiConfigID,
+		arg.CpiPackageIds,
+		arg.CpiIflowIds,
+		arg.CpiScriptIds,
+		arg.Status,
+	)
+	var i Cpitmpl
+	err := row.Scan(
+		&i.ID,
+		&i.StepID,
+		&i.CpiConfigID,
+		&i.CpiPackageIds,
+		&i.CpiIflowIds,
+		&i.CpiScriptIds,
+		&i.Status,
+	)
+	return i, err
+}
 
 const createConfig = `-- name: CreateConfig :one
 INSERT INTO config (
@@ -68,6 +114,109 @@ func (q *Queries) CreateGroup(ctx context.Context, groupName string) (Group, err
 	return i, err
 }
 
+const createJob = `-- name: CreateJob :one
+INSERT INTO job (
+  name,
+  steps
+) VALUES (
+  $1, $2
+) RETURNING id, name, steps, status
+`
+
+type CreateJobParams struct {
+	Name  string  `db:"name" json:"name"`
+	Steps []int32 `db:"steps" json:"steps"`
+}
+
+func (q *Queries) CreateJob(ctx context.Context, arg CreateJobParams) (Job, error) {
+	row := q.db.QueryRow(ctx, createJob, arg.Name, arg.Steps)
+	var i Job
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Steps,
+		&i.Status,
+	)
+	return i, err
+}
+
+const createStep = `-- name: CreateStep :one
+INSERT  INTO step (
+    job_id,
+    name,
+    templ_type,
+    status
+) VALUES (
+    $1, $2, $3, $4
+)RETURNING id, job_id, name, templ_type, templ_id, status
+`
+
+type CreateStepParams struct {
+	JobID     int32       `db:"job_id" json:"job_id"`
+	Name      string      `db:"name" json:"name"`
+	TemplType string      `db:"templ_type" json:"templ_type"`
+	Status    pgtype.Text `db:"status" json:"status"`
+}
+
+func (q *Queries) CreateStep(ctx context.Context, arg CreateStepParams) (Step, error) {
+	row := q.db.QueryRow(ctx, createStep,
+		arg.JobID,
+		arg.Name,
+		arg.TemplType,
+		arg.Status,
+	)
+	var i Step
+	err := row.Scan(
+		&i.ID,
+		&i.JobID,
+		&i.Name,
+		&i.TemplType,
+		&i.TemplID,
+		&i.Status,
+	)
+	return i, err
+}
+
+const createTMStmpl = `-- name: CreateTMStmpl :one
+INSERT  INTO tmstmpl (
+step_id,
+tms_config_id,
+tms_node_id,
+tms_tr_ids,
+status
+) VALUES (
+$1, $2, $3, $4, $5
+)RETURNING id, step_id, tms_config_id, tms_node_id, tms_tr_ids, status
+`
+
+type CreateTMStmplParams struct {
+	StepID      int32       `db:"step_id" json:"step_id"`
+	TmsConfigID int32       `db:"tms_config_id" json:"tms_config_id"`
+	TmsNodeID   int32       `db:"tms_node_id" json:"tms_node_id"`
+	TmsTrIds    []int32     `db:"tms_tr_ids" json:"tms_tr_ids"`
+	Status      pgtype.Text `db:"status" json:"status"`
+}
+
+func (q *Queries) CreateTMStmpl(ctx context.Context, arg CreateTMStmplParams) (Tmstmpl, error) {
+	row := q.db.QueryRow(ctx, createTMStmpl,
+		arg.StepID,
+		arg.TmsConfigID,
+		arg.TmsNodeID,
+		arg.TmsTrIds,
+		arg.Status,
+	)
+	var i Tmstmpl
+	err := row.Scan(
+		&i.ID,
+		&i.StepID,
+		&i.TmsConfigID,
+		&i.TmsNodeID,
+		&i.TmsTrIds,
+		&i.Status,
+	)
+	return i, err
+}
+
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (
   username,
@@ -106,8 +255,28 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 	return i, err
 }
 
+const deleteCPItmpl = `-- name: DeleteCPItmpl :one
+DELETE FROM cpitmpl
+WHERE id = $1  RETURNING id, step_id, cpi_config_id, cpi_package_ids, cpi_iflow_ids, cpi_script_ids, status
+`
+
+func (q *Queries) DeleteCPItmpl(ctx context.Context, id int32) (Cpitmpl, error) {
+	row := q.db.QueryRow(ctx, deleteCPItmpl, id)
+	var i Cpitmpl
+	err := row.Scan(
+		&i.ID,
+		&i.StepID,
+		&i.CpiConfigID,
+		&i.CpiPackageIds,
+		&i.CpiIflowIds,
+		&i.CpiScriptIds,
+		&i.Status,
+	)
+	return i, err
+}
+
 const deleteConfigByID = `-- name: DeleteConfigByID :one
-delete  FROM config
+DELETE  FROM config
 WHERE id = $1  RETURNING id, name, type, auth_url, api_url, auth_client_id, auth_client_secret
 `
 
@@ -122,6 +291,113 @@ func (q *Queries) DeleteConfigByID(ctx context.Context, id int32) (Config, error
 		&i.ApiUrl,
 		&i.AuthClientID,
 		&i.AuthClientSecret,
+	)
+	return i, err
+}
+
+const deleteJob = `-- name: DeleteJob :one
+DELETE FROM job
+WHERE id = $1 RETURNING id, name, steps, status
+`
+
+func (q *Queries) DeleteJob(ctx context.Context, id int32) (Job, error) {
+	row := q.db.QueryRow(ctx, deleteJob, id)
+	var i Job
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Steps,
+		&i.Status,
+	)
+	return i, err
+}
+
+const deleteStepByID = `-- name: DeleteStepByID :one
+DELETE FROM step
+WHERE id=$1 RETURNING id, job_id, name, templ_type, templ_id, status
+`
+
+func (q *Queries) DeleteStepByID(ctx context.Context, id int32) (Step, error) {
+	row := q.db.QueryRow(ctx, deleteStepByID, id)
+	var i Step
+	err := row.Scan(
+		&i.ID,
+		&i.JobID,
+		&i.Name,
+		&i.TemplType,
+		&i.TemplID,
+		&i.Status,
+	)
+	return i, err
+}
+
+const deleteTMStmpl = `-- name: DeleteTMStmpl :one
+DELETE FROM tmstmpl
+WHERE id = $1  RETURNING id, step_id, tms_config_id, tms_node_id, tms_tr_ids, status
+`
+
+func (q *Queries) DeleteTMStmpl(ctx context.Context, id int32) (Tmstmpl, error) {
+	row := q.db.QueryRow(ctx, deleteTMStmpl, id)
+	var i Tmstmpl
+	err := row.Scan(
+		&i.ID,
+		&i.StepID,
+		&i.TmsConfigID,
+		&i.TmsNodeID,
+		&i.TmsTrIds,
+		&i.Status,
+	)
+	return i, err
+}
+
+const getCPItmpl = `-- name: GetCPItmpl :many
+SELECT id, step_id, cpi_config_id, cpi_package_ids, cpi_iflow_ids, cpi_script_ids, status FROM cpitmpl
+`
+
+func (q *Queries) GetCPItmpl(ctx context.Context) ([]Cpitmpl, error) {
+	rows, err := q.db.Query(ctx, getCPItmpl)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Cpitmpl{}
+	for rows.Next() {
+		var i Cpitmpl
+		if err := rows.Scan(
+			&i.ID,
+			&i.StepID,
+			&i.CpiConfigID,
+			&i.CpiPackageIds,
+			&i.CpiIflowIds,
+			&i.CpiScriptIds,
+			&i.Status,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getCPItmplByID = `-- name: GetCPItmplByID :one
+SELECT id, step_id, cpi_config_id, cpi_package_ids, cpi_iflow_ids, cpi_script_ids, status FROM cpitmpl
+WHERE id =$1 LIMIT 1
+`
+
+func (q *Queries) GetCPItmplByID(ctx context.Context, id int32) (Cpitmpl, error) {
+	row := q.db.QueryRow(ctx, getCPItmplByID, id)
+	var i Cpitmpl
+	err := row.Scan(
+		&i.ID,
+		&i.StepID,
+		&i.CpiConfigID,
+		&i.CpiPackageIds,
+		&i.CpiIflowIds,
+		&i.CpiScriptIds,
+		&i.Status,
 	)
 	return i, err
 }
@@ -248,6 +524,150 @@ func (q *Queries) GetGroups(ctx context.Context) ([]Group, error) {
 	return items, nil
 }
 
+const getJobByID = `-- name: GetJobByID :one
+SELECT id, name, steps, status FROM job
+WHERE id = $1 LIMIT 1
+`
+
+func (q *Queries) GetJobByID(ctx context.Context, id int32) (Job, error) {
+	row := q.db.QueryRow(ctx, getJobByID, id)
+	var i Job
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Steps,
+		&i.Status,
+	)
+	return i, err
+}
+
+const getJobs = `-- name: GetJobs :many
+SELECT id, name, steps, status FROM job
+`
+
+func (q *Queries) GetJobs(ctx context.Context) ([]Job, error) {
+	rows, err := q.db.Query(ctx, getJobs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Job{}
+	for rows.Next() {
+		var i Job
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Steps,
+			&i.Status,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getStepByID = `-- name: GetStepByID :one
+SELECT id, job_id, name, templ_type, templ_id, status FROM step
+WHERE id =$1 LIMIT 1
+`
+
+func (q *Queries) GetStepByID(ctx context.Context, id int32) (Step, error) {
+	row := q.db.QueryRow(ctx, getStepByID, id)
+	var i Step
+	err := row.Scan(
+		&i.ID,
+		&i.JobID,
+		&i.Name,
+		&i.TemplType,
+		&i.TemplID,
+		&i.Status,
+	)
+	return i, err
+}
+
+const getSteps = `-- name: GetSteps :many
+SELECT id, name, steps, status FROM job
+`
+
+func (q *Queries) GetSteps(ctx context.Context) ([]Job, error) {
+	rows, err := q.db.Query(ctx, getSteps)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Job{}
+	for rows.Next() {
+		var i Job
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Steps,
+			&i.Status,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getTMStmpl = `-- name: GetTMStmpl :many
+SELECT id, step_id, tms_config_id, tms_node_id, tms_tr_ids, status FROM tmstmpl
+`
+
+func (q *Queries) GetTMStmpl(ctx context.Context) ([]Tmstmpl, error) {
+	rows, err := q.db.Query(ctx, getTMStmpl)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Tmstmpl{}
+	for rows.Next() {
+		var i Tmstmpl
+		if err := rows.Scan(
+			&i.ID,
+			&i.StepID,
+			&i.TmsConfigID,
+			&i.TmsNodeID,
+			&i.TmsTrIds,
+			&i.Status,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getTMStmplByID = `-- name: GetTMStmplByID :one
+SELECT id, step_id, tms_config_id, tms_node_id, tms_tr_ids, status FROM tmstmpl
+WHERE id =$1 LIMIT 1
+`
+
+func (q *Queries) GetTMStmplByID(ctx context.Context, id int32) (Tmstmpl, error) {
+	row := q.db.QueryRow(ctx, getTMStmplByID, id)
+	var i Tmstmpl
+	err := row.Scan(
+		&i.ID,
+		&i.StepID,
+		&i.TmsConfigID,
+		&i.TmsNodeID,
+		&i.TmsTrIds,
+		&i.Status,
+	)
+	return i, err
+}
+
 const getUser = `-- name: GetUser :one
 SELECT id, username, hashed_password, full_name, email, password_changed_at, created_at FROM users
 WHERE username = $1 LIMIT 1
@@ -301,8 +721,47 @@ func (q *Queries) GetUsers(ctx context.Context) ([]User, error) {
 	return items, nil
 }
 
+const updateCPItmpl = `-- name: UpdateCPItmpl :one
+UPDATE cpitmpl
+SET step_id=$2, cpi_config_id=$3, cpi_package_ids=$4, cpi_iflow_ids=$5, cpi_script_ids=$6, status=$7
+WHERE id=$1 RETURNING id, step_id, cpi_config_id, cpi_package_ids, cpi_iflow_ids, cpi_script_ids, status
+`
+
+type UpdateCPItmplParams struct {
+	ID            int32       `db:"id" json:"id"`
+	StepID        int32       `db:"step_id" json:"step_id"`
+	CpiConfigID   int32       `db:"cpi_config_id" json:"cpi_config_id"`
+	CpiPackageIds []string    `db:"cpi_package_ids" json:"cpi_package_ids"`
+	CpiIflowIds   []string    `db:"cpi_iflow_ids" json:"cpi_iflow_ids"`
+	CpiScriptIds  []string    `db:"cpi_script_ids" json:"cpi_script_ids"`
+	Status        pgtype.Text `db:"status" json:"status"`
+}
+
+func (q *Queries) UpdateCPItmpl(ctx context.Context, arg UpdateCPItmplParams) (Cpitmpl, error) {
+	row := q.db.QueryRow(ctx, updateCPItmpl,
+		arg.ID,
+		arg.StepID,
+		arg.CpiConfigID,
+		arg.CpiPackageIds,
+		arg.CpiIflowIds,
+		arg.CpiScriptIds,
+		arg.Status,
+	)
+	var i Cpitmpl
+	err := row.Scan(
+		&i.ID,
+		&i.StepID,
+		&i.CpiConfigID,
+		&i.CpiPackageIds,
+		&i.CpiIflowIds,
+		&i.CpiScriptIds,
+		&i.Status,
+	)
+	return i, err
+}
+
 const updateConfigByID = `-- name: UpdateConfigByID :one
-update   config
+UPDATE   config
 SET name = $2, type=$3, auth_url=$4, api_url = $5, auth_client_id=$6, auth_client_secret=$7
 WHERE id = $1  RETURNING id, name, type, auth_url, api_url, auth_client_id, auth_client_secret
 `
@@ -336,6 +795,99 @@ func (q *Queries) UpdateConfigByID(ctx context.Context, arg UpdateConfigByIDPara
 		&i.ApiUrl,
 		&i.AuthClientID,
 		&i.AuthClientSecret,
+	)
+	return i, err
+}
+
+const updateJobByID = `-- name: UpdateJobByID :one
+UPDATE job
+SET steps = $2
+WHERE id = $1 RETURNING id, name, steps, status
+`
+
+type UpdateJobByIDParams struct {
+	ID    int32   `db:"id" json:"id"`
+	Steps []int32 `db:"steps" json:"steps"`
+}
+
+func (q *Queries) UpdateJobByID(ctx context.Context, arg UpdateJobByIDParams) (Job, error) {
+	row := q.db.QueryRow(ctx, updateJobByID, arg.ID, arg.Steps)
+	var i Job
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Steps,
+		&i.Status,
+	)
+	return i, err
+}
+
+const updateStepByID = `-- name: UpdateStepByID :one
+UPDATE step
+SET job_id=$2, name=$3, templ_type=$3, templ_id=$4, status=$5
+WHERE id = $1 RETURNING id, job_id, name, templ_type, templ_id, status
+`
+
+type UpdateStepByIDParams struct {
+	ID      int32       `db:"id" json:"id"`
+	JobID   int32       `db:"job_id" json:"job_id"`
+	Name    string      `db:"name" json:"name"`
+	TemplID pgtype.Int4 `db:"templ_id" json:"templ_id"`
+	Status  pgtype.Text `db:"status" json:"status"`
+}
+
+func (q *Queries) UpdateStepByID(ctx context.Context, arg UpdateStepByIDParams) (Step, error) {
+	row := q.db.QueryRow(ctx, updateStepByID,
+		arg.ID,
+		arg.JobID,
+		arg.Name,
+		arg.TemplID,
+		arg.Status,
+	)
+	var i Step
+	err := row.Scan(
+		&i.ID,
+		&i.JobID,
+		&i.Name,
+		&i.TemplType,
+		&i.TemplID,
+		&i.Status,
+	)
+	return i, err
+}
+
+const updateTMStmpl = `-- name: UpdateTMStmpl :one
+UPDATE tmstmpl
+SET step_id=$2, tms_config_id=$3, tms_node_id=$4, tms_tr_ids=$5, status=$6
+WHERE id=$1 RETURNING id, step_id, tms_config_id, tms_node_id, tms_tr_ids, status
+`
+
+type UpdateTMStmplParams struct {
+	ID          int32       `db:"id" json:"id"`
+	StepID      int32       `db:"step_id" json:"step_id"`
+	TmsConfigID int32       `db:"tms_config_id" json:"tms_config_id"`
+	TmsNodeID   int32       `db:"tms_node_id" json:"tms_node_id"`
+	TmsTrIds    []int32     `db:"tms_tr_ids" json:"tms_tr_ids"`
+	Status      pgtype.Text `db:"status" json:"status"`
+}
+
+func (q *Queries) UpdateTMStmpl(ctx context.Context, arg UpdateTMStmplParams) (Tmstmpl, error) {
+	row := q.db.QueryRow(ctx, updateTMStmpl,
+		arg.ID,
+		arg.StepID,
+		arg.TmsConfigID,
+		arg.TmsNodeID,
+		arg.TmsTrIds,
+		arg.Status,
+	)
+	var i Tmstmpl
+	err := row.Scan(
+		&i.ID,
+		&i.StepID,
+		&i.TmsConfigID,
+		&i.TmsNodeID,
+		&i.TmsTrIds,
+		&i.Status,
 	)
 	return i, err
 }

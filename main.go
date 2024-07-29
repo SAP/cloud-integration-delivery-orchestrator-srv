@@ -24,13 +24,24 @@ func main() {
 	router.LoadHTMLGlob("templates/**/*")
 	router.Static("/static", "static")
 	router.GET("/", RootHandler)
-	router.GET("/api/v1/users", handler.GetUserInfoHandler)
-	router.GET("/api/v1/user/*username", handler.GetUsersHandler)
-	router.POST("/api/v1/user", handler.CreateUsersHandler)
-	router.GET("/api/v1/config", handler.GetConfigs)
-	router.DELETE("/api/v1/config", handler.DeleteConfig)
-	router.POST("/api/v1/config", handler.CreateConfig)
-	router.POST("/api/v1/config", handler.UpdateConfig)
-	router.Run(":9000")
+	v1Group := router.Group("/api/v1")
+	{
+		v1Group.GET("/users", handler.GetUserInfoHandler)
+		v1Group.GET("/user/:name", handler.GetUsersHandler)
+		v1Group.POST("/user", handler.CreateUsersHandler)
+
+		v1Group.GET("/config", handler.GetConfigs)
+
+		v1Group.POST("/config", handler.CreateConfig)
+		v1Group.POST("/config/:id", handler.UpdateConfig)
+		v1Group.DELETE("/config/:id", handler.DeleteConfig)
+		v1Group.GET("/config/:id", handler.GetConfigbyID)
+
+		router.POST("/job", handler.CreateJob)
+	}
+
+	if err := router.Run(":9000"); err != nil {
+		panic(err)
+	}
 
 }

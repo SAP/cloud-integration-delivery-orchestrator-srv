@@ -31,11 +31,13 @@
 ## APIs
 - config api
   - /api/v1/config, method `GET`, return all cpi configs
-  - /api/v1/config?id=xxxx, method `GET`, return cpi config with id `id`
-  - /api/v1/config?type=xxx, method `GET`, return cpi config with type `type`,can be cpi or tms
-  - /api/v1/config, method `POST` with data like [cpi-config.json](testData/cpi-create-config.json)
-  - /api/v1/config, method `POST`, update the config like [cpi-update-config.json](./testData/cpi-update-config.json)
-  - /api/v1/config?id=xxx, method `DELETE`, will delete the config, return the deleted config id
+  - /api/v1/config, method `POST`, create config using data like [cpi-config.json](testData/cpi-create-config.json)
+  - /api/v1/config/id, method `GET`, return  config with id `id`
+  - /api/v1/config/id, method `POST`, update the config  with `id` using data like [cpi-update-config.json](./testData/cpi-update-config.json)
+  - /api/v1/config/id, method `DELETE`, will delete the config `id`, return the deleted config id
+- job api
+  - /api/v1/job, method `POST`, create job using data like [create-job.json](testData/create-job.json)
+
 ## URL
 
 - https://permify.co/post/implement-oauth-2-golang-app/

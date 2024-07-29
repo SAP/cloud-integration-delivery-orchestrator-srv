@@ -46,15 +46,126 @@ INSERT INTO config (
 -- name: GetConfigByID :one
 SELECT * FROM config
 WHERE id = $1 LIMIT 1;
+
 -- name: GetConfigsByType :many
 SELECT * FROM config
 WHERE type = $1 ;
+
 -- name: GetConfigsAll :many
 SELECT * FROM config ;
+
 -- name: DeleteConfigByID :one
-delete  FROM config
+DELETE  FROM config
 WHERE id = $1  RETURNING *;
+
 -- name: UpdateConfigByID :one
-update   config
+UPDATE   config
 SET name = $2, type=$3, auth_url=$4, api_url = $5, auth_client_id=$6, auth_client_secret=$7
+WHERE id = $1  RETURNING *;
+
+
+-- name: CreateJob :one
+INSERT INTO job (
+  name,
+  steps
+) VALUES (
+  $1, $2
+) RETURNING *;
+
+-- name: GetJobByID :one
+SELECT * FROM job
+WHERE id = $1 LIMIT 1;
+
+-- name: GetJobs :many
+SELECT * FROM job;
+
+-- name: UpdateJobByID :one
+UPDATE job
+SET steps = $2
+WHERE id = $1 RETURNING *;
+
+-- name: DeleteJob :one
+DELETE FROM job
+WHERE id = $1 RETURNING *;
+
+-- name: CreateStep :one
+INSERT  INTO step (
+    job_id,
+    name,
+    templ_type,
+    status
+) VALUES (
+    $1, $2, $3, $4
+)RETURNING *;
+
+-- name: GetStepByID :one
+SELECT * FROM step
+WHERE id =$1 LIMIT 1;
+
+-- name: GetSteps :many
+SELECT * FROM job;
+
+-- name: UpdateStepByID :one
+UPDATE step
+SET job_id=$2, name=$3, templ_type=$3, templ_id=$4, status=$5
+WHERE id = $1 RETURNING *;
+
+-- name: DeleteStepByID :one
+DELETE FROM step
+WHERE id=$1 RETURNING *;
+
+-- name: CreateTMStmpl :one
+INSERT  INTO tmstmpl (
+step_id,
+tms_config_id,
+tms_node_id,
+tms_tr_ids,
+status
+) VALUES (
+$1, $2, $3, $4, $5
+)RETURNING *;
+
+-- name: GetTMStmplByID :one
+SELECT * FROM tmstmpl
+WHERE id =$1 LIMIT 1;
+
+-- name: GetTMStmpl :many
+SELECT * FROM tmstmpl;
+
+-- name: UpdateTMStmpl :one
+UPDATE tmstmpl
+SET step_id=$2, tms_config_id=$3, tms_node_id=$4, tms_tr_ids=$5, status=$6
+WHERE id=$1 RETURNING *;
+
+-- name: DeleteTMStmpl :one
+DELETE FROM tmstmpl
+WHERE id = $1  RETURNING *;
+
+
+-- name: CreateCPItmpl :one
+INSERT  INTO cpitmpl (
+step_id,
+cpi_config_id,
+cpi_package_ids,
+cpi_iflow_ids,
+cpi_script_ids,
+status
+) VALUES (
+$1, $2, $3, $4, $5, $6
+)RETURNING *;
+
+-- name: GetCPItmplByID :one
+SELECT * FROM cpitmpl
+WHERE id =$1 LIMIT 1;
+
+-- name: GetCPItmpl :many
+SELECT * FROM cpitmpl;
+
+-- name: UpdateCPItmpl :one
+UPDATE cpitmpl
+SET step_id=$2, cpi_config_id=$3, cpi_package_ids=$4, cpi_iflow_ids=$5, cpi_script_ids=$6, status=$7
+WHERE id=$1 RETURNING *;
+
+-- name: DeleteCPItmpl :one
+DELETE FROM cpitmpl
 WHERE id = $1  RETURNING *;

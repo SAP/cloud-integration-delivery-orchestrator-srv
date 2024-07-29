@@ -27,8 +27,8 @@ CREATE TABLE "config" (
 CREATE TABLE "job" (
   "id" SERIAL PRIMARY KEY,
   "name" varchar not NULL,
-  "steps" integer[] not NULL,
-  "status" varchar not NULL
+  "steps" integer[] ,
+  "status" varchar
 );
 
 CREATE TABLE "step" (
@@ -36,8 +36,8 @@ CREATE TABLE "step" (
   "job_id" integer not NULL,
   "name" varchar not NULL,
   "templ_type" varchar not NULL,
-  "templ_id" integer not NULL,
-  "status" varchar not NULL
+  "templ_id" integer,
+  "status" varchar
 );
 
 CREATE TABLE "tmstmpl" (
@@ -46,7 +46,7 @@ CREATE TABLE "tmstmpl" (
     "tms_config_id" integer not NULL,
     "tms_node_id" integer not NULL,
     "tms_tr_ids" integer[] not null,
-    "status" varchar not NULL
+    "status" varchar
 );
 
 CREATE TABLE "cpitmpl" (
@@ -56,12 +56,12 @@ CREATE TABLE "cpitmpl" (
       "cpi_package_ids" varchar[] not NULL,
       "cpi_iflow_ids" varchar[] not NULL,
       "cpi_script_ids" varchar[] not NULL,
-      "status" varchar not NULL
+      "status" varchar
 );
 
 CREATE TABLE "execution" (
   "id" SERIAL PRIMARY KEY,
   "job_id" integer not NULL,
-  "status" varchar not NULL,
+  "status" varchar,
   "logs" json
 );
