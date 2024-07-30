@@ -295,13 +295,13 @@ func (q *Queries) DeleteConfigByID(ctx context.Context, id int32) (Config, error
 	return i, err
 }
 
-const deleteJob = `-- name: DeleteJob :one
+const deleteJobByID = `-- name: DeleteJobByID :one
 DELETE FROM job
 WHERE id = $1 RETURNING id, name, steps, status
 `
 
-func (q *Queries) DeleteJob(ctx context.Context, id int32) (Job, error) {
-	row := q.db.QueryRow(ctx, deleteJob, id)
+func (q *Queries) DeleteJobByID(ctx context.Context, id int32) (Job, error) {
+	row := q.db.QueryRow(ctx, deleteJobByID, id)
 	var i Job
 	err := row.Scan(
 		&i.ID,
@@ -801,17 +801,18 @@ func (q *Queries) UpdateConfigByID(ctx context.Context, arg UpdateConfigByIDPara
 
 const updateJobByID = `-- name: UpdateJobByID :one
 UPDATE job
-SET steps = $2
+SET name=$2,steps = $3
 WHERE id = $1 RETURNING id, name, steps, status
 `
 
 type UpdateJobByIDParams struct {
 	ID    int32   `db:"id" json:"id"`
+	Name  string  `db:"name" json:"name"`
 	Steps []int32 `db:"steps" json:"steps"`
 }
 
 func (q *Queries) UpdateJobByID(ctx context.Context, arg UpdateJobByIDParams) (Job, error) {
-	row := q.db.QueryRow(ctx, updateJobByID, arg.ID, arg.Steps)
+	row := q.db.QueryRow(ctx, updateJobByID, arg.ID, arg.Name, arg.Steps)
 	var i Job
 	err := row.Scan(
 		&i.ID,

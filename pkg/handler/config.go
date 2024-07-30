@@ -23,12 +23,11 @@ func GetConfigs(ctx *gin.Context) {
 		return
 	}
 	query := db.New(dbConn)
-	var errorConfigRetrieve error
 
 	logger.Info("getting all configs")
-	configs, errorConfigRetrieve := query.GetConfigsAll(context)
-	if errorConfigRetrieve != nil {
-		logger.Errorf("Error when retrieve config from database, error message is %s", errorConfigRetrieve)
+	configs, errorDBQuery := query.GetConfigsAll(context)
+	if errorDBQuery != nil {
+		logger.Errorf("Error when retrieve config from database, error message is %s", errorDBQuery)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{
 			"status": "failed",
 			"msg":    "Error when retrieve config from database",
@@ -77,9 +76,9 @@ func GetConfigbyID(ctx *gin.Context) {
 
 	idnumber, _ := strconv.Atoi(id)
 	logger.Infof("getting config with id %d", idnumber)
-	config, errorConfigRetrieve := query.GetConfigByID(context, int32(idnumber))
-	if errorConfigRetrieve != nil {
-		logger.Errorf("Error when retrieve config from database, error message is %s", errorConfigRetrieve)
+	config, errorDBQuery := query.GetConfigByID(context, int32(idnumber))
+	if errorDBQuery != nil {
+		logger.Errorf("Error when retrieve config from database, error message is %s", errorDBQuery)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{
 			"status": "failed",
 			"msg":    "Error when retrieve config from database",
@@ -120,9 +119,9 @@ func CreateConfig(ctx *gin.Context) {
 			return
 		}
 		query := db.New(dbConn)
-		configResp, error2 := query.CreateConfig(context, config)
-		if error2 != nil {
-			logger.Errorf("Error when storing config to database, error message is %s", error2)
+		configResp, errorDBQuery := query.CreateConfig(context, config)
+		if errorDBQuery != nil {
+			logger.Errorf("Error when storing config to database, error message is %s", errorDBQuery)
 			ctx.JSON(http.StatusServiceUnavailable, gin.H{
 				"status": "failed",
 				"msg":    "Error when retrieve config from database",
@@ -167,9 +166,9 @@ func DeleteConfig(ctx *gin.Context) {
 	}
 	idnumber, _ := strconv.Atoi(id)
 
-	config, error2 := query.DeleteConfigByID(context, int32(idnumber))
-	if error2 != nil {
-		logger.Errorf("Error when retrieve config from database, error message is %s", error2)
+	config, errorDBQuery := query.DeleteConfigByID(context, int32(idnumber))
+	if errorDBQuery != nil {
+		logger.Errorf("Error when retrieve config from database, error message is %s", errorDBQuery)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{
 			"status": "failed",
 			"msg":    "Error when retrieve config from database",
@@ -215,9 +214,9 @@ func UpdateConfig(ctx *gin.Context) {
 		idNumber, _ := strconv.Atoi(id)
 		config.ID = int32(idNumber)
 
-		configResp, error2 := query.UpdateConfigByID(context, config)
-		if error2 != nil {
-			logger.Errorf("Error when retrieve config from database, error message is %s", error2)
+		configResp, errorDBQuery := query.UpdateConfigByID(context, config)
+		if errorDBQuery != nil {
+			logger.Errorf("Error when retrieve config from database, error message is %s", errorDBQuery)
 			ctx.JSON(http.StatusServiceUnavailable, gin.H{
 				"status": "failed",
 				"msg":    "Error when retrieve config from database",

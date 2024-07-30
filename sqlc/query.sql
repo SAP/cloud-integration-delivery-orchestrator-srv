@@ -81,10 +81,10 @@ SELECT * FROM job;
 
 -- name: UpdateJobByID :one
 UPDATE job
-SET steps = $2
+SET name=$2,steps = $3
 WHERE id = $1 RETURNING *;
 
--- name: DeleteJob :one
+-- name: DeleteJobByID :one
 DELETE FROM job
 WHERE id = $1 RETURNING *;
 

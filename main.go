@@ -31,13 +31,17 @@ func main() {
 		v1Group.POST("/user", handler.CreateUsersHandler)
 
 		v1Group.GET("/config", handler.GetConfigs)
-
 		v1Group.POST("/config", handler.CreateConfig)
-		v1Group.POST("/config/:id", handler.UpdateConfig)
+		v1Group.PUT("/config/:id", handler.UpdateConfig)
 		v1Group.DELETE("/config/:id", handler.DeleteConfig)
 		v1Group.GET("/config/:id", handler.GetConfigbyID)
 
-		router.POST("/job", handler.CreateJob)
+		v1Group.GET("/job", handler.GetJobs)
+		v1Group.POST("/job", handler.CreateJob)
+		v1Group.DELETE("/job/:id", handler.DeleteJob)
+		v1Group.PUT("/job/:id", handler.UpdateJob)
+		v1Group.GET("/job/:id", handler.GetJobyID)
+
 	}
 
 	if err := router.Run(":9000"); err != nil {
