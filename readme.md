@@ -36,7 +36,11 @@
   - /api/v1/config/id, method `PUT`, update the config  with `id` using data like [cpi-update-config.json](./testData/cpi-update-config.json)
   - /api/v1/config/id, method `DELETE`, will delete the config `id`, return the deleted config id
 - job api
+  - /api/v1/job, method `GET`, get all jobs
   - /api/v1/job, method `POST`, create job using data like [create-job.json](testData/create-job.json)
+  - /api/v1/job/:id, method `GET`, get job with `id`
+  - /api/v1/job/:id, method `PUT`, update job using data like  [update.json](testData/update-job.json)
+  - - /api/v1/job/:id, method `DELETE`, delete job with `id¸`
 
 ## URL
 
