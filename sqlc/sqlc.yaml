@@ -14,7 +14,45 @@ sql:
         emit_db_tags: true
         emit_empty_slices: true
         overrides:
-          - db_type: "serial"
-            go_type: "int"
-          - db_type: "in32"
-            go_type: "int"
+          - go_type:
+              type: "int"
+            db_type: "serial"
+          - go_type:
+              type: "int"
+            db_type: "serial4"
+          - go_type:
+              type: "int"
+            db_type: "pg_catalog.serial4"
+          - go_type:
+              type: "int"
+            db_type: "integer"
+          - go_type:
+              type: "int"
+            db_type: "int"
+          - go_type:
+              type: "int"
+            db_type: "int4"
+          - go_type:
+              type: "int"
+            db_type: "pg_catalog.int4"
+          - go_type:
+              type: "time.Time"
+            db_type: "timestamptz"
+          - go_type:
+              type: "int"
+            column: step.templ_id
+          - go_type:
+              type: "string"
+            column: job.status
+          - go_type:
+              type: "string"
+            column: step.status
+          - go_type:
+              type: "string"
+            column: tmstmpl.status
+          - go_type:
+              type: "string"
+            column: cpitmpl.status
+          - go_type:
+              type: "string"
+            column: execution.status

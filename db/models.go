@@ -5,7 +5,7 @@
 package db
 
 import (
-	"github.com/jackc/pgx/v5/pgtype"
+	"time"
 )
 
 type Config struct {
@@ -19,20 +19,19 @@ type Config struct {
 }
 
 type Cpitmpl struct {
-	ID            int         `db:"id" json:"id"`
-	StepID        int32       `db:"step_id" json:"step_id"`
-	CpiConfigID   int32       `db:"cpi_config_id" json:"cpi_config_id"`
-	CpiPackageIds []string    `db:"cpi_package_ids" json:"cpi_package_ids"`
-	CpiIflowIds   []string    `db:"cpi_iflow_ids" json:"cpi_iflow_ids"`
-	CpiScriptIds  []string    `db:"cpi_script_ids" json:"cpi_script_ids"`
-	Status        pgtype.Text `db:"status" json:"status"`
+	ID            int      `db:"id" json:"id"`
+	StepID        int      `db:"step_id" json:"step_id"`
+	CpiConfigID   int      `db:"cpi_config_id" json:"cpi_config_id"`
+	CpiPackageIds []string `db:"cpi_package_ids" json:"cpi_package_ids"`
+	CpiIflowIds   []string `db:"cpi_iflow_ids" json:"cpi_iflow_ids"`
+	CpiScriptIds  []string `db:"cpi_script_ids" json:"cpi_script_ids"`
+	Status        string   `db:"status" json:"status"`
 }
 
 type Execution struct {
-	ID     int         `db:"id" json:"id"`
-	JobID  int32       `db:"job_id" json:"job_id"`
-	Status pgtype.Text `db:"status" json:"status"`
-	Logs   []byte      `db:"logs" json:"logs"`
+	ID     int    `db:"id" json:"id"`
+	JobID  int    `db:"job_id" json:"job_id"`
+	Status string `db:"status" json:"status"`
 }
 
 type Group struct {
@@ -41,36 +40,36 @@ type Group struct {
 }
 
 type Job struct {
-	ID     int         `db:"id" json:"id"`
-	Name   string      `db:"name" json:"name"`
-	Steps  []int32     `db:"steps" json:"steps"`
-	Status pgtype.Text `db:"status" json:"status"`
+	ID     int    `db:"id" json:"id"`
+	Name   string `db:"name" json:"name"`
+	Steps  []int  `db:"steps" json:"steps"`
+	Status string `db:"status" json:"status"`
 }
 
 type Step struct {
-	ID        int         `db:"id" json:"id"`
-	JobID     int32       `db:"job_id" json:"job_id"`
-	Name      string      `db:"name" json:"name"`
-	TemplType string      `db:"templ_type" json:"templ_type"`
-	TemplID   pgtype.Int4 `db:"templ_id" json:"templ_id"`
-	Status    pgtype.Text `db:"status" json:"status"`
+	ID        int    `db:"id" json:"id"`
+	JobID     int    `db:"job_id" json:"job_id"`
+	Name      string `db:"name" json:"name"`
+	TemplType string `db:"templ_type" json:"templ_type"`
+	TemplID   int    `db:"templ_id" json:"templ_id"`
+	Status    string `db:"status" json:"status"`
 }
 
 type Tmstmpl struct {
-	ID          int         `db:"id" json:"id"`
-	StepID      int32       `db:"step_id" json:"step_id"`
-	TmsConfigID int32       `db:"tms_config_id" json:"tms_config_id"`
-	TmsNodeID   int32       `db:"tms_node_id" json:"tms_node_id"`
-	TmsTrIds    []int32     `db:"tms_tr_ids" json:"tms_tr_ids"`
-	Status      pgtype.Text `db:"status" json:"status"`
+	ID          int    `db:"id" json:"id"`
+	StepID      int    `db:"step_id" json:"step_id"`
+	TmsConfigID int    `db:"tms_config_id" json:"tms_config_id"`
+	TmsNodeID   int    `db:"tms_node_id" json:"tms_node_id"`
+	TmsTrIds    []int  `db:"tms_tr_ids" json:"tms_tr_ids"`
+	Status      string `db:"status" json:"status"`
 }
 
 type User struct {
-	ID                int                `db:"id" json:"id"`
-	Username          string             `db:"username" json:"username"`
-	HashedPassword    string             `db:"hashed_password" json:"hashed_password"`
-	FullName          string             `db:"full_name" json:"full_name"`
-	Email             string             `db:"email" json:"email"`
-	PasswordChangedAt pgtype.Timestamptz `db:"password_changed_at" json:"password_changed_at"`
-	CreatedAt         pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	ID                int       `db:"id" json:"id"`
+	Username          string    `db:"username" json:"username"`
+	HashedPassword    string    `db:"hashed_password" json:"hashed_password"`
+	FullName          string    `db:"full_name" json:"full_name"`
+	Email             string    `db:"email" json:"email"`
+	PasswordChangedAt time.Time `db:"password_changed_at" json:"password_changed_at"`
+	CreatedAt         time.Time `db:"created_at" json:"created_at"`
 }

@@ -7,8 +7,6 @@ package db
 
 import (
 	"context"
-
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const createCPItmpl = `-- name: CreateCPItmpl :one
@@ -25,12 +23,12 @@ $1, $2, $3, $4, $5, $6
 `
 
 type CreateCPItmplParams struct {
-	StepID        int32       `db:"step_id" json:"step_id"`
-	CpiConfigID   int32       `db:"cpi_config_id" json:"cpi_config_id"`
-	CpiPackageIds []string    `db:"cpi_package_ids" json:"cpi_package_ids"`
-	CpiIflowIds   []string    `db:"cpi_iflow_ids" json:"cpi_iflow_ids"`
-	CpiScriptIds  []string    `db:"cpi_script_ids" json:"cpi_script_ids"`
-	Status        pgtype.Text `db:"status" json:"status"`
+	StepID        int      `db:"step_id" json:"step_id"`
+	CpiConfigID   int      `db:"cpi_config_id" json:"cpi_config_id"`
+	CpiPackageIds []string `db:"cpi_package_ids" json:"cpi_package_ids"`
+	CpiIflowIds   []string `db:"cpi_iflow_ids" json:"cpi_iflow_ids"`
+	CpiScriptIds  []string `db:"cpi_script_ids" json:"cpi_script_ids"`
+	Status        string   `db:"status" json:"status"`
 }
 
 func (q *Queries) CreateCPItmpl(ctx context.Context, arg CreateCPItmplParams) (Cpitmpl, error) {
@@ -124,8 +122,8 @@ INSERT INTO job (
 `
 
 type CreateJobParams struct {
-	Name  string  `db:"name" json:"name"`
-	Steps []int32 `db:"steps" json:"steps"`
+	Name  string `db:"name" json:"name"`
+	Steps []int  `db:"steps" json:"steps"`
 }
 
 func (q *Queries) CreateJob(ctx context.Context, arg CreateJobParams) (Job, error) {
@@ -152,10 +150,10 @@ INSERT  INTO step (
 `
 
 type CreateStepParams struct {
-	JobID     int32       `db:"job_id" json:"job_id"`
-	Name      string      `db:"name" json:"name"`
-	TemplType string      `db:"templ_type" json:"templ_type"`
-	Status    pgtype.Text `db:"status" json:"status"`
+	JobID     int    `db:"job_id" json:"job_id"`
+	Name      string `db:"name" json:"name"`
+	TemplType string `db:"templ_type" json:"templ_type"`
+	Status    string `db:"status" json:"status"`
 }
 
 func (q *Queries) CreateStep(ctx context.Context, arg CreateStepParams) (Step, error) {
@@ -190,11 +188,11 @@ $1, $2, $3, $4, $5
 `
 
 type CreateTMStmplParams struct {
-	StepID      int32       `db:"step_id" json:"step_id"`
-	TmsConfigID int32       `db:"tms_config_id" json:"tms_config_id"`
-	TmsNodeID   int32       `db:"tms_node_id" json:"tms_node_id"`
-	TmsTrIds    []int32     `db:"tms_tr_ids" json:"tms_tr_ids"`
-	Status      pgtype.Text `db:"status" json:"status"`
+	StepID      int    `db:"step_id" json:"step_id"`
+	TmsConfigID int    `db:"tms_config_id" json:"tms_config_id"`
+	TmsNodeID   int    `db:"tms_node_id" json:"tms_node_id"`
+	TmsTrIds    []int  `db:"tms_tr_ids" json:"tms_tr_ids"`
+	Status      string `db:"status" json:"status"`
 }
 
 func (q *Queries) CreateTMStmpl(ctx context.Context, arg CreateTMStmplParams) (Tmstmpl, error) {
@@ -260,7 +258,7 @@ DELETE FROM cpitmpl
 WHERE id = $1  RETURNING id, step_id, cpi_config_id, cpi_package_ids, cpi_iflow_ids, cpi_script_ids, status
 `
 
-func (q *Queries) DeleteCPItmpl(ctx context.Context, id int32) (Cpitmpl, error) {
+func (q *Queries) DeleteCPItmpl(ctx context.Context, id int) (Cpitmpl, error) {
 	row := q.db.QueryRow(ctx, deleteCPItmpl, id)
 	var i Cpitmpl
 	err := row.Scan(
@@ -280,7 +278,7 @@ DELETE  FROM config
 WHERE id = $1  RETURNING id, name, type, auth_url, api_url, auth_client_id, auth_client_secret
 `
 
-func (q *Queries) DeleteConfigByID(ctx context.Context, id int32) (Config, error) {
+func (q *Queries) DeleteConfigByID(ctx context.Context, id int) (Config, error) {
 	row := q.db.QueryRow(ctx, deleteConfigByID, id)
 	var i Config
 	err := row.Scan(
@@ -300,7 +298,7 @@ DELETE FROM job
 WHERE id = $1 RETURNING id, name, steps, status
 `
 
-func (q *Queries) DeleteJobByID(ctx context.Context, id int32) (Job, error) {
+func (q *Queries) DeleteJobByID(ctx context.Context, id int) (Job, error) {
 	row := q.db.QueryRow(ctx, deleteJobByID, id)
 	var i Job
 	err := row.Scan(
@@ -317,7 +315,7 @@ DELETE FROM step
 WHERE id=$1 RETURNING id, job_id, name, templ_type, templ_id, status
 `
 
-func (q *Queries) DeleteStepByID(ctx context.Context, id int32) (Step, error) {
+func (q *Queries) DeleteStepByID(ctx context.Context, id int) (Step, error) {
 	row := q.db.QueryRow(ctx, deleteStepByID, id)
 	var i Step
 	err := row.Scan(
@@ -336,7 +334,7 @@ DELETE FROM tmstmpl
 WHERE id = $1  RETURNING id, step_id, tms_config_id, tms_node_id, tms_tr_ids, status
 `
 
-func (q *Queries) DeleteTMStmpl(ctx context.Context, id int32) (Tmstmpl, error) {
+func (q *Queries) DeleteTMStmpl(ctx context.Context, id int) (Tmstmpl, error) {
 	row := q.db.QueryRow(ctx, deleteTMStmpl, id)
 	var i Tmstmpl
 	err := row.Scan(
@@ -387,7 +385,7 @@ SELECT id, step_id, cpi_config_id, cpi_package_ids, cpi_iflow_ids, cpi_script_id
 WHERE id =$1 LIMIT 1
 `
 
-func (q *Queries) GetCPItmplByID(ctx context.Context, id int32) (Cpitmpl, error) {
+func (q *Queries) GetCPItmplByID(ctx context.Context, id int) (Cpitmpl, error) {
 	row := q.db.QueryRow(ctx, getCPItmplByID, id)
 	var i Cpitmpl
 	err := row.Scan(
@@ -407,7 +405,7 @@ SELECT id, name, type, auth_url, api_url, auth_client_id, auth_client_secret FRO
 WHERE id = $1 LIMIT 1
 `
 
-func (q *Queries) GetConfigByID(ctx context.Context, id int32) (Config, error) {
+func (q *Queries) GetConfigByID(ctx context.Context, id int) (Config, error) {
 	row := q.db.QueryRow(ctx, getConfigByID, id)
 	var i Config
 	err := row.Scan(
@@ -529,7 +527,7 @@ SELECT id, name, steps, status FROM job
 WHERE id = $1 LIMIT 1
 `
 
-func (q *Queries) GetJobByID(ctx context.Context, id int32) (Job, error) {
+func (q *Queries) GetJobByID(ctx context.Context, id int) (Job, error) {
 	row := q.db.QueryRow(ctx, getJobByID, id)
 	var i Job
 	err := row.Scan(
@@ -575,7 +573,7 @@ SELECT id, job_id, name, templ_type, templ_id, status FROM step
 WHERE id =$1 LIMIT 1
 `
 
-func (q *Queries) GetStepByID(ctx context.Context, id int32) (Step, error) {
+func (q *Queries) GetStepByID(ctx context.Context, id int) (Step, error) {
 	row := q.db.QueryRow(ctx, getStepByID, id)
 	var i Step
 	err := row.Scan(
@@ -654,7 +652,7 @@ SELECT id, step_id, tms_config_id, tms_node_id, tms_tr_ids, status FROM tmstmpl
 WHERE id =$1 LIMIT 1
 `
 
-func (q *Queries) GetTMStmplByID(ctx context.Context, id int32) (Tmstmpl, error) {
+func (q *Queries) GetTMStmplByID(ctx context.Context, id int) (Tmstmpl, error) {
 	row := q.db.QueryRow(ctx, getTMStmplByID, id)
 	var i Tmstmpl
 	err := row.Scan(
@@ -728,13 +726,13 @@ WHERE id=$1 RETURNING id, step_id, cpi_config_id, cpi_package_ids, cpi_iflow_ids
 `
 
 type UpdateCPItmplParams struct {
-	ID            int32       `db:"id" json:"id"`
-	StepID        int32       `db:"step_id" json:"step_id"`
-	CpiConfigID   int32       `db:"cpi_config_id" json:"cpi_config_id"`
-	CpiPackageIds []string    `db:"cpi_package_ids" json:"cpi_package_ids"`
-	CpiIflowIds   []string    `db:"cpi_iflow_ids" json:"cpi_iflow_ids"`
-	CpiScriptIds  []string    `db:"cpi_script_ids" json:"cpi_script_ids"`
-	Status        pgtype.Text `db:"status" json:"status"`
+	ID            int      `db:"id" json:"id"`
+	StepID        int      `db:"step_id" json:"step_id"`
+	CpiConfigID   int      `db:"cpi_config_id" json:"cpi_config_id"`
+	CpiPackageIds []string `db:"cpi_package_ids" json:"cpi_package_ids"`
+	CpiIflowIds   []string `db:"cpi_iflow_ids" json:"cpi_iflow_ids"`
+	CpiScriptIds  []string `db:"cpi_script_ids" json:"cpi_script_ids"`
+	Status        string   `db:"status" json:"status"`
 }
 
 func (q *Queries) UpdateCPItmpl(ctx context.Context, arg UpdateCPItmplParams) (Cpitmpl, error) {
@@ -767,7 +765,7 @@ WHERE id = $1  RETURNING id, name, type, auth_url, api_url, auth_client_id, auth
 `
 
 type UpdateConfigByIDParams struct {
-	ID               int32  `db:"id" json:"id"`
+	ID               int    `db:"id" json:"id"`
 	Name             string `db:"name" json:"name"`
 	Type             string `db:"type" json:"type"`
 	AuthUrl          string `db:"auth_url" json:"auth_url"`
@@ -806,9 +804,9 @@ WHERE id = $1 RETURNING id, name, steps, status
 `
 
 type UpdateJobByIDParams struct {
-	ID    int32   `db:"id" json:"id"`
-	Name  string  `db:"name" json:"name"`
-	Steps []int32 `db:"steps" json:"steps"`
+	ID    int    `db:"id" json:"id"`
+	Name  string `db:"name" json:"name"`
+	Steps []int  `db:"steps" json:"steps"`
 }
 
 func (q *Queries) UpdateJobByID(ctx context.Context, arg UpdateJobByIDParams) (Job, error) {
@@ -830,11 +828,11 @@ WHERE id = $1 RETURNING id, job_id, name, templ_type, templ_id, status
 `
 
 type UpdateStepByIDParams struct {
-	ID      int32       `db:"id" json:"id"`
-	JobID   int32       `db:"job_id" json:"job_id"`
-	Name    string      `db:"name" json:"name"`
-	TemplID pgtype.Int4 `db:"templ_id" json:"templ_id"`
-	Status  pgtype.Text `db:"status" json:"status"`
+	ID      int    `db:"id" json:"id"`
+	JobID   int    `db:"job_id" json:"job_id"`
+	Name    string `db:"name" json:"name"`
+	TemplID int    `db:"templ_id" json:"templ_id"`
+	Status  string `db:"status" json:"status"`
 }
 
 func (q *Queries) UpdateStepByID(ctx context.Context, arg UpdateStepByIDParams) (Step, error) {
@@ -864,12 +862,12 @@ WHERE id=$1 RETURNING id, step_id, tms_config_id, tms_node_id, tms_tr_ids, statu
 `
 
 type UpdateTMStmplParams struct {
-	ID          int32       `db:"id" json:"id"`
-	StepID      int32       `db:"step_id" json:"step_id"`
-	TmsConfigID int32       `db:"tms_config_id" json:"tms_config_id"`
-	TmsNodeID   int32       `db:"tms_node_id" json:"tms_node_id"`
-	TmsTrIds    []int32     `db:"tms_tr_ids" json:"tms_tr_ids"`
-	Status      pgtype.Text `db:"status" json:"status"`
+	ID          int    `db:"id" json:"id"`
+	StepID      int    `db:"step_id" json:"step_id"`
+	TmsConfigID int    `db:"tms_config_id" json:"tms_config_id"`
+	TmsNodeID   int    `db:"tms_node_id" json:"tms_node_id"`
+	TmsTrIds    []int  `db:"tms_tr_ids" json:"tms_tr_ids"`
+	Status      string `db:"status" json:"status"`
 }
 
 func (q *Queries) UpdateTMStmpl(ctx context.Context, arg UpdateTMStmplParams) (Tmstmpl, error) {

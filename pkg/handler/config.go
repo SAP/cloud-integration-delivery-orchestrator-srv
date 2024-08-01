@@ -76,7 +76,7 @@ func GetConfigbyID(ctx *gin.Context) {
 
 	idnumber, _ := strconv.Atoi(id)
 	logger.Infof("getting config with id %d", idnumber)
-	config, errorDBQuery := query.GetConfigByID(context, int32(idnumber))
+	config, errorDBQuery := query.GetConfigByID(context, idnumber)
 	if errorDBQuery != nil {
 		logger.Errorf("Error when retrieve config from database, error message is %s", errorDBQuery)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{
@@ -166,7 +166,7 @@ func DeleteConfig(ctx *gin.Context) {
 	}
 	idnumber, _ := strconv.Atoi(id)
 
-	config, errorDBQuery := query.DeleteConfigByID(context, int32(idnumber))
+	config, errorDBQuery := query.DeleteConfigByID(context, idnumber)
 	if errorDBQuery != nil {
 		logger.Errorf("Error when retrieve config from database, error message is %s", errorDBQuery)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{
@@ -212,7 +212,7 @@ func UpdateConfig(ctx *gin.Context) {
 		}
 		query := db.New(dbConn)
 		idNumber, _ := strconv.Atoi(id)
-		config.ID = int32(idNumber)
+		config.ID = idNumber
 
 		configResp, errorDBQuery := query.UpdateConfigByID(context, config)
 		if errorDBQuery != nil {

@@ -62,6 +62,5 @@ CREATE TABLE "cpitmpl" (
 CREATE TABLE "execution" (
   "id" SERIAL PRIMARY KEY,
   "job_id" integer not NULL,
-  "status" varchar,
-  "logs" json
+  "status" varchar
 );

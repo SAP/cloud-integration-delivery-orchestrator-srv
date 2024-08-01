@@ -41,6 +41,7 @@ func main() {
 		v1Group.DELETE("/job/:id", handler.DeleteJob)
 		v1Group.PUT("/job/:id", handler.UpdateJob)
 		v1Group.GET("/job/:id", handler.GetJobyID)
+		v1Group.POST("/job/:id", handler.ExecuteJob)
 
 	}
 
