@@ -260,16 +260,16 @@ type ReqImportTransportRequests struct {
 }
 
 type ReqImportTransportResp struct {
-	ActionID      string `json:"actionId"`
+	ActionID      int    `json:"actionId"`
 	MonitoringURL string `json:"monitoringURL"`
 }
 
-func (t *TMSClient) ImportTransportRequest(nodeID string, transportRequestIDs []int) (string, error) {
+func (t *TMSClient) ImportTransportRequest(nodeID string, transportRequestIDs []int) (int, error) {
 	childCtx, cancel := context.WithCancel(t.context)
 	defer cancel()
 
 	fullURL := fmt.Sprintf("%s/nodes/%s/transportRequests/import", t.TmsApiURL, nodeID)
-	var actionID string
+	var actionID int
 	requestBodyContent := ReqImportTransportRequests{
 		TransportRequests: transportRequestIDs,
 	}
@@ -315,11 +315,11 @@ type ActionResultResp struct {
 	} `json:"transportRequests"`
 }
 
-func (t *TMSClient) GetActionResult(actionID string) (string, error) {
+func (t *TMSClient) GetActionResult(actionID int) (string, error) {
 
 	childCtx, cancel := context.WithCancel(t.context)
 	defer cancel()
-	fullURL := fmt.Sprintf("%s/actions/%s", t.TmsApiURL, actionID)
+	fullURL := fmt.Sprintf("%s/actions/%d", t.TmsApiURL, actionID)
 	respBodyContent, errReq := t.Get(childCtx, fullURL)
 
 	if errReq != nil {
@@ -363,11 +363,11 @@ type ActionLogResp struct {
 	} `json:"logs"`
 }
 
-func (t *TMSClient) GetActionResultLog(actionID string) (ActionLogResp, error) {
+func (t *TMSClient) GetActionResultLog(actionID int) (ActionLogResp, error) {
 
 	childCtx, cancel := context.WithCancel(t.context)
 	defer cancel()
-	fullURL := fmt.Sprintf("%s/actions/%s/logs", t.TmsApiURL, actionID)
+	fullURL := fmt.Sprintf("%s/actions/%d/logs", t.TmsApiURL, actionID)
 	respBodyContent, errReq := t.Get(childCtx, fullURL)
 
 	if errReq != nil {

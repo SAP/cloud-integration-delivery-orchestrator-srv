@@ -3,10 +3,12 @@ package handler
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 	"github.wdf.sap.corp/maco-mmt/maco-deploy/db"
+	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/tms"
 )
 
 func CreateJob(ctx *gin.Context) {
@@ -271,22 +273,90 @@ func ExecuteJob(ctx *gin.Context) {
 
 		stepConfig, errerrorDBQuery2 := query.GetStepByID(context, stepID)
 		if errerrorDBQuery2 != nil {
-			logger.Errorf("Error when getting step config from database, error message is %s", errorDBQuery)
+			logger.Errorf("Error when getting step config from database, error message is %s", errerrorDBQuery2)
 			ctx.JSON(http.StatusServiceUnavailable, gin.H{
 				"status": "failed",
 				"msg":    "Error when executing job",
 				"code":   http.StatusServiceUnavailable,
 			})
-			return
+			continue
 		}
-		if stepConfig.TemplType == "import"{
-			query.GetCPItmplByID(context, stepConfig.TemplID)
+		templType  := stepConfig.TemplType
+		templID := stepConfig.TemplID
+		if templType == "import"{
+			tmsTmpl, errorTMS:= query.GetTMStmplByID(context, stepConfig.TemplID)
+			if errorTMS !=nil {
+				logger.Errorf("Error when getting tms import config from database, error message is %s", errorTMS)
+				ctx.JSON(http.StatusServiceUnavailable, gin.H{
+					"status": "failed",
+					"msg":    "Error when getting tms import config from database",
+					"code":   http.StatusServiceUnavailable,
+				})
+				continue
+			}
+			logger.Infof("Starting to execute import task id %d", templID)
+			configResp, errorConfig := query.GetConfigByID(context, tmsTmpl.CpiConfigID)
+			if errorConfig !=nil {
+				logger.Errorf("Error when getting tms config from database, error message is %s", errorConfig)
+				ctx.JSON(http.StatusServiceUnavailable, gin.H{
+					"status": "failed",
+					"msg":    "Error when getting tms config from database",
+					"code":   http.StatusServiceUnavailable,
+				})
+				continue
+			}
+			tmsClient, errTmsClient:=tms.NewTMSClient(context,configResp.AuthClientID,configResp.AuthClientSecret,configResp.AuthUrl, configResp.ApiUrl)
+			if errTmsClient != nil {
+				logger.Errorf("Error when authenticating to tms , error message is %s", errTmsClient)
+				ctx.JSON(http.StatusServiceUnavailable, gin.H{
+					"status": "failed",
+					"msg":    "Error when authenticating to tms",
+					"code":   http.StatusServiceUnavailable,
+				})
+				continue
+			}
+
+			importActionID, errorImport := tmsClient.ImportTransportRequest(tmsTmpl.TmsNodeID, tmsTmpl.TmsTrIds)
+			if errorImport !=nil {
+				logger.Errorf("Error when initializing import transport requests, error message is %s", errTmsClient)
+				ctx.JSON(http.StatusServiceUnavailable, gin.H{
+					"status": "failed",
+					"msg":    "Error when initializing import transport requests",
+					"code":   http.StatusServiceUnavailable,
+				})
+				continue
+			}
+			status := "DEPLOYING"
+			for status == "DEPLOYING" {
+				status = tmsClient.GetActionResult(importActionID)
+				time.Sleep(15)
+			}
+
+			if status != "SUCCESS" {
+				actionResp, _:=tmsClient.GetActionResultLog(importActionID)
+				logger.Errorf("Error when  importting transport requests, error message is %s", errTmsClient)
+				ctx.JSON(http.StatusServiceUnavailable, gin.H{
+					"status": "failed",
+					"msg":    "Error when importing job",
+					"code":   http.StatusServiceUnavailable,
+					"result": actionResp,
+				})
+				continue
+			}
+			logger.Info("Transport requests %v is/are import successfully for job %s", tmsTmpl.TmsTrIds,id)
+			ctx.JSON(http.StatusOK, gin.H{
+				"status": "success",
+				"msg":    "imported all transport request successfully",
+				"code":   http.StatusOK,
+				"result": actionResp,
+			})
+
 		}
-		if stepConfig.TemplType == "deploy"{
+		if templType == "deploy"{
 
 
 		}
-		if stepConfig.TemplType == "undeploy"{
+		if templType == "undeploy"{
 	}
 
 }
