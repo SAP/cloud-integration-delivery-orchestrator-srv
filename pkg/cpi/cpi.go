@@ -303,7 +303,7 @@ func (c *CPIClient) GetIflow(iflowID string, iflowVersion string) (IflowItem, er
 	childCtx, cancel := context.WithCancel(c.context)
 	defer cancel()
 
-	fullURL := fmt.Sprintf("%s/IntegrationDesigntimeArtifacts(Id='%s',Version='%s')", iflowID, iflowVersion)
+	fullURL := fmt.Sprintf("%s/IntegrationDesigntimeArtifacts(Id='%s',Version='%s')", c.CpiApiURL, iflowID, iflowVersion)
 
 	logger.Infof("Starting to get iflow %s from cpi tenant %s\n", iflowID, fullURL)
 	request := clientRequest{
