@@ -258,7 +258,7 @@ func ExecuteJob(ctx *gin.Context) {
 	}
 	query := db.New(dbConn)
 	idNumber, _ := strconv.Atoi(id)
-	jobConfig, errorDBQuery := query.GetJobByID(context, int32(idNumber))
+	jobConfig, errorDBQuery := query.GetJobByID(context, idNumber)
 	if errorDBQuery != nil {
 		logger.Errorf("Error when getting job from database, error message is %s", errorDBQuery)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{
@@ -282,12 +282,13 @@ func ExecuteJob(ctx *gin.Context) {
 			})
 			continue
 		}
-		templType  := stepConfig.TemplType
+		templType := stepConfig.TemplType
 		templID := stepConfig.TemplID
 		switch templType {
-			case "import":{
-				tmsTmpl, errorTMS:= query.GetTMStmplByID(context, stepConfig.TemplID)
-				if errorTMS !=nil {
+		case "import":
+			{
+				tmsTmpl, errorTMS := query.GetTMStmplByID(context, stepConfig.TemplID)
+				if errorTMS != nil {
 					logger.Errorf("Error when getting tms import config from database, error message is %s", errorTMS)
 					ctx.JSON(http.StatusServiceUnavailable, gin.H{
 						"status": "failed",
@@ -297,9 +298,9 @@ func ExecuteJob(ctx *gin.Context) {
 					continue
 				}
 				logger.Infof("Starting to execute import task id %d", templID)
-				tmpConfig, errorTmsConfig := query.GetConfigByID(context, tmsTmpl.CpiConfigID)
-				if errorTmsConfig !=nil {
-					logger.Errorf("Error when getting tms config from database, error message is %s", errorConfig)
+				tmpConfig, errorTmsConfig := query.GetConfigByID(context, tmsTmpl.TmsConfigID)
+				if errorTmsConfig != nil {
+					logger.Errorf("Error when getting tms config from database, error message is %s", errorTmsConfig)
 					ctx.JSON(http.StatusServiceUnavailable, gin.H{
 						"status": "failed",
 						"msg":    "Error when getting tms config from database",
@@ -307,7 +308,7 @@ func ExecuteJob(ctx *gin.Context) {
 					})
 					continue
 				}
-				tmsClient, errTmsClient:=tms.NewTMSClient(context,tmpConfig.AuthClientID,tmpConfig.AuthClientSecret,tmpConfig.AuthUrl, tmpConfig.ApiUrl)
+				tmsClient, errTmsClient := tms.NewTMSClient(context, tmpConfig.AuthClientID, tmpConfig.AuthClientSecret, tmpConfig.AuthUrl, tmpConfig.ApiUrl)
 				if errTmsClient != nil {
 					logger.Errorf("Error when authenticating to tms , error message is %s", errTmsClient)
 					ctx.JSON(http.StatusServiceUnavailable, gin.H{
@@ -319,7 +320,7 @@ func ExecuteJob(ctx *gin.Context) {
 				}
 
 				importActionID, errorImport := tmsClient.ImportTransportRequest(tmsTmpl.TmsNodeID, tmsTmpl.TmsTrIds)
-				if errorImport !=nil {
+				if errorImport != nil {
 					logger.Errorf("Error when initializing import transport requests, error message is %s", errTmsClient)
 					ctx.JSON(http.StatusServiceUnavailable, gin.H{
 						"status": "failed",
@@ -330,12 +331,11 @@ func ExecuteJob(ctx *gin.Context) {
 				}
 				status := "DEPLOYING"
 				for status == "DEPLOYING" {
-					status = tmsClient.GetActionResult(importActionID)
+					status, _ = tmsClient.GetActionResult(importActionID)
 					time.Sleep(time.Second * 15)
 				}
-
+				actionResp, _ := tmsClient.GetActionResultLog(importActionID)
 				if status != "SUCCESS" {
-					actionResp, _:=tmsClient.GetActionResultLog(importActionID)
 					logger.Errorf("Error when  importting transport requests, error message is %s", errTmsClient)
 					ctx.JSON(http.StatusServiceUnavailable, gin.H{
 						"status": "failed",
@@ -345,7 +345,7 @@ func ExecuteJob(ctx *gin.Context) {
 					})
 					continue
 				}
-				logger.Info("Transport requests %v is/are import successfully for job %s", tmsTmpl.TmsTrIds,id)
+				logger.Info("Transport requests %v is/are import successfully for job %s", tmsTmpl.TmsTrIds, id)
 				ctx.JSON(http.StatusOK, gin.H{
 					"status": "success",
 					"msg":    "imported all transport request successfully",
@@ -354,10 +354,11 @@ func ExecuteJob(ctx *gin.Context) {
 				})
 
 			}
-			case "deploy": {
-				cpiTmpl, errorTMS:= query.GetCPItmplByID(context, stepConfig.TemplID)
-				if errorCPI !=nil {
-					logger.Errorf("Error when getting tms import config from database, error message is %s", errorCPI)
+		case "deploy":
+			{
+				cpiTmpl, errorTMS := query.GetCPItmplByID(context, stepConfig.TemplID)
+				if errorTMS != nil {
+					logger.Errorf("Error when getting tms import config from database, error message is %s", errorTMS)
 					ctx.JSON(http.StatusServiceUnavailable, gin.H{
 						"status": "failed",
 						"msg":    "Error when getting cpi import config from database",
@@ -368,8 +369,8 @@ func ExecuteJob(ctx *gin.Context) {
 				logger.Infof("Starting to execute deployment task id %d", templID)
 
 				cpiConfig, errorCpiConfig := query.GetConfigByID(context, cpiTmpl.CpiConfigID)
-				if errorCpiConfig !=nil {
-					logger.Errorf("Error when getting cpi config from database, error message is %s", errorConfig)
+				if errorCpiConfig != nil {
+					logger.Errorf("Error when getting cpi config from database, error message is %s", errorCpiConfig)
 					ctx.JSON(http.StatusServiceUnavailable, gin.H{
 						"status": "failed",
 						"msg":    "Error when getting cpi config from database",
@@ -378,9 +379,9 @@ func ExecuteJob(ctx *gin.Context) {
 					continue
 				}
 
-				cpiClient, errorCpiClient := cpi.NewCPIClient(context, cpiConfig.AuthClientID, cpiConfig.AuthClientSecret, cpiConfig.AuthUrl , cpiConfig.ApiUrl)
+				cpiClient, errorCpiClient := cpi.NewCPIClient(context, cpiConfig.AuthClientID, cpiConfig.AuthClientSecret, cpiConfig.AuthUrl, cpiConfig.ApiUrl)
 				if errorCpiClient != nil {
-					logger.Errorf("Error when authenticating to cpi tenant, error message is %s", errTmsClient)
+					logger.Errorf("Error when authenticating to cpi tenant, error message is %s", errorCpiClient)
 					ctx.JSON(http.StatusServiceUnavailable, gin.H{
 						"status": "failed",
 						"msg":    "Error when authenticating to cpi tenant",
@@ -388,15 +389,16 @@ func ExecuteJob(ctx *gin.Context) {
 					})
 					continue
 				}
-				cpiClient.DeployIflow(packageID string, iflowID string, iflowVersion string)
-
-
+				for _, iflow := range cpiTmpl.CpiIflowIds {
+					cpiClient.DeployIflow(iflow, "active")
+				}
 
 			}
-			case "undeploy":{
+		case "undeploy":
+			{
 
 			}
 		}
 
-
+	}
 }

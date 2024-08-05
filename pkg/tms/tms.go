@@ -231,11 +231,11 @@ type NodeTransportRequestsResp struct {
 	TransportRequests []NodeTransportRequest `json:"transportRequests"`
 }
 
-func (t *TMSClient) GetNodeTransportRequests(nodeID string) ([]NodeTransportRequest, error) {
+func (t *TMSClient) GetNodeTransportRequests(nodeID int) ([]NodeTransportRequest, error) {
 	childCtx, cancel := context.WithCancel(t.context)
 	defer cancel()
 
-	fullURL := fmt.Sprintf("%s/nodes/%s/transportRequests?status=in,re,er,fa", t.TmsApiURL, nodeID)
+	fullURL := fmt.Sprintf("%s/nodes/%d/transportRequests?status=in,re,er,fa", t.TmsApiURL, nodeID)
 	logger.Infof("Starting to get tranport requests for node %s from  %s\n", nodeID, fullURL)
 
 	request := clientRequest{
@@ -269,11 +269,11 @@ type ReqImportTransportResp struct {
 	MonitoringURL string `json:"monitoringURL"`
 }
 
-func (t *TMSClient) ImportTransportRequest(nodeID string, transportRequestIDs []int) (int, error) {
+func (t *TMSClient) ImportTransportRequest(nodeID int, transportRequestIDs []int) (int, error) {
 	childCtx, cancel := context.WithCancel(t.context)
 	defer cancel()
 
-	fullURL := fmt.Sprintf("%s/nodes/%s/transportRequests/import", t.TmsApiURL, nodeID)
+	fullURL := fmt.Sprintf("%s/nodes/%d/transportRequests/import", t.TmsApiURL, nodeID)
 	var actionID int
 	requestBodyContent := ReqImportTransportRequests{
 		TransportRequests: transportRequestIDs,
