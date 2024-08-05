@@ -73,7 +73,13 @@ type clientRequest struct {
 func (t *TMSClient) Do(request clientRequest) ([]byte, error) {
 	childCtx, cancel := context.WithCancel(request.ctx)
 	defer cancel()
-	req, _ := http.NewRequestWithContext(childCtx, request.method, request.apiURL, request.requestBody)
+
+	var req *http.Request
+	if request.requestBody.String() == "<nil>" {
+		req, _ = http.NewRequestWithContext(childCtx, request.method, request.apiURL, nil)
+	} else {
+		req, _ = http.NewRequestWithContext(childCtx, request.method, request.apiURL, request.requestBody)
+	}
 	tokenHeaderVal := fmt.Sprintf("Bearer %s", t.AccessToken)
 	req.Header.Add("Authorization", tokenHeaderVal)
 	req.Header.Add("Accept", "application/json")
