@@ -1,6 +1,7 @@
 package cpi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -61,10 +62,17 @@ func NewCPIClient(ctx context.Context, clientID string, clientSecret string, cpi
 	}, nil
 }
 
-func (c *CPIClient) Do(ctx context.Context, apiURL string, method string) ([]byte, error) {
-	childCtx, cancel := context.WithCancel(ctx)
+type clientRequest struct {
+	ctx         context.Context
+	apiURL      string
+	method      string
+	requestBody *bytes.Buffer
+}
+
+func (c *CPIClient) Do(request clientRequest) ([]byte, error) {
+	childCtx, cancel := context.WithCancel(request.ctx)
 	defer cancel()
-	req, _ := http.NewRequestWithContext(childCtx, method, apiURL, nil)
+	req, _ := http.NewRequestWithContext(childCtx, request.method, request.apiURL, request.requestBody)
 	tokenHeaderVal := fmt.Sprintf("Bearer %s", c.AccessToken)
 	req.Header.Add("Authorization", tokenHeaderVal)
 	req.Header.Add("Accept", "application/json")
@@ -116,7 +124,12 @@ func (c *CPIClient) GetPackages() ([]CPIPackage, error) {
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/IntegrationPackages", c.CpiApiURL)
 	logger.Infof("Starting to get all packages from cpi tenant %s\n", fullURL)
-	respBodyContent, errReq := c.Do(childCtx, fullURL, http.MethodGet)
+	request := clientRequest{
+		ctx:    childCtx,
+		method: http.MethodGet,
+		apiURL: fullURL,
+	}
+	respBodyContent, errReq := c.Do(request)
 	if errReq != nil {
 		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
 		return []CPIPackage{}, errReq
@@ -142,8 +155,12 @@ func (c *CPIClient) GetPackage(packageID string) (CPIPackage, error) {
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/IntegrationPackages('%s')", c.CpiApiURL, packageID)
 	logger.Infof("Starting to get packages %s from cpi tenant %s\n", packageID, fullURL)
-
-	respBodyContent, errReq := c.Do(childCtx, fullURL, http.MethodGet)
+	request := clientRequest{
+		ctx:    childCtx,
+		method: http.MethodGet,
+		apiURL: fullURL,
+	}
+	respBodyContent, errReq := c.Do(request)
 	if errReq != nil {
 		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
 		return CPIPackage{}, errReq
@@ -156,6 +173,48 @@ func (c *CPIClient) GetPackage(packageID string) (CPIPackage, error) {
 		return CPIPackage{}, jsonUnmarshalError
 	}
 
+	return packcageResp.D, nil
+}
+
+type importPackageRequest struct {
+	ID                string `json:"Id"`
+	Name              string `json:"Name"`
+	Description       string `json:"Description"`
+	ShortText         string `json:"ShortText"`
+	Version           string `json:"Version"`
+	SupportedPlatform string `json:"SupportedPlatform"`
+	Products          string `json:"Products"`
+	Keywords          string `json:"Keywords"`
+	Countries         string `json:"Countries"`
+	Industries        string `json:"Industries"`
+	LineOfBusiness    string `json:"LineOfBusiness"`
+}
+
+func (c *CPIClient) ImportPackage(cpiPackage importPackageRequest) (CPIPackage, error) {
+	childCtx, cancel := context.WithCancel(c.context)
+	defer cancel()
+	fullURL := fmt.Sprintf("%s/IntegrationPackages", c.CpiApiURL)
+	logger.Infof("Starting to import package to cpi tenant %s\n", fullURL)
+	requestBodyJson, _ := json.Marshal(cpiPackage)
+	request := clientRequest{
+		ctx:         childCtx,
+		method:      http.MethodPost,
+		apiURL:      fullURL,
+		requestBody: bytes.NewBuffer(requestBodyJson),
+	}
+	respBodyContent, errReq := c.Do(request)
+	if errReq != nil {
+		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
+		return CPIPackage{}, errReq
+	}
+
+	var packcageResp PackageResponse
+	jsonUnmarshalError := json.Unmarshal(respBodyContent, &packcageResp)
+
+	if jsonUnmarshalError != nil {
+		logger.Errorf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
+		return CPIPackage{}, jsonUnmarshalError
+	}
 	return packcageResp.D, nil
 }
 
@@ -178,24 +237,28 @@ type IflowItem struct {
 	} `json:"Resources"`
 }
 
-type IflowsResp struct {
+type PackageIflowsResp struct {
 	D struct {
 		Results []IflowItem `json:"results"`
 	} `json:"d"`
 }
 
-func (c *CPIClient) GetIflows(packageID string) ([]IflowItem, error) {
+func (c *CPIClient) GetPackageIflows(packageID string) ([]IflowItem, error) {
 	childCtx, cancel := context.WithCancel(c.context)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/IntegrationPackages('%s')/IntegrationDesigntimeArtifacts", c.CpiApiURL, packageID)
 	logger.Infof("Starting to get all iflows in package %s from cpi tenant %s\n", packageID, fullURL)
-
-	respBodyContent, errReq := c.Do(childCtx, fullURL, http.MethodGet)
+	request := clientRequest{
+		ctx:    childCtx,
+		method: http.MethodGet,
+		apiURL: fullURL,
+	}
+	respBodyContent, errReq := c.Do(request)
 	if errReq != nil {
 		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
 		return []IflowItem{}, errReq
 	}
-	var iflowsResp IflowsResp
+	var iflowsResp PackageIflowsResp
 	jsonUnmarshalError := json.Unmarshal(respBodyContent, &iflowsResp)
 
 	if jsonUnmarshalError != nil {
@@ -210,13 +273,17 @@ type IflowResp struct {
 	D IflowItem `json:"d"`
 }
 
-func (c *CPIClient) GetIflow(packageID string, iflowID string, iflowVersion string) (IflowItem, error) {
+func (c *CPIClient) GetPackageIflow(packageID string, iflowID string, iflowVersion string) (IflowItem, error) {
 	childCtx, cancel := context.WithCancel(c.context)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/IntegrationPackages('%s')/IntegrationDesigntimeArtifacts(Id='%s',Version='%s')", c.CpiApiURL, packageID, iflowID, iflowVersion)
 	logger.Infof("Starting to get iflow %s in package %s from cpi tenant %s\n", iflowID, packageID, fullURL)
-
-	respBodyContent, errReq := c.Do(childCtx, fullURL, http.MethodGet)
+	request := clientRequest{
+		ctx:    childCtx,
+		method: http.MethodGet,
+		apiURL: fullURL,
+	}
+	respBodyContent, errReq := c.Do(request)
 	if errReq != nil {
 		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
 		return IflowItem{}, errReq
@@ -232,14 +299,46 @@ func (c *CPIClient) GetIflow(packageID string, iflowID string, iflowVersion stri
 	return iflowResp.D, nil
 }
 
-func (c *CPIClient) DeployIflow(packageID string, iflowID string, iflowVersion string) (string, error) {
+func (c *CPIClient) GetIflow(iflowID string, iflowVersion string) (IflowItem, error) {
+	childCtx, cancel := context.WithCancel(c.context)
+	defer cancel()
+
+	fullURL := fmt.Sprintf("%s/IntegrationDesigntimeArtifacts(Id='%s',Version='%s')", iflowID, iflowVersion)
+
+	logger.Infof("Starting to get iflow %s from cpi tenant %s\n", iflowID, fullURL)
+	request := clientRequest{
+		ctx:    childCtx,
+		method: http.MethodGet,
+		apiURL: fullURL,
+	}
+	respBodyContent, errReq := c.Do(request)
+	if errReq != nil {
+		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
+		return IflowItem{}, errReq
+	}
+	var iflowResp IflowResp
+	jsonUnmarshalError := json.Unmarshal(respBodyContent, &iflowResp)
+
+	if jsonUnmarshalError != nil {
+		logger.Errorf("Error when unmarshal from json, error message %s\n", jsonUnmarshalError)
+		return IflowItem{}, jsonUnmarshalError
+	}
+
+	return iflowResp.D, nil
+}
+
+func (c *CPIClient) DeployIflow(iflowID string, iflowVersion string) (string, error) {
 	childCtx, cancel := context.WithCancel(c.context)
 	defer cancel()
 	var taskID string
 	fullURL := fmt.Sprintf("%s/DeployIntegrationDesigntimeArtifact?Id='%s'&Version='%s'", c.CpiApiURL, iflowID, iflowVersion)
-	logger.Infof("Starting to deploy iflow %s  in package %s on tenant %s\n", iflowID, packageID, fullURL)
-
-	respBodyContent, errReq := c.Do(childCtx, fullURL, http.MethodPost)
+	logger.Infof("Starting to deploy iflow %s  on tenant %s\n", iflowID, fullURL)
+	request := clientRequest{
+		ctx:    childCtx,
+		method: http.MethodPost,
+		apiURL: fullURL,
+	}
+	respBodyContent, errReq := c.Do(request)
 	if errReq != nil {
 		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
 		return taskID, errReq
@@ -265,8 +364,12 @@ func (c *CPIClient) CheckDeployStatus(taskID string) (string, error) {
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/BuildAndDeployStatus(TaskId='%s')", c.CpiApiURL, taskID)
 	logger.Infof("Checking the deploy status for task id  %s on tenant %s\n", taskID, fullURL)
-
-	respBodyContent, errReq := c.Do(childCtx, fullURL, http.MethodGet)
+	request := clientRequest{
+		ctx:    childCtx,
+		method: http.MethodGet,
+		apiURL: fullURL,
+	}
+	respBodyContent, errReq := c.Do(request)
 	if errReq != nil {
 		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
 		return "", errReq
@@ -283,13 +386,17 @@ func (c *CPIClient) CheckDeployStatus(taskID string) (string, error) {
 
 }
 
-func (c *CPIClient) DeleteIflow(packageID string, iflowID string, iflowVersion string) error {
+func (c *CPIClient) DeleteIflow(iflowID string, iflowVersion string) error {
 	childCtx, cancel := context.WithCancel(c.context)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/IntegrationDesigntimeArtifacts(Id='%s',Version='%s')", c.CpiApiURL, iflowID, iflowVersion)
-	logger.Infof("Starting to delete iflow %s in package %s on tenant %s\n", iflowID, packageID, fullURL)
-
-	_, errReq := c.Do(childCtx, fullURL, http.MethodDelete)
+	logger.Infof("Starting to delete iflow %s on tenant %s\n", iflowID, fullURL)
+	request := clientRequest{
+		ctx:    childCtx,
+		method: http.MethodDelete,
+		apiURL: fullURL,
+	}
+	_, errReq := c.Do(request)
 	if errReq != nil {
 		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
 		return errReq
@@ -313,13 +420,17 @@ type ScriptCollectionsResp struct {
 	} `json:"d"`
 }
 
-func (c *CPIClient) GetScripts(packageID string) ([]ScriptCollectionItem, error) {
+func (c *CPIClient) GetPackageScripts(packageID string) ([]ScriptCollectionItem, error) {
 	childCtx, cancel := context.WithCancel(c.context)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/IntegrationPackages('%s')/IntegrationDesigntimeArtifacts", c.CpiApiURL, packageID)
 	logger.Infof("Starting to get all iflows in package %s from cpi tenant %s\n", packageID, fullURL)
-
-	respBodyContent, errReq := c.Do(childCtx, fullURL, http.MethodGet)
+	request := clientRequest{
+		ctx:    childCtx,
+		method: http.MethodGet,
+		apiURL: fullURL,
+	}
+	respBodyContent, errReq := c.Do(request)
 	if errReq != nil {
 		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
 		return []ScriptCollectionItem{}, errReq
@@ -339,13 +450,17 @@ type ScriptCollectionResp struct {
 	D ScriptCollectionItem `json:"d"`
 }
 
-func (c *CPIClient) GetScript(scriptCollectionID string, scriptCollectionVersion string) (ScriptCollectionItem, error) {
+func (c *CPIClient) GetPackageScript(scriptCollectionID string, scriptCollectionVersion string) (ScriptCollectionItem, error) {
 	childCtx, cancel := context.WithCancel(c.context)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/ScriptCollectionDesigntimeArtifacts(Id='%s',Version='%s')", c.CpiApiURL, scriptCollectionID, scriptCollectionVersion)
 	logger.Infof("Starting to get script collection %s in package from cpi tenant %s\n", scriptCollectionID, fullURL)
-
-	respBodyContent, errReq := c.Do(childCtx, fullURL, http.MethodGet)
+	request := clientRequest{
+		ctx:    childCtx,
+		method: http.MethodGet,
+		apiURL: fullURL,
+	}
+	respBodyContent, errReq := c.Do(request)
 	if errReq != nil {
 		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
 		return ScriptCollectionItem{}, errReq
@@ -361,14 +476,18 @@ func (c *CPIClient) GetScript(scriptCollectionID string, scriptCollectionVersion
 	return scriptCollectionResp.D, nil
 }
 
-func (c *CPIClient) DeployScriptCollection(packageID string, scriptCollectionID string, scriptCollectionVersion string) (string, error) {
+func (c *CPIClient) DeployScriptCollection(scriptCollectionID string, scriptCollectionVersion string) (string, error) {
 	childCtx, cancel := context.WithCancel(c.context)
 	defer cancel()
 	var taskID string
 	fullURL := fmt.Sprintf("%s/DeployScriptCollectionDesigntimeArtifact(Id='%s',Version='%s')", c.CpiApiURL, scriptCollectionID, scriptCollectionVersion)
 	logger.Infof("Starting to deploy script collection %s in package from cpi tenant %s\n", scriptCollectionID, fullURL)
-
-	respBodyContent, errReq := c.Do(childCtx, fullURL, http.MethodPost)
+	request := clientRequest{
+		ctx:    childCtx,
+		method: http.MethodPost,
+		apiURL: fullURL,
+	}
+	respBodyContent, errReq := c.Do(request)
 	if errReq != nil {
 		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
 		return "", errReq
@@ -377,13 +496,17 @@ func (c *CPIClient) DeployScriptCollection(packageID string, scriptCollectionID 
 	return taskID, nil
 }
 
-func (c *CPIClient) DeleteScriptCollection(packageID string, scriptCollectionID string, scriptCollectionVersion string) error {
+func (c *CPIClient) DeleteScriptCollection(scriptCollectionID string, scriptCollectionVersion string) error {
 	childCtx, cancel := context.WithCancel(c.context)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/ScriptCollectionDesigntimeArtifacts(Id='%s',Version='%s')", c.CpiApiURL, scriptCollectionID, scriptCollectionVersion)
-	logger.Infof("Starting to delete script collection %s in package %s on tenant %s\n", scriptCollectionID, packageID, fullURL)
-
-	_, errReq := c.Do(childCtx, fullURL, http.MethodDelete)
+	logger.Infof("Starting to delete script collection %s on tenant %s\n", scriptCollectionID, fullURL)
+	request := clientRequest{
+		ctx:    childCtx,
+		method: http.MethodDelete,
+		apiURL: fullURL,
+	}
+	_, errReq := c.Do(request)
 	if errReq != nil {
 		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
 		return errReq

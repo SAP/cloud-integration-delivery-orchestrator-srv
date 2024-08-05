@@ -63,34 +63,17 @@ func NewTMSClient(ctx context.Context, clientID string, clientSecret string, tms
 	}, nil
 }
 
-func (t *TMSClient) Get(ctx context.Context, apiURL string) ([]byte, error) {
-	childCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	req, _ := http.NewRequestWithContext(childCtx, http.MethodGet, apiURL, nil)
-	tokenHeaderVal := fmt.Sprintf("Bearer %s", t.AccessToken)
-	req.Header.Add("Authorization", tokenHeaderVal)
-	req.Header.Add("Accept", "application/json")
-	resp, errReq := t.HTTPClient.Do(req)
-
-	if errReq != nil {
-		logger.Errorf("Error when getting response from api, the error message is %s", errReq)
-		return []byte{}, errReq
-	}
-	defer resp.Body.Close()
-
-	respBodyContent, errIOreader := io.ReadAll(resp.Body)
-
-	if errIOreader != nil {
-		logger.Errorf("Error when getting  content from response, the error message is %s", errReq)
-		return []byte{}, errIOreader
-	}
-	return respBodyContent, nil
+type clientRequest struct {
+	ctx         context.Context
+	apiURL      string
+	method      string
+	requestBody *bytes.Buffer
 }
 
-func (t *TMSClient) Post(ctx context.Context, apiURL string, requestBody *bytes.Buffer) ([]byte, error) {
-	childCtx, cancel := context.WithCancel(t.context)
+func (t *TMSClient) Do(request clientRequest) ([]byte, error) {
+	childCtx, cancel := context.WithCancel(request.ctx)
 	defer cancel()
-	req, _ := http.NewRequestWithContext(childCtx, http.MethodPost, apiURL, requestBody)
+	req, _ := http.NewRequestWithContext(childCtx, request.method, request.apiURL, request.requestBody)
 	tokenHeaderVal := fmt.Sprintf("Bearer %s", t.AccessToken)
 	req.Header.Add("Authorization", tokenHeaderVal)
 	req.Header.Add("Accept", "application/json")
@@ -136,11 +119,16 @@ type TMSNodesResp struct {
 }
 
 func (t *TMSClient) GetNodes() ([]TMSNode, error) {
-	ctx, cancel := context.WithCancel(t.context)
+	childCtx, cancel := context.WithCancel(t.context)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/nodes", t.TmsApiURL)
 	logger.Infof("Starting to get all tms nodes from %s\n", fullURL)
-	respBodyContent, errReq := t.Get(ctx, fullURL)
+	request := clientRequest{
+		ctx:    childCtx,
+		apiURL: fullURL,
+		method: http.MethodGet,
+	}
+	respBodyContent, errReq := t.Do(request)
 	if errReq != nil {
 		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
 		return []TMSNode{}, errReq
@@ -180,7 +168,12 @@ func (t *TMSClient) GetNode(nodeID int) (TMSNode, error) {
 
 	fullURL := fmt.Sprintf("%s/nodes/%d", t.TmsApiURL, nodeID)
 	logger.Infof("Starting to get tms node from  %s\n", fullURL)
-	respBodyContent, errReq := t.Get(childCtx, fullURL)
+	request := clientRequest{
+		ctx:    childCtx,
+		apiURL: fullURL,
+		method: http.MethodGet,
+	}
+	respBodyContent, errReq := t.Do(request)
 	if errReq != nil {
 		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
 		return TMSNode{}, errReq
@@ -238,7 +231,13 @@ func (t *TMSClient) GetNodeTransportRequests(nodeID string) ([]NodeTransportRequ
 
 	fullURL := fmt.Sprintf("%s/nodes/%s/transportRequests?status=in,re,er,fa", t.TmsApiURL, nodeID)
 	logger.Infof("Starting to get tranport requests for node %s from  %s\n", nodeID, fullURL)
-	respBodyContent, errReq := t.Get(childCtx, fullURL)
+
+	request := clientRequest{
+		ctx:    childCtx,
+		apiURL: fullURL,
+		method: http.MethodGet,
+	}
+	respBodyContent, errReq := t.Do(request)
 	if errReq != nil {
 		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
 		return []NodeTransportRequest{}, errReq
@@ -275,9 +274,16 @@ func (t *TMSClient) ImportTransportRequest(nodeID string, transportRequestIDs []
 	}
 
 	requestBodyJson, _ := json.Marshal(requestBodyContent)
-
 	logger.Infof("Starting to get all packages from cpi tenant %s\n", fullURL)
-	respBodyContent, errReq := t.Post(childCtx, fullURL, bytes.NewBuffer(requestBodyJson))
+
+	request := clientRequest{
+		ctx:         childCtx,
+		apiURL:      fullURL,
+		method:      http.MethodPost,
+		requestBody: bytes.NewBuffer(requestBodyJson),
+	}
+	respBodyContent, errReq := t.Do(request)
+
 	if errReq != nil {
 		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
 		return actionID, errReq
@@ -320,8 +326,12 @@ func (t *TMSClient) GetActionResult(actionID int) (string, error) {
 	childCtx, cancel := context.WithCancel(t.context)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/actions/%d", t.TmsApiURL, actionID)
-	respBodyContent, errReq := t.Get(childCtx, fullURL)
-
+	request := clientRequest{
+		ctx:    childCtx,
+		apiURL: fullURL,
+		method: http.MethodGet,
+	}
+	respBodyContent, errReq := t.Do(request)
 	if errReq != nil {
 		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
 		return "", errReq
@@ -368,8 +378,12 @@ func (t *TMSClient) GetActionResultLog(actionID int) (ActionLogResp, error) {
 	childCtx, cancel := context.WithCancel(t.context)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/actions/%d/logs", t.TmsApiURL, actionID)
-	respBodyContent, errReq := t.Get(childCtx, fullURL)
-
+	request := clientRequest{
+		ctx:    childCtx,
+		apiURL: fullURL,
+		method: http.MethodGet,
+	}
+	respBodyContent, errReq := t.Do(request)
 	if errReq != nil {
 		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
 		return ActionLogResp{}, errReq
