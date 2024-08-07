@@ -43,6 +43,9 @@ func main() {
 		v1Group.GET("/job/:id", handler.GetJobyID)
 		v1Group.POST("/job/:id", handler.ExecuteJob)
 
+		v1Group.GET("/tanant/packages", handler.GetPackagesHandler)             //get all packages under a tenant
+		v1Group.GET("/tenant/packages/iflows", handler.GetPackageIflowsHandler) // get all iflows under a package
+
 	}
 
 	if err := router.Run(":9000"); err != nil {

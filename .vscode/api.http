@@ -1,0 +1,23 @@
+###
+Get http://127.0.0.1:9000
+
+###
+Get http://127.0.0.1:9000/api/v1/config
+
+###
+POST http://127.0.0.1:9000/api/v1/config
+
+{
+    "name": "CPI dev",
+    "type":"CPI",
+    "auth_url":"https://mmt-test-hfc.authentication.eu10.hana.ondemand.com/oauth/token",
+    "api_url":"https://mmt-test-hfc.it-cpi026.cfapps.eu10-002.hana.ondemand.com",
+    "auth_client_id":"sb-8f42f318-747c-4aa1-9da7-d54287569114!b443441|it!b410603",
+    "auth_client_secret":"REDACTED"
+}
+
+###
+GET http://127.0.0.1:9000/api/v1/tanant/packages?tenant=2
+
+###
+GET http://127.0.0.1:9000/api/v1/tenant/packages/iflows?tenant=2&package=SAPMaCoforUtilitiesEmailProcessingV4

@@ -1,0 +1,8 @@
+DROP table IF EXISTS users;
+DROP table IF EXISTS groups;
+DROP table IF EXISTS config;
+DROP table IF EXISTS job;
+DROP table IF EXISTS step;
+DROP table IF EXISTS tmstmpl;
+DROP table IF EXISTS cpitmpl;
+DROP table IF EXISTS execution;

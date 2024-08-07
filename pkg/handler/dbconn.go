@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/http"
 	"os"
 
+	"github.com/gin-gonic/gin"
 	"github.com/golang-migrate/migrate/v4"
 	pgxmig "github.com/golang-migrate/migrate/v4/database/pgx/v5"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
@@ -54,17 +56,22 @@ type DBClient struct {
 	Query  *db.Queries
 }
 
-func NewDBClient(ctx context.Context) (DBClient, error) {
+func NewDBClient(ctx *gin.Context) DBClient {
 	dbConn, errDBconn := pgx.Connect(ctx, dbSource)
 	if errDBconn != nil {
-		logger.Fatal("error connecting to db,", errDBconn)
+		logger.Errorf("error when connecting to the database, please contact your system administrator, error message is %s", errDBconn)
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{
+			"status": "failed",
+			"msg":    "error when connecting to the database, please contact your system administrator",
+			"code":   http.StatusServiceUnavailable,
+		})
 	}
 
 	return DBClient{
 		ctx:    ctx,
 		DBConn: dbConn,
 		Query:  db.New(dbConn),
-	}, nil
+	}
 }
 
 func (d *DBClient) dbmigrate() {

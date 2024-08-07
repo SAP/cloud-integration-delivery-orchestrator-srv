@@ -429,7 +429,7 @@ type ScriptCollectionsResp struct {
 func (c *CPIClient) GetPackageScripts(packageID string) ([]ScriptCollectionItem, error) {
 	childCtx, cancel := context.WithCancel(c.context)
 	defer cancel()
-	fullURL := fmt.Sprintf("%s/IntegrationPackages('%s')/IntegrationDesigntimeArtifacts", c.CpiApiURL, packageID)
+	fullURL := fmt.Sprintf("%s/IntegrationPackages('%s')/ScriptCollectionDesigntimeArtifacts", c.CpiApiURL, packageID)
 	logger.Infof("Starting to get all iflows in package %s from cpi tenant %s\n", packageID, fullURL)
 	request := clientRequest{
 		ctx:    childCtx,
