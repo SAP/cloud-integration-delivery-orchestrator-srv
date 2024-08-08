@@ -329,6 +329,38 @@ func (q *Queries) DeleteStepByID(ctx context.Context, id int) (Step, error) {
 	return i, err
 }
 
+const deleteStepByJobID = `-- name: DeleteStepByJobID :many
+DELETE FROM step
+WHERE job_id=$1 RETURNING id, job_id, name, templ_type, templ_id, status
+`
+
+func (q *Queries) DeleteStepByJobID(ctx context.Context, jobID int) ([]Step, error) {
+	rows, err := q.db.Query(ctx, deleteStepByJobID, jobID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Step{}
+	for rows.Next() {
+		var i Step
+		if err := rows.Scan(
+			&i.ID,
+			&i.JobID,
+			&i.Name,
+			&i.TemplType,
+			&i.TemplID,
+			&i.Status,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const deleteTMStmpl = `-- name: DeleteTMStmpl :one
 DELETE FROM tmstmpl
 WHERE id = $1  RETURNING id, step_id, tms_config_id, tms_node_id, tms_tr_ids, status
@@ -604,6 +636,38 @@ func (q *Queries) GetSteps(ctx context.Context) ([]Job, error) {
 			&i.ID,
 			&i.Name,
 			&i.Steps,
+			&i.Status,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getStepsByJobID = `-- name: GetStepsByJobID :many
+SELECT id, job_id, name, templ_type, templ_id, status FROM step
+WHERE job_id =$1
+`
+
+func (q *Queries) GetStepsByJobID(ctx context.Context, jobID int) ([]Step, error) {
+	rows, err := q.db.Query(ctx, getStepsByJobID, jobID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Step{}
+	for rows.Next() {
+		var i Step
+		if err := rows.Scan(
+			&i.ID,
+			&i.JobID,
+			&i.Name,
+			&i.TemplType,
+			&i.TemplID,
 			&i.Status,
 		); err != nil {
 			return nil, err

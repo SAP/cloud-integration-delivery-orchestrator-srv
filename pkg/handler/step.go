@@ -280,4 +280,49 @@ func DeleteStepByID(ctx *gin.Context) {
 	})
 }
 func DeleteStepByJobID(ctx *gin.Context) {
+	context := ctx.Request.Context()
+	id := ctx.Param("id")
+	if id == "" {
+		logger.Error("invalid request, please supply the id in the url")
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"status": "failed",
+			"msg":    "invalid request",
+			"code":   http.StatusBadRequest,
+		})
+		return
+	}
+	dbConn, errDBconn := pgx.Connect(context, dbSource)
+	if errDBconn != nil {
+		logger.Errorf("error when connecting to the database, please contact your system administrator, error message is %s", errDBconn)
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{
+			"status": "failed",
+			"msg":    "error when connecting to the database, please contact your system administrator",
+			"code":   http.StatusServiceUnavailable,
+		})
+		return
+	}
+
+	query := db.New(dbConn)
+
+	idnumber, _ := strconv.Atoi(id)
+	logger.Infof("deleting step with id %d", idnumber)
+	steps, errorDBQuery := query.DeleteStepByJobID(context, idnumber)
+	if errorDBQuery != nil {
+		logger.Errorf("Error when deleting job, error message is %s", errorDBQuery)
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{
+			"status": "failed",
+			"msg":    "Error when deleting job",
+			"code":   http.StatusServiceUnavailable,
+		})
+		return
+	}
+	var stepIDList []int
+	for _, step := range steps {
+		stepIDList = append(stepIDList, step.ID)
+	}
+	ctx.JSON(http.StatusOK, gin.H{
+		"status": "success",
+		"code":   http.StatusOK,
+		"result": stepIDList,
+	})
 }

@@ -118,6 +118,11 @@ WHERE id = $1 RETURNING *;
 DELETE FROM step
 WHERE id=$1 RETURNING *;
 
+
+-- name: DeleteStepByJobID :many
+DELETE FROM step
+WHERE job_id=$1 RETURNING *;
+
 -- name: CreateTMStmpl :one
 INSERT  INTO tmstmpl (
 step_id,
