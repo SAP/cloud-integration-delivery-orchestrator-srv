@@ -128,7 +128,51 @@ func GetStepByID(ctx *gin.Context) {
 	})
 }
 func GetStepByJobID(ctx *gin.Context) {
+	context := ctx.Request.Context()
 
+	jobID := ctx.Param("id")
+
+	if jobID == "" {
+		logger.Error("invalid request, please supply the id in the url")
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"status": "failed",
+			"msg":    "invalid request",
+			"code":   http.StatusBadRequest,
+		})
+		return
+	}
+
+	dbConn, errDBconn := pgx.Connect(context, dbSource)
+	if errDBconn != nil {
+		logger.Errorf("error when connecting to the database, please contact your system administrator, error message is %s", errDBconn)
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{
+			"status": "failed",
+			"msg":    "error when connecting to the database, please contact your system administrator",
+			"code":   http.StatusServiceUnavailable,
+		})
+		return
+	}
+
+	query := db.New(dbConn)
+
+	idnumber, _ := strconv.Atoi(jobID)
+	logger.Infof("get step with id %d", idnumber)
+
+	step, errorDBQuery := query.GetStepByID(context, idnumber)
+	if errorDBQuery != nil {
+		logger.Errorf("Error when updating job, error message is %s", errorDBQuery)
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{
+			"status": "failed",
+			"msg":    "Error when updating job",
+			"code":   http.StatusServiceUnavailable,
+		})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{
+		"status": "success",
+		"code":   http.StatusOK,
+		"result": step,
+	})
 }
 func UpdateStepByID(ctx *gin.Context) {
 
@@ -188,6 +232,7 @@ func UpdateStepByID(ctx *gin.Context) {
 	})
 }
 func UpdateStepByJobID(ctx *gin.Context) {
+
 }
 func DeleteStepByID(ctx *gin.Context) {
 

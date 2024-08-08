@@ -5,18 +5,23 @@
 - [x] cpi backend
 - [x] config api
 - [ ] job api
-- [ ] stage api
+- [ ] step api
 - [ ] execution api
 - [ ] user/group api
 - [ ] encrypt password
 - [ ] oauth integration
 - [ ] data checking before stored in db
+- [ ] add retry when failed
+
+## issues
+- how to store iflows with version
+- how to associate execution with job
 
 ## Local Development
 1. prerequisites
     - make sure golang and make are installed
     - make sure to config env  `GOPROXY` to an accessible site, such as `https://goproxy.cn`
-    - make sure docker engine and docker-compose are installed
+    - make sure docker engine and docker-compose or podman-desktop are installed
 2. start postgresql locally with [docker-compose-db.yml](./docker-compose-db.yml)
   ```
   docker compose -f docker-compose-db.yml up -d
@@ -40,7 +45,7 @@
   - /api/v1/job, method `POST`, create job using data like [create-job.json](testData/create-job.json)
   - /api/v1/job/:id, method `GET`, get job with `id`
   - /api/v1/job/:id, method `PUT`, update job using data like  [update.json](testData/update-job.json)
-  - - /api/v1/job/:id, method `DELETE`, delete job with `id¸`
+  - /api/v1/job/:id, method `DELETE`, delete job with `id¸`
 
 ## URL
 

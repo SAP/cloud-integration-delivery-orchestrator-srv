@@ -102,6 +102,10 @@ INSERT  INTO step (
 SELECT * FROM step
 WHERE id =$1 LIMIT 1;
 
+-- name: GetStepsByJobID :many
+SELECT * FROM step
+WHERE job_id =$1;
+
 -- name: GetSteps :many
 SELECT * FROM job;
 
