@@ -5,15 +5,28 @@ Get http://127.0.0.1:9000
 Get http://127.0.0.1:9000/api/v1/config
 
 ###
-POST http://127.0.0.1:9000/api/v1/config
+POST http://127.0.0.1:9000/api/v1/apiEndpoint
 
 {
     "name": "CPI dev",
     "type":"CPI",
-    "auth_url":"https://mmt-test-hfc.authentication.eu10.hana.ondemand.com/oauth/token",
-    "api_url":"https://mmt-test-hfc.it-cpi026.cfapps.eu10-002.hana.ondemand.com",
-    "auth_client_id":"sb-8f42f318-747c-4aa1-9da7-d54287569114!b443441|it!b410603",
-    "auth_client_secret":"REDACTED"
+    "authUrl":"https://mmt-test-hfc.authentication.eu10.hana.ondemand.com/oauth/token",
+    "apiUrl":"https://mmt-test-hfc.it-cpi026.cfapps.eu10-002.hana.ondemand.com",
+    "clientId":"sb-8f42f318-747c-4aa1-9da7-d54287569114!b443441|it!b410603",
+    "clientSecret":"REDACTED"
+}
+
+###
+POST http://127.0.0.1:9000/api/v1/apiEndpoint
+
+{
+    "name": "TMS devops",
+    "type":"TMS",
+    "description": "???",
+    "authUrl":"https://stage-devops.authentication.sap.hana.ondemand.com/oauth/token",
+    "apiUrl":"https://transport-service-app-backend.ts.cfapps.sap.hana.ondemand.com",
+    "clientId":"sb-9db92843-8155-437e-a5d9-d84ac1cfc5d7!b14446|alm-ts-backend!b339",
+    "clientSecret":"REDACTED"
 }
 
 ###

@@ -31,5 +31,14 @@ clean:
 # https://huanghantao.github.io/2019/06/17/golang-migrate%E5%91%BD%E4%BB%A4%E8%A1%8C%E7%9A%84%E4%BD%BF%E7%94%A8/ 
 migrateUp:
 	migrate -database ${POSTGRESQL_URL} -path migrations up
-	
+
+migrateCreate:
+	migrate create -ext sql -dir migrations create_tables
+
+migrateDown:
+	migrate -database ${POSTGRESQL_URL} -path migrations down
+
+migrateForce:
+	migrate  -database ${POSTGRESQL_URL} force 20240809073908
+
 .PHONY: all fmt run build clean

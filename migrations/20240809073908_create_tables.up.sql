@@ -14,14 +14,20 @@ CREATE TABLE IF NOT EXISTS "groups" (
 );
 
 
-CREATE TABLE IF NOT EXISTS "config" (
+CREATE TABLE IF NOT EXISTS "ApiEndpoint" (
   "id" SERIAL PRIMARY KEY,
   "name" varchar not NULL,
+  "description" varchar,
   "type" varchar not NULL,
-  "auth_url" varchar not NULL,
-  "api_url" varchar not NULL,
-  "auth_client_id" varchar not NULL,
-  "auth_client_secret" varchar not NULL
+  "authUrl" varchar not NULL,
+  "apiUrl" varchar not NULL,
+  "clientId" varchar not NULL,
+  "clientSecret" varchar not NULL,
+  "status" varchar not NULL,
+  "modifiedAt" varchar not NULL,
+  "modifiedBy" varchar not NULL,
+  "createdAt" varchar not NULL,
+  "createdBy" varchar not NULL
 );
 
 CREATE TABLE IF NOT EXISTS "job" (

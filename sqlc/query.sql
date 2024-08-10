@@ -31,38 +31,43 @@ WHERE group_name = $1 LIMIT 1;
 SELECT * FROM groups
 ORDER BY group_name;
 
--- name: CreateConfig :one
-INSERT INTO config (
+-- name: GetApiEndpointById :one
+SELECT * FROM "ApiEndpoint"
+WHERE id = $1;
+
+-- name: GetApiEndpointsByType :many
+SELECT * FROM "ApiEndpoint"
+WHERE type = $1;
+
+-- name: GetApiEndpointsAll :many
+SELECT * FROM "ApiEndpoint";
+
+-- name: DeleteApiEndpointById :one
+DELETE FROM "ApiEndpoint"
+WHERE id = $1 RETURNING *;
+
+-- name: UpdateApiEndpointById :one
+UPDATE  "ApiEndpoint"
+SET name = $2, type=$3, description=$4, "authUrl"=$5, "apiUrl"=$6, "clientId"=$7, "clientSecret"=$8, status=$9
+WHERE id = $1  RETURNING *;
+
+-- name: CreateApiendpoint :one
+INSERT INTO "ApiEndpoint" (
   name,
   type,
-  auth_url,
-  api_url,
-  auth_client_id,
-  auth_client_secret
+  description,
+  status,
+  "authUrl",
+  "apiUrl",
+  "clientId",
+  "clientSecret",
+  "createdAt",
+  "createdBy",
+  "modifiedAt",
+  "modifiedBy"
 ) VALUES (
-  $1, $2, $3, $4, $5,$6
+  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
 ) RETURNING *;
-
--- name: GetConfigByID :one
-SELECT * FROM config
-WHERE id = $1 LIMIT 1;
-
--- name: GetConfigsByType :many
-SELECT * FROM config
-WHERE type = $1 ;
-
--- name: GetConfigsAll :many
-SELECT * FROM config ;
-
--- name: DeleteConfigByID :one
-DELETE  FROM config
-WHERE id = $1  RETURNING *;
-
--- name: UpdateConfigByID :one
-UPDATE   config
-SET name = $2, type=$3, auth_url=$4, api_url = $5, auth_client_id=$6, auth_client_secret=$7
-WHERE id = $1  RETURNING *;
-
 
 -- name: CreateJob :one
 INSERT INTO job (

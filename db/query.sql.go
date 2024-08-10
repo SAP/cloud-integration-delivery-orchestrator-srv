@@ -7,7 +7,77 @@ package db
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
+
+const createApiendpoint = `-- name: CreateApiendpoint :one
+INSERT INTO "ApiEndpoint" (
+  name,
+  type,
+  description,
+  status,
+  "authUrl",
+  "apiUrl",
+  "clientId",
+  "clientSecret",
+  "createdAt",
+  "createdBy",
+  "modifiedAt",
+  "modifiedBy"
+) VALUES (
+  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+) RETURNING id, name, description, type, "authUrl", "apiUrl", "clientId", "clientSecret", status, "modifiedAt", "modifiedBy", "createdAt", "createdBy"
+`
+
+type CreateApiendpointParams struct {
+	Name         string      `db:"name" json:"name"`
+	Type         string      `db:"type" json:"type"`
+	Description  pgtype.Text `db:"description" json:"description"`
+	Status       string      `db:"status" json:"status"`
+	AuthUrl      string      `db:"authUrl" json:"authUrl"`
+	ApiUrl       string      `db:"apiUrl" json:"apiUrl"`
+	ClientId     string      `db:"clientId" json:"clientId"`
+	ClientSecret string      `db:"clientSecret" json:"clientSecret"`
+	CreatedAt    string      `db:"createdAt" json:"createdAt"`
+	CreatedBy    string      `db:"createdBy" json:"createdBy"`
+	ModifiedAt   string      `db:"modifiedAt" json:"modifiedAt"`
+	ModifiedBy   string      `db:"modifiedBy" json:"modifiedBy"`
+}
+
+func (q *Queries) CreateApiendpoint(ctx context.Context, arg CreateApiendpointParams) (ApiEndpoint, error) {
+	row := q.db.QueryRow(ctx, createApiendpoint,
+		arg.Name,
+		arg.Type,
+		arg.Description,
+		arg.Status,
+		arg.AuthUrl,
+		arg.ApiUrl,
+		arg.ClientId,
+		arg.ClientSecret,
+		arg.CreatedAt,
+		arg.CreatedBy,
+		arg.ModifiedAt,
+		arg.ModifiedBy,
+	)
+	var i ApiEndpoint
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.Type,
+		&i.AuthUrl,
+		&i.ApiUrl,
+		&i.ClientId,
+		&i.ClientSecret,
+		&i.Status,
+		&i.ModifiedAt,
+		&i.ModifiedBy,
+		&i.CreatedAt,
+		&i.CreatedBy,
+	)
+	return i, err
+}
 
 const createCPItmpl = `-- name: CreateCPItmpl :one
 INSERT  INTO cpitmpl (
@@ -49,50 +119,6 @@ func (q *Queries) CreateCPItmpl(ctx context.Context, arg CreateCPItmplParams) (C
 		&i.CpiIflowIds,
 		&i.CpiScriptIds,
 		&i.Status,
-	)
-	return i, err
-}
-
-const createConfig = `-- name: CreateConfig :one
-INSERT INTO config (
-  name,
-  type,
-  auth_url,
-  api_url,
-  auth_client_id,
-  auth_client_secret
-) VALUES (
-  $1, $2, $3, $4, $5,$6
-) RETURNING id, name, type, auth_url, api_url, auth_client_id, auth_client_secret
-`
-
-type CreateConfigParams struct {
-	Name             string `db:"name" json:"name"`
-	Type             string `db:"type" json:"type"`
-	AuthUrl          string `db:"auth_url" json:"auth_url"`
-	ApiUrl           string `db:"api_url" json:"api_url"`
-	AuthClientID     string `db:"auth_client_id" json:"auth_client_id"`
-	AuthClientSecret string `db:"auth_client_secret" json:"auth_client_secret"`
-}
-
-func (q *Queries) CreateConfig(ctx context.Context, arg CreateConfigParams) (Config, error) {
-	row := q.db.QueryRow(ctx, createConfig,
-		arg.Name,
-		arg.Type,
-		arg.AuthUrl,
-		arg.ApiUrl,
-		arg.AuthClientID,
-		arg.AuthClientSecret,
-	)
-	var i Config
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Type,
-		&i.AuthUrl,
-		&i.ApiUrl,
-		&i.AuthClientID,
-		&i.AuthClientSecret,
 	)
 	return i, err
 }
@@ -253,6 +279,32 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 	return i, err
 }
 
+const deleteApiEndpointById = `-- name: DeleteApiEndpointById :one
+DELETE FROM "ApiEndpoint"
+WHERE id = $1 RETURNING id, name, description, type, "authUrl", "apiUrl", "clientId", "clientSecret", status, "modifiedAt", "modifiedBy", "createdAt", "createdBy"
+`
+
+func (q *Queries) DeleteApiEndpointById(ctx context.Context, id int) (ApiEndpoint, error) {
+	row := q.db.QueryRow(ctx, deleteApiEndpointById, id)
+	var i ApiEndpoint
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.Type,
+		&i.AuthUrl,
+		&i.ApiUrl,
+		&i.ClientId,
+		&i.ClientSecret,
+		&i.Status,
+		&i.ModifiedAt,
+		&i.ModifiedBy,
+		&i.CreatedAt,
+		&i.CreatedBy,
+	)
+	return i, err
+}
+
 const deleteCPItmpl = `-- name: DeleteCPItmpl :one
 DELETE FROM cpitmpl
 WHERE id = $1  RETURNING id, step_id, cpi_config_id, cpi_package_ids, cpi_iflow_ids, cpi_script_ids, status
@@ -269,26 +321,6 @@ func (q *Queries) DeleteCPItmpl(ctx context.Context, id int) (Cpitmpl, error) {
 		&i.CpiIflowIds,
 		&i.CpiScriptIds,
 		&i.Status,
-	)
-	return i, err
-}
-
-const deleteConfigByID = `-- name: DeleteConfigByID :one
-DELETE  FROM config
-WHERE id = $1  RETURNING id, name, type, auth_url, api_url, auth_client_id, auth_client_secret
-`
-
-func (q *Queries) DeleteConfigByID(ctx context.Context, id int) (Config, error) {
-	row := q.db.QueryRow(ctx, deleteConfigByID, id)
-	var i Config
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Type,
-		&i.AuthUrl,
-		&i.ApiUrl,
-		&i.AuthClientID,
-		&i.AuthClientSecret,
 	)
 	return i, err
 }
@@ -380,6 +412,109 @@ func (q *Queries) DeleteTMStmpl(ctx context.Context, id int) (Tmstmpl, error) {
 	return i, err
 }
 
+const getApiEndpointById = `-- name: GetApiEndpointById :one
+SELECT id, name, description, type, "authUrl", "apiUrl", "clientId", "clientSecret", status, "modifiedAt", "modifiedBy", "createdAt", "createdBy" FROM "ApiEndpoint"
+WHERE id = $1
+`
+
+func (q *Queries) GetApiEndpointById(ctx context.Context, id int) (ApiEndpoint, error) {
+	row := q.db.QueryRow(ctx, getApiEndpointById, id)
+	var i ApiEndpoint
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.Type,
+		&i.AuthUrl,
+		&i.ApiUrl,
+		&i.ClientId,
+		&i.ClientSecret,
+		&i.Status,
+		&i.ModifiedAt,
+		&i.ModifiedBy,
+		&i.CreatedAt,
+		&i.CreatedBy,
+	)
+	return i, err
+}
+
+const getApiEndpointsAll = `-- name: GetApiEndpointsAll :many
+SELECT id, name, description, type, "authUrl", "apiUrl", "clientId", "clientSecret", status, "modifiedAt", "modifiedBy", "createdAt", "createdBy" FROM "ApiEndpoint"
+`
+
+func (q *Queries) GetApiEndpointsAll(ctx context.Context) ([]ApiEndpoint, error) {
+	rows, err := q.db.Query(ctx, getApiEndpointsAll)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ApiEndpoint{}
+	for rows.Next() {
+		var i ApiEndpoint
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Description,
+			&i.Type,
+			&i.AuthUrl,
+			&i.ApiUrl,
+			&i.ClientId,
+			&i.ClientSecret,
+			&i.Status,
+			&i.ModifiedAt,
+			&i.ModifiedBy,
+			&i.CreatedAt,
+			&i.CreatedBy,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getApiEndpointsByType = `-- name: GetApiEndpointsByType :many
+SELECT id, name, description, type, "authUrl", "apiUrl", "clientId", "clientSecret", status, "modifiedAt", "modifiedBy", "createdAt", "createdBy" FROM "ApiEndpoint"
+WHERE type = $1
+`
+
+func (q *Queries) GetApiEndpointsByType(ctx context.Context, type_ string) ([]ApiEndpoint, error) {
+	rows, err := q.db.Query(ctx, getApiEndpointsByType, type_)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ApiEndpoint{}
+	for rows.Next() {
+		var i ApiEndpoint
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Description,
+			&i.Type,
+			&i.AuthUrl,
+			&i.ApiUrl,
+			&i.ClientId,
+			&i.ClientSecret,
+			&i.Status,
+			&i.ModifiedAt,
+			&i.ModifiedBy,
+			&i.CreatedAt,
+			&i.CreatedBy,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getCPItmpl = `-- name: GetCPItmpl :many
 SELECT id, step_id, cpi_config_id, cpi_package_ids, cpi_iflow_ids, cpi_script_ids, status FROM cpitmpl
 `
@@ -430,91 +565,6 @@ func (q *Queries) GetCPItmplByID(ctx context.Context, id int) (Cpitmpl, error) {
 		&i.Status,
 	)
 	return i, err
-}
-
-const getConfigByID = `-- name: GetConfigByID :one
-SELECT id, name, type, auth_url, api_url, auth_client_id, auth_client_secret FROM config
-WHERE id = $1 LIMIT 1
-`
-
-func (q *Queries) GetConfigByID(ctx context.Context, id int) (Config, error) {
-	row := q.db.QueryRow(ctx, getConfigByID, id)
-	var i Config
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Type,
-		&i.AuthUrl,
-		&i.ApiUrl,
-		&i.AuthClientID,
-		&i.AuthClientSecret,
-	)
-	return i, err
-}
-
-const getConfigsAll = `-- name: GetConfigsAll :many
-SELECT id, name, type, auth_url, api_url, auth_client_id, auth_client_secret FROM config
-`
-
-func (q *Queries) GetConfigsAll(ctx context.Context) ([]Config, error) {
-	rows, err := q.db.Query(ctx, getConfigsAll)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []Config{}
-	for rows.Next() {
-		var i Config
-		if err := rows.Scan(
-			&i.ID,
-			&i.Name,
-			&i.Type,
-			&i.AuthUrl,
-			&i.ApiUrl,
-			&i.AuthClientID,
-			&i.AuthClientSecret,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const getConfigsByType = `-- name: GetConfigsByType :many
-SELECT id, name, type, auth_url, api_url, auth_client_id, auth_client_secret FROM config
-WHERE type = $1
-`
-
-func (q *Queries) GetConfigsByType(ctx context.Context, type_ string) ([]Config, error) {
-	rows, err := q.db.Query(ctx, getConfigsByType, type_)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []Config{}
-	for rows.Next() {
-		var i Config
-		if err := rows.Scan(
-			&i.ID,
-			&i.Name,
-			&i.Type,
-			&i.AuthUrl,
-			&i.ApiUrl,
-			&i.AuthClientID,
-			&i.AuthClientSecret,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const getGroup = `-- name: GetGroup :one
@@ -783,6 +833,55 @@ func (q *Queries) GetUsers(ctx context.Context) ([]User, error) {
 	return items, nil
 }
 
+const updateApiEndpointById = `-- name: UpdateApiEndpointById :one
+UPDATE  "ApiEndpoint"
+SET name = $2, type=$3, description=$4, "authUrl"=$5, "apiUrl"=$6, "clientId"=$7, "clientSecret"=$8, status=$9
+WHERE id = $1  RETURNING id, name, description, type, "authUrl", "apiUrl", "clientId", "clientSecret", status, "modifiedAt", "modifiedBy", "createdAt", "createdBy"
+`
+
+type UpdateApiEndpointByIdParams struct {
+	ID           int         `db:"id" json:"id"`
+	Name         string      `db:"name" json:"name"`
+	Type         string      `db:"type" json:"type"`
+	Description  pgtype.Text `db:"description" json:"description"`
+	AuthUrl      string      `db:"authUrl" json:"authUrl"`
+	ApiUrl       string      `db:"apiUrl" json:"apiUrl"`
+	ClientId     string      `db:"clientId" json:"clientId"`
+	ClientSecret string      `db:"clientSecret" json:"clientSecret"`
+	Status       string      `db:"status" json:"status"`
+}
+
+func (q *Queries) UpdateApiEndpointById(ctx context.Context, arg UpdateApiEndpointByIdParams) (ApiEndpoint, error) {
+	row := q.db.QueryRow(ctx, updateApiEndpointById,
+		arg.ID,
+		arg.Name,
+		arg.Type,
+		arg.Description,
+		arg.AuthUrl,
+		arg.ApiUrl,
+		arg.ClientId,
+		arg.ClientSecret,
+		arg.Status,
+	)
+	var i ApiEndpoint
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.Type,
+		&i.AuthUrl,
+		&i.ApiUrl,
+		&i.ClientId,
+		&i.ClientSecret,
+		&i.Status,
+		&i.ModifiedAt,
+		&i.ModifiedBy,
+		&i.CreatedAt,
+		&i.CreatedBy,
+	)
+	return i, err
+}
+
 const updateCPItmpl = `-- name: UpdateCPItmpl :one
 UPDATE cpitmpl
 SET step_id=$2, cpi_config_id=$3, cpi_package_ids=$4, cpi_iflow_ids=$5, cpi_script_ids=$6, status=$7
@@ -818,45 +917,6 @@ func (q *Queries) UpdateCPItmpl(ctx context.Context, arg UpdateCPItmplParams) (C
 		&i.CpiIflowIds,
 		&i.CpiScriptIds,
 		&i.Status,
-	)
-	return i, err
-}
-
-const updateConfigByID = `-- name: UpdateConfigByID :one
-UPDATE   config
-SET name = $2, type=$3, auth_url=$4, api_url = $5, auth_client_id=$6, auth_client_secret=$7
-WHERE id = $1  RETURNING id, name, type, auth_url, api_url, auth_client_id, auth_client_secret
-`
-
-type UpdateConfigByIDParams struct {
-	ID               int    `db:"id" json:"id"`
-	Name             string `db:"name" json:"name"`
-	Type             string `db:"type" json:"type"`
-	AuthUrl          string `db:"auth_url" json:"auth_url"`
-	ApiUrl           string `db:"api_url" json:"api_url"`
-	AuthClientID     string `db:"auth_client_id" json:"auth_client_id"`
-	AuthClientSecret string `db:"auth_client_secret" json:"auth_client_secret"`
-}
-
-func (q *Queries) UpdateConfigByID(ctx context.Context, arg UpdateConfigByIDParams) (Config, error) {
-	row := q.db.QueryRow(ctx, updateConfigByID,
-		arg.ID,
-		arg.Name,
-		arg.Type,
-		arg.AuthUrl,
-		arg.ApiUrl,
-		arg.AuthClientID,
-		arg.AuthClientSecret,
-	)
-	var i Config
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Type,
-		&i.AuthUrl,
-		&i.ApiUrl,
-		&i.AuthClientID,
-		&i.AuthClientSecret,
 	)
 	return i, err
 }

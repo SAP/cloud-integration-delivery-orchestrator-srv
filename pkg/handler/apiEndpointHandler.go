@@ -10,7 +10,6 @@ import (
 )
 
 func GetConfigs(ctx *gin.Context) {
-
 	context := ctx.Request.Context()
 	dbConn, errDBconn := pgx.Connect(context, dbSource)
 	if errDBconn != nil {
@@ -25,7 +24,7 @@ func GetConfigs(ctx *gin.Context) {
 	query := db.New(dbConn)
 
 	logger.Info("getting all configs")
-	configs, errorDBQuery := query.GetConfigsAll(context)
+	configs, errorDBQuery := query.GetApiEndpointsAll(context)
 	if errorDBQuery != nil {
 		logger.Errorf("Error when retrieve config from database, error message is %s", errorDBQuery)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{
@@ -36,9 +35,9 @@ func GetConfigs(ctx *gin.Context) {
 		return
 	}
 
-	var maskConfig []db.Config
+	var maskConfig []db.ApiEndpoint
 	for _, conf := range configs {
-		conf.AuthClientSecret = "encrypted"
+		conf.ClientSecret = "encrypted"
 		maskConfig = append(maskConfig, conf)
 	}
 	ctx.JSON(http.StatusOK, gin.H{
@@ -76,7 +75,7 @@ func GetConfigbyID(ctx *gin.Context) {
 
 	idnumber, _ := strconv.Atoi(id)
 	logger.Infof("getting config with id %d", idnumber)
-	config, errorDBQuery := query.GetConfigByID(context, idnumber)
+	config, errorDBQuery := query.GetApiEndpointById(context, idnumber)
 	if errorDBQuery != nil {
 		logger.Errorf("Error when retrieve config from database, error message is %s", errorDBQuery)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{
@@ -86,7 +85,7 @@ func GetConfigbyID(ctx *gin.Context) {
 		})
 		return
 	}
-	config.AuthClientSecret = "encrypted"
+	config.ClientSecret = "encrypted"
 	ctx.JSON(http.StatusOK, gin.H{
 		"status": "success",
 		"code":   200,
@@ -95,9 +94,8 @@ func GetConfigbyID(ctx *gin.Context) {
 }
 
 func CreateConfig(ctx *gin.Context) {
-
 	context := ctx.Request.Context()
-	var config db.CreateConfigParams
+	var config db.CreateApiendpointParams
 	err := ctx.BindJSON(&config)
 	if err != nil {
 		logger.Errorf("invalid request, error message is %s", err)
@@ -107,37 +105,35 @@ func CreateConfig(ctx *gin.Context) {
 			"code":   http.StatusBadRequest,
 		})
 		return
-	} else {
-		dbConn, errDBconn := pgx.Connect(context, dbSource)
-		if errDBconn != nil {
-			logger.Errorf("error when connecting to the database, please contact your system administrator, error message is %s", errDBconn)
-			ctx.JSON(http.StatusServiceUnavailable, gin.H{
-				"status": "failed",
-				"msg":    "error when connecting to the database",
-				"code":   http.StatusServiceUnavailable,
-			})
-			return
-		}
-		query := db.New(dbConn)
-		configResp, errorDBQuery := query.CreateConfig(context, config)
-		if errorDBQuery != nil {
-			logger.Errorf("Error when storing config to database, error message is %s", errorDBQuery)
-			ctx.JSON(http.StatusServiceUnavailable, gin.H{
-				"status": "failed",
-				"msg":    "Error when retrieve config from database",
-				"code":   http.StatusServiceUnavailable,
-			})
-			return
-		} else {
-			var maskConfig = configResp
-			maskConfig.AuthClientSecret = "encrypted"
-			ctx.JSON(http.StatusOK, gin.H{
-				"status": "success",
-				"code":   200,
-				"result": maskConfig,
-			})
-		}
 	}
+	dbConn, errDBconn := pgx.Connect(context, dbSource)
+	if errDBconn != nil {
+		logger.Errorf("error when connecting to the database, please contact your system administrator, error message is %s", errDBconn)
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{
+			"status": "failed",
+			"msg":    "error when connecting to the database",
+			"code":   http.StatusServiceUnavailable,
+		})
+		return
+	}
+	query := db.New(dbConn)
+	configResp, errorDBQuery := query.CreateApiendpoint(context, config)
+	if errorDBQuery != nil {
+		logger.Errorf("Error when storing config to database, error message is %s", errorDBQuery)
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{
+			"status": "failed",
+			"msg":    "Error when retrieve config from database",
+			"code":   http.StatusServiceUnavailable,
+		})
+		return
+	}
+	var maskConfig = configResp
+	maskConfig.ClientSecret = "encrypted"
+	ctx.JSON(http.StatusOK, gin.H{
+		"status": "success",
+		"code":   200,
+		"result": maskConfig,
+	})
 }
 
 func DeleteConfig(ctx *gin.Context) {
@@ -166,7 +162,7 @@ func DeleteConfig(ctx *gin.Context) {
 	}
 	idnumber, _ := strconv.Atoi(id)
 
-	config, errorDBQuery := query.DeleteConfigByID(context, idnumber)
+	config, errorDBQuery := query.DeleteApiEndpointById(context, idnumber)
 	if errorDBQuery != nil {
 		logger.Errorf("Error when retrieve config from database, error message is %s", errorDBQuery)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{
@@ -188,7 +184,7 @@ func UpdateConfig(ctx *gin.Context) {
 
 	context := ctx.Request.Context()
 	id := ctx.Param("id")
-	var config db.UpdateConfigByIDParams
+	var config db.UpdateApiEndpointByIdParams
 
 	err := ctx.BindJSON(&config)
 	if err != nil {
@@ -214,7 +210,7 @@ func UpdateConfig(ctx *gin.Context) {
 		idNumber, _ := strconv.Atoi(id)
 		config.ID = idNumber
 
-		configResp, errorDBQuery := query.UpdateConfigByID(context, config)
+		configResp, errorDBQuery := query.UpdateApiEndpointById(context, config)
 		if errorDBQuery != nil {
 			logger.Errorf("Error when retrieve config from database, error message is %s", errorDBQuery)
 			ctx.JSON(http.StatusServiceUnavailable, gin.H{
@@ -225,7 +221,7 @@ func UpdateConfig(ctx *gin.Context) {
 			return
 		} else {
 			var maskConfig = configResp
-			maskConfig.AuthClientSecret = "encrypted"
+			maskConfig.ClientSecret = "encrypted"
 			ctx.JSON(http.StatusOK, gin.H{
 				"status": "success",
 				"code":   200,

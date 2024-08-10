@@ -6,16 +6,24 @@ package db
 
 import (
 	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
-type Config struct {
-	ID               int    `db:"id" json:"id"`
-	Name             string `db:"name" json:"name"`
-	Type             string `db:"type" json:"type"`
-	AuthUrl          string `db:"auth_url" json:"auth_url"`
-	ApiUrl           string `db:"api_url" json:"api_url"`
-	AuthClientID     string `db:"auth_client_id" json:"auth_client_id"`
-	AuthClientSecret string `db:"auth_client_secret" json:"auth_client_secret"`
+type ApiEndpoint struct {
+	ID           int         `db:"id" json:"id"`
+	Name         string      `db:"name" json:"name"`
+	Description  pgtype.Text `db:"description" json:"description"`
+	Type         string      `db:"type" json:"type"`
+	AuthUrl      string      `db:"authUrl" json:"authUrl"`
+	ApiUrl       string      `db:"apiUrl" json:"apiUrl"`
+	ClientId     string      `db:"clientId" json:"clientId"`
+	ClientSecret string      `db:"clientSecret" json:"clientSecret"`
+	Status       string      `db:"status" json:"status"`
+	ModifiedAt   string      `db:"modifiedAt" json:"modifiedAt"`
+	ModifiedBy   string      `db:"modifiedBy" json:"modifiedBy"`
+	CreatedAt    string      `db:"createdAt" json:"createdAt"`
+	CreatedBy    string      `db:"createdBy" json:"createdBy"`
 }
 
 type Cpitmpl struct {

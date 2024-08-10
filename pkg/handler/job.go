@@ -297,7 +297,7 @@ func ExecuteJob(ctx *gin.Context) {
 					continue
 				}
 				logger.Infof("Starting to execute import task id %d", templID)
-				tmpConfig, errorTmsConfig := query.GetConfigByID(context, tmsTmpl.TmsConfigID)
+				tmpConfig, errorTmsConfig := query.GetApiEndpointById(context, tmsTmpl.TmsConfigID)
 				if errorTmsConfig != nil {
 					logger.Errorf("Error when getting tms config from database, error message is %s", errorTmsConfig)
 					ctx.JSON(http.StatusServiceUnavailable, gin.H{
@@ -307,7 +307,7 @@ func ExecuteJob(ctx *gin.Context) {
 					})
 					continue
 				}
-				tmsClient, errTmsClient := tms.NewTMSClient(context, tmpConfig.AuthClientID, tmpConfig.AuthClientSecret, tmpConfig.AuthUrl, tmpConfig.ApiUrl)
+				tmsClient, errTmsClient := tms.NewTMSClient(context, tmpConfig.ClientId, tmpConfig.ClientSecret, tmpConfig.AuthUrl, tmpConfig.ApiUrl)
 				if errTmsClient != nil {
 					logger.Errorf("Error when authenticating to tms , error message is %s", errTmsClient)
 					ctx.JSON(http.StatusServiceUnavailable, gin.H{
@@ -367,7 +367,7 @@ func ExecuteJob(ctx *gin.Context) {
 				}
 				logger.Infof("Starting to execute deployment task id %d", templID)
 
-				cpiConfig, errorCpiConfig := query.GetConfigByID(context, cpiTmpl.CpiConfigID)
+				cpiConfig, errorCpiConfig := query.GetApiEndpointById(context, cpiTmpl.CpiConfigID)
 				if errorCpiConfig != nil {
 					logger.Errorf("Error when getting cpi config from database, error message is %s", errorCpiConfig)
 					ctx.JSON(http.StatusServiceUnavailable, gin.H{
@@ -378,7 +378,7 @@ func ExecuteJob(ctx *gin.Context) {
 					continue
 				}
 
-				cpiClient, errorCpiClient := cpi.NewCPIClient(context, cpiConfig.AuthClientID, cpiConfig.AuthClientSecret, cpiConfig.AuthUrl, cpiConfig.ApiUrl)
+				cpiClient, errorCpiClient := cpi.NewCPIClient(context, cpiConfig.ClientId, cpiConfig.ClientSecret, cpiConfig.AuthUrl, cpiConfig.ApiUrl)
 				if errorCpiClient != nil {
 					logger.Errorf("Error when authenticating to cpi tenant, error message is %s", errorCpiClient)
 					ctx.JSON(http.StatusServiceUnavailable, gin.H{

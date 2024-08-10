@@ -21,8 +21,8 @@ func GetPackagesHandler(ctx *gin.Context) {
 
 	cpi_id, _ := strconv.Atoi(cpi_tenant)
 	query := db.New(dbClient.DBConn)
-	cpiEndpoint, _ := query.GetConfigByID(context, cpi_id)
-	cpiClient, error := cpi.NewCPIClient(context, cpiEndpoint.AuthClientID, cpiEndpoint.AuthClientSecret, cpiEndpoint.AuthUrl, cpiEndpoint.ApiUrl)
+	cpiEndpoint, _ := query.GetApiEndpointById(context, cpi_id)
+	cpiClient, error := cpi.NewCPIClient(context, cpiEndpoint.ClientId, cpiEndpoint.ClientSecret, cpiEndpoint.AuthUrl, cpiEndpoint.ApiUrl)
 	packages, error := cpiClient.GetPackages()
 	if error != nil {
 		logger.Error("error while retrieving packages: %s", error)
@@ -45,8 +45,8 @@ func GetPackageIflowsHandler(ctx *gin.Context) {
 
 	cpi_id, _ := strconv.Atoi(cpi_tenant)
 	query := db.New(dbClient.DBConn)
-	cpiEndpoint, _ := query.GetConfigByID(context, cpi_id)
-	cpiClient, _ := cpi.NewCPIClient(context, cpiEndpoint.AuthClientID, cpiEndpoint.AuthClientSecret, cpiEndpoint.AuthUrl, cpiEndpoint.ApiUrl)
+	cpiEndpoint, _ := query.GetApiEndpointById(context, cpi_id)
+	cpiClient, _ := cpi.NewCPIClient(context, cpiEndpoint.ClientId, cpiEndpoint.ClientSecret, cpiEndpoint.AuthUrl, cpiEndpoint.ApiUrl)
 	iflows, error := cpiClient.GetPackageIflows(packageID)
 	if error != nil {
 		logger.Error("Error while retrieving iflows within a package")
@@ -55,7 +55,25 @@ func GetPackageIflowsHandler(ctx *gin.Context) {
 	}
 	ctx.JSON(http.StatusOK, gin.H{
 		"status": "success",
-		"result": iflows,
+		"data":   iflows,
 	})
 
+}
+
+func GetEndpointsByTypeHandler(ctx *gin.Context) {
+	dbClient := NewDBClient(ctx)
+	tms_tenant := ctx.Query("type")
+	query := db.New(dbClient.DBConn)
+	apiEndpoints, error := query.GetApiEndpointsByType(ctx, tms_tenant)
+	if error != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"status": 500,
+			"result": fmt.Sprintf("internal server error: %s", error),
+		})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{
+		"status": 200,
+		"data":   apiEndpoints,
+	})
 }
