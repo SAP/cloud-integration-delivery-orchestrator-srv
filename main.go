@@ -30,11 +30,12 @@ func main() {
 		v1Group.GET("/user/:name", handler.GetUsersHandler)
 		v1Group.POST("/user", handler.CreateUsersHandler)
 
-		v1Group.GET("/apiEndpoint", handler.GetConfigs)
-		v1Group.POST("/apiEndpoint", handler.CreateConfig)
-		v1Group.PUT("/apiEndpoint/:id", handler.UpdateConfig)
-		v1Group.DELETE("/apiEndpoint/:id", handler.DeleteConfig)
-		v1Group.GET("/apiEndpoint/:id", handler.GetConfigbyID)
+		v1Group.GET("/apiEndpoint", handler.GetApiEndpoints)
+		v1Group.POST("/apiEndpoint", handler.CreateApiEndpoint)
+		v1Group.PUT("/apiEndpoint/:id", handler.UpdateApiEndpoint)
+		v1Group.DELETE("/apiEndpoint/:id", handler.DeleteApiEndpoint)
+		v1Group.GET("/apiEndpoint/:id", handler.GetApiEndpointById)
+		v1Group.GET("/apiEndpoints", handler.GetEndpointsByType)
 
 		v1Group.GET("/job", handler.GetJobs)
 		v1Group.POST("/job", handler.CreateJob)
@@ -55,7 +56,8 @@ func main() {
 		v1Group.GET("/tanant/packages", handler.GetPackagesHandler)             //get all packages under a tenant
 		v1Group.GET("/tenant/packages/iflows", handler.GetPackageIflowsHandler) // get all iflows under a package
 
-		v1Group.GET("/apiEndpoints", handler.GetEndpointsByTypeHandler)
+		v1Group.GET("/tms/Nodes", handler.GetTmsNodesHandler)
+		v1Group.GET("tms/trs", handler.GetTranportRequestsHandler)
 
 	}
 

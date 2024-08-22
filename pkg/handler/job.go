@@ -26,7 +26,7 @@ func CreateJob(ctx *gin.Context) {
 		})
 		return
 	}
-	dbConn, errDBconn := pgx.Connect(context, dbSource)
+	dbConn, errDBconn := pgx.Connect(context, DBSource)
 	if errDBconn != nil {
 		logger.Errorf("error when connecting to the database, please contact your system administrator, error message is %s", errDBconn)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{
@@ -57,7 +57,7 @@ func CreateJob(ctx *gin.Context) {
 
 func GetJobs(ctx *gin.Context) {
 	context := ctx.Request.Context()
-	dbConn, errDBconn := pgx.Connect(context, dbSource)
+	dbConn, errDBconn := pgx.Connect(context, DBSource)
 	if errDBconn != nil {
 		logger.Errorf("error when connecting to the database, please contact your system administrator, error message is %s", errDBconn)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{
@@ -99,7 +99,7 @@ func GetJobyID(ctx *gin.Context) {
 		return
 	}
 
-	dbConn, errDBconn := pgx.Connect(context, dbSource)
+	dbConn, errDBconn := pgx.Connect(context, DBSource)
 	if errDBconn != nil {
 		logger.Errorf("error when connecting to the database, please contact your system administrator, error message is %s", errDBconn)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{
@@ -133,7 +133,7 @@ func GetJobyID(ctx *gin.Context) {
 func DeleteJob(ctx *gin.Context) {
 
 	context := ctx.Request.Context()
-	dbConn, errDBconn := pgx.Connect(context, dbSource)
+	dbConn, errDBconn := pgx.Connect(context, DBSource)
 	if errDBconn != nil {
 		logger.Errorf("error when connecting to the database, please contact your system administrator, error message is %s", errDBconn)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{
@@ -199,7 +199,7 @@ func UpdateJob(ctx *gin.Context) {
 		})
 		return
 	}
-	dbConn, errDBconn := pgx.Connect(context, dbSource)
+	dbConn, errDBconn := pgx.Connect(context, DBSource)
 	if errDBconn != nil {
 		logger.Errorf("error when connecting to the database, please contact your system administrator, error message is %s", errDBconn)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{
@@ -245,7 +245,7 @@ func ExecuteJob(ctx *gin.Context) {
 	}
 
 	logger.Infof("get job config for %s", id)
-	dbConn, errDBconn := pgx.Connect(context, dbSource)
+	dbConn, errDBconn := pgx.Connect(context, DBSource)
 	if errDBconn != nil {
 		logger.Errorf("error when connecting to the database, please contact your system administrator, error message is %s", errDBconn)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{

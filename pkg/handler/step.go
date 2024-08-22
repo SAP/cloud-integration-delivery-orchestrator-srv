@@ -23,7 +23,7 @@ func CreateStep(ctx *gin.Context) {
 		})
 		return
 	}
-	dbConn, errDBconn := pgx.Connect(context, dbSource)
+	dbConn, errDBconn := pgx.Connect(context, DBSource)
 	if errDBconn != nil {
 		logger.Errorf("error when connecting to the database, please contact your system administrator, error message is %s", errDBconn)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{
@@ -56,7 +56,7 @@ func CreateStep(ctx *gin.Context) {
 func GetSteps(ctx *gin.Context) {
 	context := ctx.Request.Context()
 
-	dbConn, errDBconn := pgx.Connect(context, dbSource)
+	dbConn, errDBconn := pgx.Connect(context, DBSource)
 	if errDBconn != nil {
 		logger.Errorf("error when connecting to the database, please contact your system administrator, error message is %s", errDBconn)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{
@@ -97,7 +97,7 @@ func GetStepByID(ctx *gin.Context) {
 		})
 		return
 	}
-	dbConn, errDBconn := pgx.Connect(context, dbSource)
+	dbConn, errDBconn := pgx.Connect(context, DBSource)
 	if errDBconn != nil {
 		logger.Errorf("error when connecting to the database, please contact your system administrator, error message is %s", errDBconn)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{
@@ -142,7 +142,7 @@ func GetStepByJobID(ctx *gin.Context) {
 		return
 	}
 
-	dbConn, errDBconn := pgx.Connect(context, dbSource)
+	dbConn, errDBconn := pgx.Connect(context, DBSource)
 	if errDBconn != nil {
 		logger.Errorf("error when connecting to the database, please contact your system administrator, error message is %s", errDBconn)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{
@@ -187,7 +187,7 @@ func UpdateStepByID(ctx *gin.Context) {
 		})
 		return
 	}
-	dbConn, errDBconn := pgx.Connect(context, dbSource)
+	dbConn, errDBconn := pgx.Connect(context, DBSource)
 	if errDBconn != nil {
 		logger.Errorf("error when connecting to the database, please contact your system administrator, error message is %s", errDBconn)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{
@@ -247,7 +247,7 @@ func DeleteStepByID(ctx *gin.Context) {
 		})
 		return
 	}
-	dbConn, errDBconn := pgx.Connect(context, dbSource)
+	dbConn, errDBconn := pgx.Connect(context, DBSource)
 	if errDBconn != nil {
 		logger.Errorf("error when connecting to the database, please contact your system administrator, error message is %s", errDBconn)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{
@@ -291,7 +291,7 @@ func DeleteStepByJobID(ctx *gin.Context) {
 		})
 		return
 	}
-	dbConn, errDBconn := pgx.Connect(context, dbSource)
+	dbConn, errDBconn := pgx.Connect(context, DBSource)
 	if errDBconn != nil {
 		logger.Errorf("error when connecting to the database, please contact your system administrator, error message is %s", errDBconn)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{

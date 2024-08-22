@@ -15,7 +15,7 @@ import (
 	"github.wdf.sap.corp/maco-mmt/maco-deploy/db"
 )
 
-var dbSource string
+var DBSource string
 
 const dbDriver = "postgres"
 
@@ -41,9 +41,9 @@ func init() {
 	if !ok {
 		logger.Fatal("error when looking up env DB_PASSWORD")
 	}
-	dbSource = fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable", db_user, db_password, db_host, db_port, db_name)
+	DBSource = fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable", db_user, db_password, db_host, db_port, db_name)
 	context := context.Background()
-	_, errDBconn := pgx.Connect(context, dbSource)
+	_, errDBconn := pgx.Connect(context, DBSource)
 	if errDBconn != nil {
 		logger.Fatalf("Failed to connect to database, error message is %s", errDBconn)
 	}
@@ -57,7 +57,7 @@ type DBClient struct {
 }
 
 func NewDBClient(ctx *gin.Context) DBClient {
-	dbConn, errDBconn := pgx.Connect(ctx, dbSource)
+	dbConn, errDBconn := pgx.Connect(ctx, DBSource)
 	if errDBconn != nil {
 		logger.Errorf("error when connecting to the database, please contact your system administrator, error message is %s", errDBconn)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{
@@ -80,7 +80,7 @@ func (d *DBClient) dbmigrate() {
 		DatabaseName:    "macodeploy",
 		MigrationsTable: "user",
 	}
-	sqlInstance, error := sql.Open(dbDriver, dbSource)
+	sqlInstance, error := sql.Open(dbDriver, DBSource)
 	if error != nil {
 		logger.Fatalf("error when create db instance, error message is %s", error)
 	}

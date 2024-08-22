@@ -11,7 +11,7 @@ import (
 func GetGroupInfoHandler(ctx *gin.Context) {
 	name := ctx.Param("groupname")
 	context := ctx.Request.Context()
-	dbConn, errDBconn := pgx.Connect(context, dbSource)
+	dbConn, errDBconn := pgx.Connect(context, DBSource)
 	if errDBconn != nil {
 		logger.Errorf("error connecting to db, %s", errDBconn)
 	}
@@ -28,7 +28,7 @@ func GetGroupInfoHandler(ctx *gin.Context) {
 
 func GetGroupsHandler(ctx *gin.Context) {
 	context := ctx.Request.Context()
-	dbConn, errDBconn := pgx.Connect(context, dbSource)
+	dbConn, errDBconn := pgx.Connect(context, DBSource)
 	if errDBconn != nil {
 		logger.Errorf("error connecting to db, %s", errDBconn)
 	}

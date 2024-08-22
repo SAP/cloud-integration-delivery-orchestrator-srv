@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -9,9 +10,9 @@ import (
 	"github.wdf.sap.corp/maco-mmt/maco-deploy/db"
 )
 
-func GetConfigs(ctx *gin.Context) {
+func GetApiEndpoints(ctx *gin.Context) {
 	context := ctx.Request.Context()
-	dbConn, errDBconn := pgx.Connect(context, dbSource)
+	dbConn, errDBconn := pgx.Connect(context, DBSource)
 	if errDBconn != nil {
 		logger.Errorf("error when connecting to the database, please contact your system administrator, error message is %s", errDBconn)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{
@@ -47,10 +48,10 @@ func GetConfigs(ctx *gin.Context) {
 	})
 }
 
-func GetConfigbyID(ctx *gin.Context) {
+func GetApiEndpointById(ctx *gin.Context) {
 
 	context := ctx.Request.Context()
-	dbConn, errDBconn := pgx.Connect(context, dbSource)
+	dbConn, errDBconn := pgx.Connect(context, DBSource)
 	if errDBconn != nil {
 		logger.Errorf("error when connecting to the database, please contact your system administrator, error message is %s", errDBconn)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{
@@ -93,7 +94,25 @@ func GetConfigbyID(ctx *gin.Context) {
 	})
 }
 
-func CreateConfig(ctx *gin.Context) {
+func GetEndpointsByType(ctx *gin.Context) {
+	dbClient := NewDBClient(ctx)
+	tms_tenant := ctx.Query("type")
+	query := db.New(dbClient.DBConn)
+	apiEndpoints, error := query.GetApiEndpointsByType(ctx, tms_tenant)
+	if error != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"status": 500,
+			"result": fmt.Sprintf("internal server error: %s", error),
+		})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{
+		"status": 200,
+		"data":   apiEndpoints,
+	})
+}
+
+func CreateApiEndpoint(ctx *gin.Context) {
 	context := ctx.Request.Context()
 	var config db.CreateApiendpointParams
 	err := ctx.BindJSON(&config)
@@ -106,7 +125,7 @@ func CreateConfig(ctx *gin.Context) {
 		})
 		return
 	}
-	dbConn, errDBconn := pgx.Connect(context, dbSource)
+	dbConn, errDBconn := pgx.Connect(context, DBSource)
 	if errDBconn != nil {
 		logger.Errorf("error when connecting to the database, please contact your system administrator, error message is %s", errDBconn)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{
@@ -136,10 +155,10 @@ func CreateConfig(ctx *gin.Context) {
 	})
 }
 
-func DeleteConfig(ctx *gin.Context) {
+func DeleteApiEndpoint(ctx *gin.Context) {
 
 	context := ctx.Request.Context()
-	dbConn, errDBconn := pgx.Connect(context, dbSource)
+	dbConn, errDBconn := pgx.Connect(context, DBSource)
 	if errDBconn != nil {
 		logger.Errorf("error when connecting to the database, please contact your system administrator, error message is %s", errDBconn)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{
@@ -180,7 +199,7 @@ func DeleteConfig(ctx *gin.Context) {
 	})
 
 }
-func UpdateConfig(ctx *gin.Context) {
+func UpdateApiEndpoint(ctx *gin.Context) {
 
 	context := ctx.Request.Context()
 	id := ctx.Param("id")
@@ -196,7 +215,7 @@ func UpdateConfig(ctx *gin.Context) {
 		})
 		return
 	} else {
-		dbConn, errDBconn := pgx.Connect(context, dbSource)
+		dbConn, errDBconn := pgx.Connect(context, DBSource)
 		if errDBconn != nil {
 			logger.Errorf("error when connecting to the database, please contact your system administrator, error message is %s", errDBconn)
 			ctx.JSON(http.StatusServiceUnavailable, gin.H{

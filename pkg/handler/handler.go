@@ -1,17 +1,37 @@
 package handler
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5"
 	"github.wdf.sap.corp/maco-mmt/maco-deploy/db"
 	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/cpi"
 	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/log"
+	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/tms"
 )
 
 var logger = log.NewLogger().Sugar()
+var tmsEndpoint db.ApiEndpoint
+
+// init. get default TMS api Endpoint
+func init() {
+	ctx := context.Background()
+	conn, error := pgx.Connect(ctx, DBSource)
+	if error != nil {
+		logger.Panic("Failed to connect to DB: %s", error)
+		return
+	}
+	query := db.New(conn)
+	tmsEndpoint, error = query.GetApiEndpointById(ctx, 3)
+	if error != nil {
+		logger.Panic("Failed to fetch default tms endpoint: %s", error)
+	}
+
+}
 
 // get all packages within a cpi tenant
 func GetPackagesHandler(ctx *gin.Context) {
@@ -55,25 +75,48 @@ func GetPackageIflowsHandler(ctx *gin.Context) {
 	}
 	ctx.JSON(http.StatusOK, gin.H{
 		"status": "success",
-		"data":   iflows,
+		"result": iflows,
 	})
 
 }
 
-func GetEndpointsByTypeHandler(ctx *gin.Context) {
-	dbClient := NewDBClient(ctx)
-	tms_tenant := ctx.Query("type")
-	query := db.New(dbClient.DBConn)
-	apiEndpoints, error := query.GetApiEndpointsByType(ctx, tms_tenant)
+func GetTmsNodesHandler(ctx *gin.Context) {
+
+	tmsClient, error := tms.NewTMSClient(ctx, tmsEndpoint.ClientId, tmsEndpoint.ClientSecret, tmsEndpoint.AuthUrl, tmsEndpoint.ApiUrl)
 	if error != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{
-			"status": 500,
-			"result": fmt.Sprintf("internal server error: %s", error),
-		})
 		return
 	}
-	ctx.JSON(http.StatusOK, gin.H{
-		"status": 200,
-		"data":   apiEndpoints,
-	})
+	tmsNodes, error := tmsClient.GetNodes()
+	if error != nil {
+		errorMsg := fmt.Sprintf("Error while retrieving tms Nodes: %s", error)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"status": 500, "result": errorMsg})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"status": 200, "result": tmsNodes})
+	return
+}
+
+func GetTranportRequestsHandler(ctx *gin.Context) {
+	trNode := ctx.Query("transportNode")
+	nodeId, error := strconv.Atoi(trNode)
+	if error != nil {
+		errorMsg := fmt.Sprintf("Invalid transport node id %d: %s", trNode, error)
+		logger.Error(errorMsg)
+		ctx.JSON(http.StatusOK, gin.H{"status": 500, "result": errorMsg})
+		return
+	}
+
+	tmsClient, error := tms.NewTMSClient(ctx, tmsEndpoint.ClientId, tmsEndpoint.ClientSecret, tmsEndpoint.AuthUrl, tmsEndpoint.ApiUrl)
+	if error != nil {
+		logger.Error(error)
+		return
+	}
+	trs, error := tmsClient.GetNodeTransportRequests(nodeId)
+	if error != nil {
+		errorMsg := fmt.Sprintf("Error while get node trs: %s", error)
+		logger.Error(errorMsg)
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"status": 200, "result": trs})
+
 }

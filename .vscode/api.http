@@ -2,7 +2,7 @@
 Get http://127.0.0.1:9000
 
 ###
-Get http://127.0.0.1:9000/api/v1/config
+Get http://127.0.0.1:9000/api/v1/apiEndpoint
 
 ###
 POST http://127.0.0.1:9000/api/v1/apiEndpoint
@@ -33,4 +33,8 @@ POST http://127.0.0.1:9000/api/v1/apiEndpoint
 GET http://127.0.0.1:9000/api/v1/tanant/packages?tenant=2
 
 ###
-GET http://127.0.0.1:9000/api/v1/tenant/packages/iflows?tenant=2&package=SAPMaCoforUtilitiesEmailProcessingV4
+GET http://127.0.0.1:9000/api/v1/tenant/packages/iflows?tenant=4&package=SAPMaCoforUtilitiesEmailProcessingV4
+
+
+### 
+GET http://127.0.0.1:9000/api/v1/tms/Nodes?tenant=3
