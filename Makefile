@@ -28,7 +28,12 @@ run: build
 clean:
 	rm -rf $(BIN_DIR)
 
-# https://huanghantao.github.io/2019/06/17/golang-migrate%E5%91%BD%E4%BB%A4%E8%A1%8C%E7%9A%84%E4%BD%BF%E7%94%A8/ 
+prepare:
+	$(GO) install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+	$(GO) install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
+
+
+# https://huanghantao.github.io/2019/06/17/golang-migrate%E5%91%BD%E4%BB%A4%E8%A1%8C%E7%9A%84%E4%BD%BF%E7%94%A8/
 migrateUp:
 	migrate -database ${POSTGRESQL_URL} -path migrations up
 
@@ -39,6 +44,6 @@ migrateDown:
 	migrate -database ${POSTGRESQL_URL} -path migrations down
 
 migrateForce:
-	migrate  -database ${POSTGRESQL_URL} force 20240809073908
+	migrate  -database ${POSTGRESQL_URL} -path migrations force 20240809073908
 
 .PHONY: all fmt run build clean

@@ -1,4 +1,4 @@
-CREATE TABLE "users" (
+CREATE TABLE IF NOT EXISTS "users" (
   "id" SERIAL PRIMARY KEY,
   "username" varchar NOT NULL,
   "hashed_password" varchar NOT NULL,
@@ -8,7 +8,7 @@ CREATE TABLE "users" (
   "created_at" timestamptz NOT NULL DEFAULT (now())
 );
 
-CREATE TABLE "groups" (
+CREATE TABLE IF NOT EXISTS "groups" (
   "id" SERIAL PRIMARY KEY,
   "group_name" varchar NOT NULL
 );
@@ -30,14 +30,14 @@ CREATE TABLE IF NOT EXISTS "ApiEndpoint" (
   "createdBy" varchar not NULL
 );
 
-CREATE TABLE "job" (
+CREATE TABLE IF NOT EXISTS "job" (
   "id" SERIAL PRIMARY KEY,
   "name" varchar not NULL,
   "steps" integer[] ,
   "status" varchar
 );
 
-CREATE TABLE "step" (
+CREATE TABLE IF NOT EXISTS "step" (
   "id" SERIAL PRIMARY KEY,
   "job_id" integer not NULL,
   "name" varchar not NULL,
@@ -46,7 +46,7 @@ CREATE TABLE "step" (
   "status" varchar
 );
 
-CREATE TABLE "tmstmpl" (
+CREATE TABLE IF NOT EXISTS "tmstmpl" (
     "id" SERIAL PRIMARY KEY,
     "step_id" integer not NULL,
     "tms_config_id" integer not NULL,
@@ -55,13 +55,13 @@ CREATE TABLE "tmstmpl" (
     "status" varchar
 );
 
-CREATE TABLE "cpitmpl" (
+CREATE TABLE IF NOT EXISTS "cpitmpl" (
       "id" SERIAL PRIMARY KEY,
       "step_id" integer not NULL,
       "cpi_config_id" integer not NULL,
-      "cpi_package_ids" varchar[] not NULL,
-      "cpi_iflow_ids" varchar[] not NULL,
-      "cpi_script_ids" varchar[] not NULL,
+      "cpi_package_ids" integer[] not NULL,
+      "cpi_iflow_ids" integer[] not NULL,
+      "cpi_script_ids" integer[] not NULL,
       "status" varchar
 );
 
@@ -72,7 +72,7 @@ CREATE TABLE IF NOT EXISTS "cpiartifacts" (
     "cpi_item_version" real not NULL
 );
 
-CREATE TABLE "execution" (
+CREATE TABLE IF NOT EXISTS "execution" (
   "id" SERIAL PRIMARY KEY,
   "job_id" integer not NULL,
   "status" varchar

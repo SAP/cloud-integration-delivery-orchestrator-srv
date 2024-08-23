@@ -146,14 +146,19 @@ WHERE id =$1 LIMIT 1;
 -- name: GetTMStmpl :many
 SELECT * FROM tmstmpl;
 
--- name: UpdateTMStmpl :one
+-- name: UpdateTMStmplByID :one
 UPDATE tmstmpl
 SET step_id=$2, tms_config_id=$3, tms_node_id=$4, tms_tr_ids=$5, status=$6
 WHERE id=$1 RETURNING *;
 
--- name: DeleteTMStmpl :one
+
+-- name: DeleteTMStmplByID :one
 DELETE FROM tmstmpl
 WHERE id = $1  RETURNING *;
+
+-- name: DeleteTMStmplByStepID :one
+DELETE FROM tmstmpl
+WHERE step_id = $1  RETURNING *;
 
 
 -- name: CreateCPItmpl :one
@@ -172,10 +177,11 @@ $1, $2, $3, $4, $5, $6
 SELECT * FROM cpitmpl
 WHERE id =$1 LIMIT 1;
 
--- name: GetCPItmpl :many
-SELECT * FROM cpitmpl;
+-- name: GetCPItmplByStepID :many
+SELECT * FROM cpitmpl
+WHERE step_id = $1;
 
--- name: UpdateCPItmpl :one
+-- name: UpdateCPItmplByID :one
 UPDATE cpitmpl
 SET step_id=$2, cpi_config_id=$3, cpi_package_ids=$4, cpi_iflow_ids=$5, cpi_script_ids=$6, status=$7
 WHERE id=$1 RETURNING *;
@@ -183,3 +189,37 @@ WHERE id=$1 RETURNING *;
 -- name: DeleteCPItmpl :one
 DELETE FROM cpitmpl
 WHERE id = $1  RETURNING *;
+
+-- name: DeleteCPItmplByStepID :one
+DELETE FROM cpitmpl
+WHERE id = $1  RETURNING *;
+
+-- name: CreateCpiArtifact :one
+INSERT  INTO cpiartifacts (
+cpi_tmpl_id,
+cpi_item_id,
+cpi_item_version
+) VALUES (
+$1, $2, $3
+)RETURNING *;
+
+-- name: GetCpiArtifactsByCpiTmplID :many
+SELECT * FROM cpiartifacts
+WHERE cpi_tmpl_id = $1;
+
+-- name: GetCpiArtifactByID :one
+SELECT * FROM cpiartifacts
+WHERE id = $1 LIMIT 1;
+
+-- name: UpdateCpiArtifact :one
+UPDATE cpiartifacts
+SET cpi_tmpl_id = $2,  cpi_item_id = $3, cpi_item_version = $4
+WHERE id = $1 RETURNING *;
+
+-- name: DeleteCpiArtifactByID :one
+DELETE FROM cpiartifacts
+WHERE id = $1 RETURNING *;
+
+-- name: DeleteCpiArtifactByCpiTmplID :one
+DELETE FROM cpiartifacts
+WHERE cpi_tmpl_id = $1 RETURNING *;
