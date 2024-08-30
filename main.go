@@ -40,8 +40,7 @@ func main() {
 		v1Group.GET("/job", handler.GetJobs)
 		v1Group.POST("/job", handler.CreateJob)
 		v1Group.DELETE("/job/:id", handler.DeleteJob)
-		v1Group.PUT("/job/:id", handler.UpdateJob)
-		v1Group.GET("/job/:id", handler.GetJobyID)
+		v1Group.PUT("/job", handler.UpdateJobAndStep)
 		v1Group.POST("/job/:id", handler.ExecuteJob)
 
 		v1Group.GET("/step", handler.GetSteps)
@@ -56,8 +55,13 @@ func main() {
 		v1Group.GET("/tanant/packages", handler.GetPackagesHandler)             //get all packages under a tenant
 		v1Group.GET("/tenant/packages/iflows", handler.GetPackageIflowsHandler) // get all iflows under a package
 
-		v1Group.GET("/tms/Nodes", handler.GetTmsNodesHandler)
-		v1Group.GET("tms/trs", handler.GetTranportRequestsHandler)
+		v1Group.GET("/tms/nodes", handler.GetTmsNodesHandler)
+		v1Group.GET("/tms/trs", handler.GetTranportRequestsHandler)
+
+		v1Group.POST("/importStep", handler.CreateImportStep)
+		v1Group.POST("/deployStep", handler.CreateDeployStep)
+
+		v1Group.GET("/job/:id", handler.GetJobByID)
 
 	}
 

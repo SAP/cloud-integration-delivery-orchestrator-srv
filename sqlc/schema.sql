@@ -14,7 +14,7 @@ CREATE TABLE "groups" (
 );
 
 
-CREATE TABLE IF NOT EXISTS "ApiEndpoint" (
+CREATE TABLE IF NOT EXISTS "api_endpoint" (
   "id" SERIAL PRIMARY KEY,
   "name" varchar not NULL,
   "description" varchar,
@@ -32,8 +32,8 @@ CREATE TABLE IF NOT EXISTS "ApiEndpoint" (
 
 CREATE TABLE "job" (
   "id" SERIAL PRIMARY KEY,
-  "name" varchar not NULL,
-  "steps" integer[] ,
+  "name" varchar,
+  "description" varchar,
   "status" varchar
 );
 
@@ -76,4 +76,29 @@ CREATE TABLE "execution" (
   "id" SERIAL PRIMARY KEY,
   "job_id" integer not NULL,
   "status" varchar
+);
+
+CREATE TABLE IF NOT EXISTS "import_step" (
+  "id" SERIAL PRIMARY KEY,
+  "job_id" integer not NULL,
+  "sequence" integer not NULL,
+  "status" varchar not NULL,
+  "endpoint_id" integer not NULL,
+  "transport_node_id" integer not NULL,
+  "transport_node_name" varchar not NULL,
+  "transport_requests" integer[],
+
+  "created_at" timestamptz NOT NULL DEFAULT (now())
+);
+
+CREATE TABLE IF NOT EXISTS "deploy_step" (
+  "id" SERIAL PRIMARY KEY,
+  "job_id" integer not NULL,
+  "sequence" integer not NULL,
+  "status" varchar not NULL,
+  "endpoint_id" integer not NULL, -- ApiEndpoint
+  "package_id" integer not NULL,
+  "artifact_ids" integer[],
+
+  "created_at" timestamptz NOT NULL DEFAULT (now())
 );

@@ -24,7 +24,7 @@ POST http://127.0.0.1:9000/api/v1/apiEndpoint
     "type":"TMS",
     "description": "???",
     "authUrl":"https://stage-devops.authentication.sap.hana.ondemand.com/oauth/token",
-    "apiUrl":"https://transport-service-app-backend.ts.cfapps.sap.hana.ondemand.com",
+    "apiUrl":"https://transport-service-app-backend.ts.cfapps.sap.hana.ondemand.com/v2",
     "clientId":"sb-9db92843-8155-437e-a5d9-d84ac1cfc5d7!b14446|alm-ts-backend!b339",
     "clientSecret":"REDACTED"
 }
@@ -38,3 +38,42 @@ GET http://127.0.0.1:9000/api/v1/tenant/packages/iflows?tenant=4&package=SAPMaCo
 
 ### 
 GET http://127.0.0.1:9000/api/v1/tms/Nodes?tenant=3
+
+
+###
+POST http://127.0.0.1:9000/api/v1/importStep
+
+{
+    "job_id": 0,
+    "status": "initial",
+    "sequence": 2,
+    "endpoint_id": 3,
+    "transport_node": 10,
+    "transport_requests": [10,312,33,8960]
+}
+
+###
+POST http://127.0.0.1:9000/api/v1/deployStep
+
+{
+    "job_id": 0,
+    "status": "initial",
+    "sequence": 3,
+    "endpoint_id": 3,
+    "package_id": 10,
+    "artifact_ids": [11,3234,12331,4423]
+}
+
+###
+GET http://127.0.0.1:9000/api/v1/steps/0
+
+###
+POST http://127.0.0.1:9000/api/v1/job
+
+{
+    "name": "Job 01",
+    "steps": []
+}
+
+###
+GET http://127.0.0.1:9000/api/v1/job/3

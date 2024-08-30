@@ -44,6 +44,6 @@ migrateDown:
 	migrate -database ${POSTGRESQL_URL} -path migrations down
 
 migrateForce:
-	migrate  -database ${POSTGRESQL_URL} -path migrations force 20240809073908
+	migrate  -database ${POSTGRESQL_URL} -path migrations force 20240828090143
 
 .PHONY: all fmt run build clean

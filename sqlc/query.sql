@@ -32,27 +32,27 @@ SELECT * FROM groups
 ORDER BY group_name;
 
 -- name: GetApiEndpointById :one
-SELECT * FROM "ApiEndpoint"
+SELECT * FROM api_endpoint
 WHERE id = $1;
 
 -- name: GetApiEndpointsByType :many
-SELECT * FROM "ApiEndpoint"
+SELECT * FROM api_endpoint
 WHERE type = $1;
 
 -- name: GetApiEndpointsAll :many
-SELECT * FROM "ApiEndpoint";
+SELECT * FROM api_endpoint;
 
 -- name: DeleteApiEndpointById :one
-DELETE FROM "ApiEndpoint"
+DELETE FROM api_endpoint
 WHERE id = $1 RETURNING *;
 
 -- name: UpdateApiEndpointById :one
-UPDATE  "ApiEndpoint"
+UPDATE  api_endpoint
 SET name = $2, type=$3, description=$4, "authUrl"=$5, "apiUrl"=$6, "clientId"=$7, "clientSecret"=$8, status=$9
 WHERE id = $1  RETURNING *;
 
 -- name: CreateApiendpoint :one
-INSERT INTO "ApiEndpoint" (
+INSERT INTO api_endpoint (
   name,
   type,
   description,
@@ -72,9 +72,10 @@ INSERT INTO "ApiEndpoint" (
 -- name: CreateJob :one
 INSERT INTO job (
   name,
-  steps
+  description,
+  status
 ) VALUES (
-  $1, $2
+  $1, $2, $3
 ) RETURNING *;
 
 -- name: GetJobByID :one
@@ -86,22 +87,22 @@ SELECT * FROM job;
 
 -- name: UpdateJobByID :one
 UPDATE job
-SET name=$2,steps = $3
-WHERE id = $1 RETURNING *;
+SET name=$2, description=$3, status=$4
+WHERE id=$1 RETURNING *;
 
 -- name: DeleteJobByID :one
 DELETE FROM job
 WHERE id = $1 RETURNING *;
 
 -- name: CreateStep :one
-INSERT  INTO step (
+INSERT INTO step (
     job_id,
     name,
     templ_type,
     status
 ) VALUES (
     $1, $2, $3, $4
-)RETURNING *;
+) RETURNING *;
 
 -- name: GetStepByID :one
 SELECT * FROM step
@@ -223,3 +224,41 @@ WHERE id = $1 RETURNING *;
 -- name: DeleteCpiArtifactByCpiTmplID :one
 DELETE FROM cpiartifacts
 WHERE cpi_tmpl_id = $1 RETURNING *;
+
+
+-- name: InsertImportStep :one
+INSERT INTO import_step (
+  job_id,
+  status,
+  sequence,
+  endpoint_id,
+  transport_node_id,
+  transport_node_name,
+  transport_requests
+) VALUES (
+  $1, $2, $3, $4, $5, $6, $7
+) RETURNING *;
+
+-- name: InsertDeployStep :one
+INSERT INTO deploy_step (
+  job_id,
+  status,
+  sequence,
+  endpoint_id,
+  package_id,
+  artifact_ids
+) VALUES (
+  $1, $2, $3, $4, $5, $6
+) RETURNING *;
+
+-- name: SelectImportStepsByJobId :many
+SELECT * From import_step WHERE job_id=$1;
+
+-- name: SelectDeployStepsByJobId :many
+SELECT * FROM deploy_step WHERE job_id=$1;
+
+
+-- name: UpdateImportStep :one
+UPDATE import_step
+SET status=$2, endpoint_id=$3, transport_node_id=$4, transport_node_name=$5, transport_requests=$6, sequence=$7
+WHERE id=$1 RETURNING *;

@@ -209,7 +209,7 @@ func (t *TMSClient) GetNodeName(nodeID int) string {
 }
 
 type NodeTransportRequest struct {
-	ID                 string    `json:"id"`
+	ID                 int       `json:"id"`
 	Status             string    `json:"status"`
 	Archived           bool      `json:"archived"`
 	Position           int       `json:"position"`

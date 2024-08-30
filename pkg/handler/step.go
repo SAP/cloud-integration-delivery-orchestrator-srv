@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -324,5 +325,68 @@ func DeleteStepByJobID(ctx *gin.Context) {
 		"status": "success",
 		"code":   http.StatusOK,
 		"result": stepIDList,
+	})
+}
+
+func CreateImportStep(ctx *gin.Context) {
+	var importStepParams db.InsertImportStepParams
+	err := ctx.BindJSON(&importStepParams)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"msg": fmt.Sprintf("Invalid request params: %s", err),
+		})
+		return
+	}
+	conn, _ := pgx.Connect(ctx, DBSource)
+	query := db.New(conn)
+	step, err := query.InsertImportStep(ctx, importStepParams)
+	if err != nil {
+		logger.Error(err)
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{
+		"result": step,
+	})
+}
+
+func UpdateImportStep(ctx *gin.Context) {
+	var updateImportStepParams db.UpdateImportStepParams
+	err := ctx.BindJSON(&updateImportStepParams)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"result": fmt.Sprintf("Invalid request params: %s", err),
+		})
+		return
+	}
+	conn, _ := pgx.Connect(ctx, DBSource)
+	query := db.New(conn)
+	importStep, err := query.UpdateImportStep(ctx, updateImportStepParams)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, fmt.Sprintf("Internal server error: %s", err))
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{
+		"result": importStep,
+	})
+}
+
+func CreateDeployStep(ctx *gin.Context) {
+	var deployParams db.InsertDeployStepParams
+	err := ctx.BindJSON(&deployParams)
+	if err != nil {
+		return
+	}
+	conn, err := pgx.Connect(ctx, DBSource)
+	if err != nil {
+		logger.Error(err)
+		return
+	}
+	step, err := db.New(conn).InsertDeployStep(ctx, deployParams)
+	if err != nil {
+		logger.Error(err)
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{
+		"result": step,
 	})
 }
