@@ -108,7 +108,7 @@ func GetEndpointsByType(ctx *gin.Context) {
 	}
 	ctx.JSON(http.StatusOK, gin.H{
 		"status": 200,
-		"data":   apiEndpoints,
+		"result": apiEndpoints,
 	})
 }
 

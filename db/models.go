@@ -44,14 +44,15 @@ type Cpitmpl struct {
 }
 
 type DeployStep struct {
-	ID          int       `db:"id" json:"id"`
-	JobID       int       `db:"job_id" json:"job_id"`
-	Sequence    int       `db:"sequence" json:"sequence"`
-	Status      string    `db:"status" json:"status"`
-	EndpointID  int       `db:"endpoint_id" json:"endpoint_id"`
-	PackageID   int       `db:"package_id" json:"package_id"`
-	ArtifactIds []int     `db:"artifact_ids" json:"artifact_ids"`
-	CreatedAt   time.Time `db:"created_at" json:"created_at"`
+	ID           int       `db:"id" json:"id"`
+	JobID        int       `db:"job_id" json:"job_id"`
+	Sequence     int       `db:"sequence" json:"sequence"`
+	Status       string    `db:"status" json:"status"`
+	EndpointID   int       `db:"endpoint_id" json:"endpoint_id"`
+	EndpointName string    `db:"endpoint_name" json:"endpoint_name"`
+	PackageID    string    `db:"package_id" json:"package_id"`
+	ArtifactIds  []string  `db:"artifact_ids" json:"artifact_ids"`
+	CreatedAt    time.Time `db:"created_at" json:"created_at"`
 }
 
 type Execution struct {

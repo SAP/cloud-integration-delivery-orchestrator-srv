@@ -245,10 +245,11 @@ INSERT INTO deploy_step (
   status,
   sequence,
   endpoint_id,
+  endpoint_name,
   package_id,
   artifact_ids
 ) VALUES (
-  $1, $2, $3, $4, $5, $6
+  $1, $2, $3, $4, $5, $6, $7
 ) RETURNING *;
 
 -- name: SelectImportStepsByJobId :many
@@ -261,4 +262,10 @@ SELECT * FROM deploy_step WHERE job_id=$1;
 -- name: UpdateImportStep :one
 UPDATE import_step
 SET status=$2, endpoint_id=$3, transport_node_id=$4, transport_node_name=$5, transport_requests=$6, sequence=$7
+WHERE id=$1 RETURNING *;
+
+
+-- name: UpdateDeployStep :one
+UPDATE deploy_step
+SET status=$2, endpoint_id=$3, sequence=$4, endpoint_name=$5, package_id=$6, artifact_ids=$7
 WHERE id=$1 RETURNING *;

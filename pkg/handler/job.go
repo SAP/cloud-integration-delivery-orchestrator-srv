@@ -317,23 +317,24 @@ func DeleteJob(ctx *gin.Context) {
 }
 
 type StepReq struct {
-	Id                int    `json:"id"`
-	Status            string `json:"status"`
-	Type              string `json:"type"`
-	EndpointId        int    `json:"endpoint_id"`
-	TransportNodeId   int    `json:"transport_node_id"`
-	TransportNodeName string `json:"transport_node_name"`
-	TransportRequests []int  `json:"transport_requests"`
-	PackageId         int    `json:"package_id"`
-	ArtifactIds       []int  `json:"artifact_ids"`
+	Id                int      `json:"id"`
+	Status            string   `json:"status"`
+	Type              string   `json:"type"`
+	EndpointId        int      `json:"endpoint_id"`
+	EndpointName      string   `json:"endpoint_name"`
+	TransportNodeId   int      `json:"transport_node_id"`
+	TransportNodeName string   `json:"transport_node_name"`
+	TransportRequests []int    `json:"transport_requests"`
+	PackageId         string   `json:"package_id"`
+	ArtifactIds       []string `json:"artifact_ids"`
 }
 type JobReq struct {
 	db.Job
 	Steps []StepReq `json:"steps"`
 }
 
-// Update Job and steps within it
-func UpdateJobAndStep(ctx *gin.Context) {
+// Update or Insert Job and steps within it
+func UpSertJobWithStep(ctx *gin.Context) {
 	var jobReq JobReq
 
 	err := ctx.BindJSON(&jobReq)
@@ -361,8 +362,8 @@ func UpdateJobAndStep(ctx *gin.Context) {
 	// Update Job itself
 	updateJobParams := &db.UpdateJobByIDParams{
 		ID:          jobReq.ID,
-		Name:        jobReq.Description,
-		Description: jobReq.Name,
+		Name:        jobReq.Name,
+		Description: jobReq.Description,
 		Status:      "Submitted",
 	}
 
@@ -415,6 +416,39 @@ func UpdateJobAndStep(ctx *gin.Context) {
 				return
 			}
 		} else if step.Type == "Deploy" {
+			if step.Id == -1 {
+				_, err := query.InsertDeployStep(ctx, db.InsertDeployStepParams{
+					JobID:        jobReq.ID,
+					Status:       "Submitted",
+					Sequence:     i,
+					EndpointID:   step.EndpointId,
+					EndpointName: step.EndpointName,
+					PackageID:    step.PackageId,
+					ArtifactIds:  step.ArtifactIds,
+				})
+				if err != nil {
+					ctx.JSON(http.StatusInternalServerError, gin.H{
+						"msg": fmt.Sprintf("Internal Server Error: %s", err),
+					})
+					return
+				}
+				continue
+			}
+			// Update
+			_, err := query.UpdateDeployStep(ctx, db.UpdateDeployStepParams{
+				ID:           step.Id,
+				Status:       "Submitted",
+				EndpointID:   step.EndpointId,
+				EndpointName: step.EndpointName,
+				PackageID:    step.PackageId,
+				ArtifactIds:  step.ArtifactIds,
+			})
+			if err != nil {
+				ctx.JSON(http.StatusInternalServerError, gin.H{
+					"msg": fmt.Sprintf("Internal Server Error: %s", err),
+				})
+				return
+			}
 
 		}
 

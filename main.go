@@ -40,8 +40,9 @@ func main() {
 		v1Group.GET("/job", handler.GetJobs)
 		v1Group.POST("/job", handler.CreateJob)
 		v1Group.DELETE("/job/:id", handler.DeleteJob)
-		v1Group.PUT("/job", handler.UpdateJobAndStep)
+		v1Group.PUT("/job", handler.UpSertJobWithStep)
 		v1Group.POST("/job/:id", handler.ExecuteJob)
+		v1Group.GET("/job/:id", handler.GetJobByID)
 
 		v1Group.GET("/step", handler.GetSteps)
 		v1Group.POST("/step", handler.CreateStep)
@@ -60,8 +61,6 @@ func main() {
 
 		v1Group.POST("/importStep", handler.CreateImportStep)
 		v1Group.POST("/deployStep", handler.CreateDeployStep)
-
-		v1Group.GET("/job/:id", handler.GetJobByID)
 
 	}
 

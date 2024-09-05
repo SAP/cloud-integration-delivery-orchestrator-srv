@@ -245,7 +245,7 @@ func (t *TMSClient) GetNodeTransportRequests(nodeID int) ([]NodeTransportRequest
 	}
 	respBodyContent, errReq := t.Do(request)
 	if errReq != nil {
-		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
+		logger.Errorf("Error when getting response content, the error message is %s", errReq)
 		return []NodeTransportRequest{}, errReq
 	}
 

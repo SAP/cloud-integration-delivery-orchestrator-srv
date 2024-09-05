@@ -990,20 +990,22 @@ INSERT INTO deploy_step (
   status,
   sequence,
   endpoint_id,
+  endpoint_name,
   package_id,
   artifact_ids
 ) VALUES (
-  $1, $2, $3, $4, $5, $6
-) RETURNING id, job_id, sequence, status, endpoint_id, package_id, artifact_ids, created_at
+  $1, $2, $3, $4, $5, $6, $7
+) RETURNING id, job_id, sequence, status, endpoint_id, endpoint_name, package_id, artifact_ids, created_at
 `
 
 type InsertDeployStepParams struct {
-	JobID       int    `db:"job_id" json:"job_id"`
-	Status      string `db:"status" json:"status"`
-	Sequence    int    `db:"sequence" json:"sequence"`
-	EndpointID  int    `db:"endpoint_id" json:"endpoint_id"`
-	PackageID   int    `db:"package_id" json:"package_id"`
-	ArtifactIds []int  `db:"artifact_ids" json:"artifact_ids"`
+	JobID        int      `db:"job_id" json:"job_id"`
+	Status       string   `db:"status" json:"status"`
+	Sequence     int      `db:"sequence" json:"sequence"`
+	EndpointID   int      `db:"endpoint_id" json:"endpoint_id"`
+	EndpointName string   `db:"endpoint_name" json:"endpoint_name"`
+	PackageID    string   `db:"package_id" json:"package_id"`
+	ArtifactIds  []string `db:"artifact_ids" json:"artifact_ids"`
 }
 
 func (q *Queries) InsertDeployStep(ctx context.Context, arg InsertDeployStepParams) (DeployStep, error) {
@@ -1012,6 +1014,7 @@ func (q *Queries) InsertDeployStep(ctx context.Context, arg InsertDeployStepPara
 		arg.Status,
 		arg.Sequence,
 		arg.EndpointID,
+		arg.EndpointName,
 		arg.PackageID,
 		arg.ArtifactIds,
 	)
@@ -1022,6 +1025,7 @@ func (q *Queries) InsertDeployStep(ctx context.Context, arg InsertDeployStepPara
 		&i.Sequence,
 		&i.Status,
 		&i.EndpointID,
+		&i.EndpointName,
 		&i.PackageID,
 		&i.ArtifactIds,
 		&i.CreatedAt,
@@ -1079,7 +1083,7 @@ func (q *Queries) InsertImportStep(ctx context.Context, arg InsertImportStepPara
 }
 
 const selectDeployStepsByJobId = `-- name: SelectDeployStepsByJobId :many
-SELECT id, job_id, sequence, status, endpoint_id, package_id, artifact_ids, created_at FROM deploy_step WHERE job_id=$1
+SELECT id, job_id, sequence, status, endpoint_id, endpoint_name, package_id, artifact_ids, created_at FROM deploy_step WHERE job_id=$1
 `
 
 func (q *Queries) SelectDeployStepsByJobId(ctx context.Context, jobID int) ([]DeployStep, error) {
@@ -1097,6 +1101,7 @@ func (q *Queries) SelectDeployStepsByJobId(ctx context.Context, jobID int) ([]De
 			&i.Sequence,
 			&i.Status,
 			&i.EndpointID,
+			&i.EndpointName,
 			&i.PackageID,
 			&i.ArtifactIds,
 			&i.CreatedAt,
@@ -1259,6 +1264,47 @@ func (q *Queries) UpdateCpiArtifact(ctx context.Context, arg UpdateCpiArtifactPa
 		&i.CpiTmplID,
 		&i.CpiItemID,
 		&i.CpiItemVersion,
+	)
+	return i, err
+}
+
+const updateDeployStep = `-- name: UpdateDeployStep :one
+UPDATE deploy_step
+SET status=$2, endpoint_id=$3, sequence=$4, endpoint_name=$5, package_id=$6, artifact_ids=$7
+WHERE id=$1 RETURNING id, job_id, sequence, status, endpoint_id, endpoint_name, package_id, artifact_ids, created_at
+`
+
+type UpdateDeployStepParams struct {
+	ID           int      `db:"id" json:"id"`
+	Status       string   `db:"status" json:"status"`
+	EndpointID   int      `db:"endpoint_id" json:"endpoint_id"`
+	Sequence     int      `db:"sequence" json:"sequence"`
+	EndpointName string   `db:"endpoint_name" json:"endpoint_name"`
+	PackageID    string   `db:"package_id" json:"package_id"`
+	ArtifactIds  []string `db:"artifact_ids" json:"artifact_ids"`
+}
+
+func (q *Queries) UpdateDeployStep(ctx context.Context, arg UpdateDeployStepParams) (DeployStep, error) {
+	row := q.db.QueryRow(ctx, updateDeployStep,
+		arg.ID,
+		arg.Status,
+		arg.EndpointID,
+		arg.Sequence,
+		arg.EndpointName,
+		arg.PackageID,
+		arg.ArtifactIds,
+	)
+	var i DeployStep
+	err := row.Scan(
+		&i.ID,
+		&i.JobID,
+		&i.Sequence,
+		&i.Status,
+		&i.EndpointID,
+		&i.EndpointName,
+		&i.PackageID,
+		&i.ArtifactIds,
+		&i.CreatedAt,
 	)
 	return i, err
 }
