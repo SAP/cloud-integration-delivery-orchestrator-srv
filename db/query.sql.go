@@ -409,6 +409,26 @@ func (q *Queries) DeleteCpiArtifactByID(ctx context.Context, id int) (Cpiartifac
 	return i, err
 }
 
+const deleteDeployStepByJobId = `-- name: DeleteDeployStepByJobId :exec
+DELETE FROM deploy_step
+WHERE job_id=$1
+`
+
+func (q *Queries) DeleteDeployStepByJobId(ctx context.Context, jobID int) error {
+	_, err := q.db.Exec(ctx, deleteDeployStepByJobId, jobID)
+	return err
+}
+
+const deleteImportStepByJobId = `-- name: DeleteImportStepByJobId :exec
+DELETE FROM import_step
+WHERE job_id=$1
+`
+
+func (q *Queries) DeleteImportStepByJobId(ctx context.Context, jobID int) error {
+	_, err := q.db.Exec(ctx, deleteImportStepByJobId, jobID)
+	return err
+}
+
 const deleteJobByID = `-- name: DeleteJobByID :one
 DELETE FROM job
 WHERE id = $1 RETURNING id, name, description, status

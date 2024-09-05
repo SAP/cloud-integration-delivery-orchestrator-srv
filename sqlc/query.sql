@@ -269,3 +269,12 @@ WHERE id=$1 RETURNING *;
 UPDATE deploy_step
 SET status=$2, endpoint_id=$3, sequence=$4, endpoint_name=$5, package_id=$6, artifact_ids=$7
 WHERE id=$1 RETURNING *;
+
+
+-- name: DeleteImportStepByJobId :exec
+DELETE FROM import_step
+WHERE job_id=$1;
+
+-- name: DeleteDeployStepByJobId :exec
+DELETE FROM deploy_step
+WHERE job_id=$1;

@@ -271,6 +271,8 @@ func GetJobyID(ctx *gin.Context) {
 		"result": job,
 	})
 }
+
+// Delete job and steps within it
 func DeleteJob(ctx *gin.Context) {
 
 	context := ctx.Request.Context()
@@ -295,9 +297,9 @@ func DeleteJob(ctx *gin.Context) {
 		})
 		return
 	}
-	idnumber, _ := strconv.Atoi(id)
+	jobId, _ := strconv.Atoi(id)
 
-	job, errorDBQuery := query.DeleteJobByID(context, idnumber)
+	job, errorDBQuery := query.DeleteJobByID(context, jobId)
 	if errorDBQuery != nil {
 		logger.Errorf("Error when deleting job, error message is %s", errorDBQuery)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{
@@ -307,6 +309,17 @@ func DeleteJob(ctx *gin.Context) {
 		})
 		return
 	}
+
+	err := query.DeleteImportStepByJobId(ctx, jobId)
+	err = query.DeleteDeployStepByJobId(ctx, jobId)
+	if err != nil {
+		msg := fmt.Sprintf("Internal Server Error while delete Steps: %s", err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"msg": msg,
+		})
+		return
+	}
+
 	ctx.JSON(http.StatusOK, gin.H{
 		"status": "success",
 		"msg":    "deleted",

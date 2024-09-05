@@ -77,3 +77,6 @@ POST http://127.0.0.1:9000/api/v1/job
 
 ###
 GET http://127.0.0.1:9000/api/v1/job/3
+
+###
+DELETE http://127.0.0.1:9000/api/v1/job/4
