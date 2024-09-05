@@ -520,3 +520,22 @@ func (c *CPIClient) DeleteScriptCollection(scriptCollectionID string, scriptColl
 	return nil
 
 }
+
+func (c *CPIClient) UndeployRuntimeArtifacts(artifactID string) error {
+
+	childCtx, cancel := context.WithCancel(c.context)
+	defer cancel()
+	fullURL := fmt.Sprintf("%s/IntegrationRuntimeArtifacts('%s')", c.CpiApiURL, artifactID)
+	logger.Infof("Starting to undeploy artifact %s on tenant %s\n", artifactID, fullURL)
+	request := clientRequest{
+		ctx:    childCtx,
+		method: http.MethodDelete,
+		apiURL: fullURL,
+	}
+	_, errReq := c.Do(request)
+	if errReq != nil {
+		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
+		return errReq
+	}
+	return nil
+}
