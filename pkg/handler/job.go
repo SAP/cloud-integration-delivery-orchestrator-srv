@@ -451,6 +451,7 @@ func UpSertJobWithStep(ctx *gin.Context) {
 			_, err := query.UpdateDeployStep(ctx, db.UpdateDeployStepParams{
 				ID:           step.Id,
 				Status:       "Submitted",
+				Sequence:     i,
 				EndpointID:   step.EndpointId,
 				EndpointName: step.EndpointName,
 				PackageID:    step.PackageId,

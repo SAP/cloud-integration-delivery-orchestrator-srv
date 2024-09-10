@@ -278,3 +278,11 @@ WHERE job_id=$1;
 -- name: DeleteDeployStepByJobId :exec
 DELETE FROM deploy_step
 WHERE job_id=$1;
+
+-- name: DeleteImportStepById :exec
+DELETE FROM import_step
+WHERE id=$1;
+
+-- name: DeleteDeployStepById :exec
+DELETE FROM deploy_step
+WHERE id=$1;

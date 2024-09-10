@@ -40,13 +40,13 @@ func main() {
 		v1Group.GET("/job", handler.GetJobs)
 		v1Group.POST("/job", handler.CreateJob)
 		v1Group.DELETE("/job/:id", handler.DeleteJob)
-		v1Group.PUT("/job", handler.UpSertJobWithStep)
+		v1Group.PUT("/job", handler.UpSertJobWithStep) // update or insert steps within a job
 		v1Group.POST("/job/:id", handler.ExecuteJob)
 		v1Group.GET("/job/:id", handler.GetJobByID)
 
 		v1Group.GET("/step", handler.GetSteps)
 		v1Group.POST("/step", handler.CreateStep)
-		v1Group.DELETE("/step/:id", handler.DeleteStepByID)
+		v1Group.DELETE("/step", handler.DeleteStepByID)
 		v1Group.DELETE("/step/job/:id", handler.DeleteStepByJobID)
 		v1Group.PUT("/step/:id", handler.UpdateStepByID)
 		v1Group.PUT("/step/job", handler.UpdateStepByID)

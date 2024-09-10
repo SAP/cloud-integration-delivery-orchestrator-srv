@@ -236,9 +236,8 @@ func UpdateStepByJobID(ctx *gin.Context) {
 
 }
 func DeleteStepByID(ctx *gin.Context) {
-
-	context := ctx.Request.Context()
-	id := ctx.Param("id")
+	id := ctx.Query("id")
+	step_type := ctx.Query("type")
 	if id == "" {
 		logger.Error("invalid request, please supply the id in the url")
 		ctx.JSON(http.StatusBadRequest, gin.H{
@@ -248,7 +247,7 @@ func DeleteStepByID(ctx *gin.Context) {
 		})
 		return
 	}
-	dbConn, errDBconn := pgx.Connect(context, DBSource)
+	dbConn, errDBconn := pgx.Connect(ctx, DBSource)
 	if errDBconn != nil {
 		logger.Errorf("error when connecting to the database, please contact your system administrator, error message is %s", errDBconn)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{
@@ -261,23 +260,29 @@ func DeleteStepByID(ctx *gin.Context) {
 
 	query := db.New(dbConn)
 
-	idnumber, _ := strconv.Atoi(id)
-	logger.Infof("deleting step with id %d", idnumber)
-	step, errorDBQuery := query.DeleteStepByID(context, idnumber)
-	if errorDBQuery != nil {
-		logger.Errorf("Error when deleting job, error message is %s", errorDBQuery)
-		ctx.JSON(http.StatusServiceUnavailable, gin.H{
-			"status": "failed",
-			"msg":    "Error when deleting job",
-			"code":   http.StatusServiceUnavailable,
+	step_id, _ := strconv.Atoi(id)
+	logger.Infof("deleting step with id %d", step_id)
+
+	var err error
+	if step_type == "Import" {
+		err = query.DeleteImportStepById(ctx, step_id)
+	} else if step_type == "Deploy" {
+		err = query.DeleteDeployStepById(ctx, step_id)
+	} else {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"msg": fmt.Sprintf("step type %s, is neither 'Import' nor 'Deploy'", step_type),
 		})
 		return
 	}
-
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"msg": fmt.Sprintf("internal server error while deleting %s step %d", step_type, step_id),
+		})
+		return
+	}
 	ctx.JSON(http.StatusOK, gin.H{
-		"status": "success",
-		"code":   http.StatusOK,
-		"result": step.ID,
+		"result": step_id,
+		"msg":    fmt.Sprintf("%s step %d deleted", step_type, step_id),
 	})
 }
 func DeleteStepByJobID(ctx *gin.Context) {
