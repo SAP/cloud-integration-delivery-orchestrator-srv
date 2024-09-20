@@ -2,17 +2,12 @@ package cpi
 
 import (
 	"context"
-	"os"
 	"testing"
 )
 
 func TestCPIPackages(t *testing.T) {
 	ctx := context.Background()
-	clientID, _ := os.LookupEnv("CPI_AUTH_CLIENT_ID")
-	clientSecret, _ := os.LookupEnv("CPI_AUTH_CLIENT_SECRET")
-	cpiAuthURL, _ := os.LookupEnv("CPI_AUTH_URL")
-	cpiApiURL, _ := os.LookupEnv("CPI_API_URL")
-	client, err1 := NewCPIClient(ctx, clientID, clientSecret, cpiAuthURL, cpiApiURL)
+	client, err1 := NewClient(ctx, "")
 	if err1 != nil {
 		t.Fatalf("error when authenticating, %v\n  ", err1)
 	}

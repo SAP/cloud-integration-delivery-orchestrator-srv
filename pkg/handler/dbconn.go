@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"net/http"
 	"os"
 
 	"github.com/gin-gonic/gin"
@@ -56,22 +55,17 @@ type DBClient struct {
 	Query  *db.Queries
 }
 
-func NewDBClient(ctx *gin.Context) DBClient {
-	dbConn, errDBconn := pgx.Connect(ctx, DBSource)
-	if errDBconn != nil {
-		logger.Errorf("error when connecting to the database, please contact your system administrator, error message is %s", errDBconn)
-		ctx.JSON(http.StatusServiceUnavailable, gin.H{
-			"status": "failed",
-			"msg":    "error when connecting to the database, please contact your system administrator",
-			"code":   http.StatusServiceUnavailable,
-		})
+func NewDBClient(ctx *gin.Context) (*DBClient, error) {
+	dbConn, err := pgx.Connect(ctx, DBSource)
+	if err != nil {
+		return nil, err
 	}
 
-	return DBClient{
+	return &DBClient{
 		ctx:    ctx,
 		DBConn: dbConn,
 		Query:  db.New(dbConn),
-	}
+	}, nil
 }
 
 func (d *DBClient) dbmigrate() {

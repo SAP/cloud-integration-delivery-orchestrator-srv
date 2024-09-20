@@ -10,105 +10,41 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-type ApiEndpoint struct {
-	ID           int         `db:"id" json:"id"`
-	Name         string      `db:"name" json:"name"`
-	Description  pgtype.Text `db:"description" json:"description"`
-	Type         string      `db:"type" json:"type"`
-	AuthUrl      string      `db:"authUrl" json:"authUrl"`
-	ApiUrl       string      `db:"apiUrl" json:"apiUrl"`
-	ClientId     string      `db:"clientId" json:"clientId"`
-	ClientSecret string      `db:"clientSecret" json:"clientSecret"`
-	Status       string      `db:"status" json:"status"`
-	ModifiedAt   string      `db:"modifiedAt" json:"modifiedAt"`
-	ModifiedBy   string      `db:"modifiedBy" json:"modifiedBy"`
-	CreatedAt    string      `db:"createdAt" json:"createdAt"`
-	CreatedBy    string      `db:"createdBy" json:"createdBy"`
-}
-
-type Cpiartifact struct {
-	ID             int     `db:"id" json:"id"`
-	CpiTmplID      int     `db:"cpi_tmpl_id" json:"cpi_tmpl_id"`
-	CpiItemID      string  `db:"cpi_item_id" json:"cpi_item_id"`
-	CpiItemVersion float32 `db:"cpi_item_version" json:"cpi_item_version"`
-}
-
-type Cpitmpl struct {
-	ID            int      `db:"id" json:"id"`
-	StepID        int      `db:"step_id" json:"step_id"`
-	CpiConfigID   int      `db:"cpi_config_id" json:"cpi_config_id"`
-	CpiPackageIds []string `db:"cpi_package_ids" json:"cpi_package_ids"`
-	CpiIflowIds   []string `db:"cpi_iflow_ids" json:"cpi_iflow_ids"`
-	CpiScriptIds  []string `db:"cpi_script_ids" json:"cpi_script_ids"`
-	Status        string   `db:"status" json:"status"`
-}
-
 type DeployStep struct {
-	ID           int       `db:"id" json:"id"`
-	JobID        int       `db:"job_id" json:"job_id"`
-	Sequence     int       `db:"sequence" json:"sequence"`
-	Status       string    `db:"status" json:"status"`
-	EndpointID   int       `db:"endpoint_id" json:"endpoint_id"`
-	EndpointName string    `db:"endpoint_name" json:"endpoint_name"`
-	PackageID    string    `db:"package_id" json:"package_id"`
-	ArtifactIds  []string  `db:"artifact_ids" json:"artifact_ids"`
-	CreatedAt    time.Time `db:"created_at" json:"created_at"`
+	ID          int      `db:"id" json:"id"`
+	JobID       int      `db:"job_id" json:"job_id"`
+	Sequence    int      `db:"sequence" json:"sequence"`
+	Status      string   `db:"status" json:"status"`
+	Endpoint    string   `db:"endpoint" json:"endpoint"`
+	PackageID   string   `db:"package_id" json:"package_id"`
+	ArtifactIds []string `db:"artifact_ids" json:"artifact_ids"`
 }
 
-type Execution struct {
-	ID     int    `db:"id" json:"id"`
-	JobID  int    `db:"job_id" json:"job_id"`
-	Status string `db:"status" json:"status"`
-}
-
-type Group struct {
-	ID        int    `db:"id" json:"id"`
-	GroupName string `db:"group_name" json:"group_name"`
+type ExecutionLog struct {
+	ID        int                `db:"id" json:"id"`
+	JobID     int                `db:"job_id" json:"job_id"`
+	Timestamp pgtype.Timestamptz `db:"timestamp" json:"timestamp"`
+	Log       pgtype.Text        `db:"log" json:"log"`
 }
 
 type ImportStep struct {
-	ID                int       `db:"id" json:"id"`
-	JobID             int       `db:"job_id" json:"job_id"`
-	Sequence          int       `db:"sequence" json:"sequence"`
-	Status            string    `db:"status" json:"status"`
-	EndpointID        int       `db:"endpoint_id" json:"endpoint_id"`
-	TransportNodeID   int       `db:"transport_node_id" json:"transport_node_id"`
-	TransportNodeName string    `db:"transport_node_name" json:"transport_node_name"`
-	TransportRequests []int     `db:"transport_requests" json:"transport_requests"`
-	CreatedAt         time.Time `db:"created_at" json:"created_at"`
+	ID                int    `db:"id" json:"id"`
+	JobID             int    `db:"job_id" json:"job_id"`
+	Sequence          int    `db:"sequence" json:"sequence"`
+	Status            string `db:"status" json:"status"`
+	TransportNodeID   int    `db:"transport_node_id" json:"transport_node_id"`
+	TransportNodeName string `db:"transport_node_name" json:"transport_node_name"`
+	TransportRequests []int  `db:"transport_requests" json:"transport_requests"`
 }
 
 type Job struct {
 	ID          int         `db:"id" json:"id"`
 	Name        pgtype.Text `db:"name" json:"name"`
+	Type        string      `db:"type" json:"type"`
 	Description pgtype.Text `db:"description" json:"description"`
 	Status      string      `db:"status" json:"status"`
-}
-
-type Step struct {
-	ID        int    `db:"id" json:"id"`
-	JobID     int    `db:"job_id" json:"job_id"`
-	Name      string `db:"name" json:"name"`
-	TemplType string `db:"templ_type" json:"templ_type"`
-	TemplID   int    `db:"templ_id" json:"templ_id"`
-	Status    string `db:"status" json:"status"`
-}
-
-type Tmstmpl struct {
-	ID          int    `db:"id" json:"id"`
-	StepID      int    `db:"step_id" json:"step_id"`
-	TmsConfigID int    `db:"tms_config_id" json:"tms_config_id"`
-	TmsNodeID   int    `db:"tms_node_id" json:"tms_node_id"`
-	TmsTrIds    []int  `db:"tms_tr_ids" json:"tms_tr_ids"`
-	Status      string `db:"status" json:"status"`
-}
-
-type User struct {
-	ID                int       `db:"id" json:"id"`
-	Username          string    `db:"username" json:"username"`
-	HashedPassword    string    `db:"hashed_password" json:"hashed_password"`
-	FullName          string    `db:"full_name" json:"full_name"`
-	Email             string    `db:"email" json:"email"`
-	PasswordChangedAt time.Time `db:"password_changed_at" json:"password_changed_at"`
-	CreatedAt         time.Time `db:"created_at" json:"created_at"`
+	CreatedAt   time.Time   `db:"created_at" json:"created_at"`
+	CreatedBy   pgtype.Text `db:"created_by" json:"created_by"`
+	ModifiedAt  time.Time   `db:"modified_at" json:"modified_at"`
+	ModifiedBy  pgtype.Text `db:"modified_by" json:"modified_by"`
 }

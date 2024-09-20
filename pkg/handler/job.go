@@ -11,11 +11,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.wdf.sap.corp/maco-mmt/maco-deploy/db"
 	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/cpi"
 	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/tms"
-	// "github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/cpi"
-	// "github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/tms"
 )
 
 type Step interface {
@@ -41,11 +40,7 @@ func (s *DeployStepResp) GetSeq() int {
 
 func (s *ImportStepResp) Execute(ctx *gin.Context, query *db.Queries) error {
 	logger.Infof("Starting to execute import task id %d", s.ID)
-	apiEndpoint, error := query.GetApiEndpointById(ctx, s.EndpointID)
-	if error != nil {
-		return error
-	}
-	tmsClient, error := tms.NewTMSClient(ctx, apiEndpoint.ClientId, apiEndpoint.ClientSecret, apiEndpoint.AuthUrl, apiEndpoint.ApiUrl)
+	tmsClient, error := tms.NewClient(ctx)
 	if error != nil {
 		return error
 	}
@@ -72,12 +67,7 @@ func (s *ImportStepResp) Execute(ctx *gin.Context, query *db.Queries) error {
 func (s *DeployStepResp) Execute(ctx *gin.Context, query *db.Queries) error {
 	logger.Infof("Starting to execute deployment task %d", s.JobID)
 
-	apiEndpoint, errorCpiConfig := query.GetApiEndpointById(ctx, s.EndpointID)
-	if errorCpiConfig != nil {
-		return fmt.Errorf("error when getting cpi config from database, error message is %s", errorCpiConfig)
-	}
-
-	cpiClient, errorCpiClient := cpi.NewCPIClient(ctx, apiEndpoint.ClientId, apiEndpoint.ClientSecret, apiEndpoint.AuthUrl, apiEndpoint.ApiUrl)
+	cpiClient, errorCpiClient := cpi.NewClient(ctx, s.Endpoint)
 	if errorCpiClient != nil {
 		return fmt.Errorf("error when authenticating to cpi tenant, error message is %s", errorCpiClient)
 	}
@@ -155,7 +145,6 @@ func getJobwithSteps(ctx *gin.Context, jobId int) (*db.Job, []Step, error) {
 }
 
 func CreateJob(ctx *gin.Context) {
-	context := ctx.Request.Context()
 	var createJobParams db.CreateJobParams
 	err := ctx.BindJSON(&createJobParams)
 	if err != nil {
@@ -167,52 +156,40 @@ func CreateJob(ctx *gin.Context) {
 		})
 		return
 	}
-	dbConn, errDBconn := pgx.Connect(context, DBSource)
-	if errDBconn != nil {
-		logger.Errorf("error when connecting to the database, please contact your system administrator, error message is %s", errDBconn)
-		ctx.JSON(http.StatusServiceUnavailable, gin.H{
-			"status": "failed",
-			"msg":    "error when connecting to the database",
-			"code":   http.StatusServiceUnavailable,
-		})
+	createJobParams.Status = "Submitted"
+	client, err := NewDBClient(ctx)
+	if err != nil {
+		logger.Error("error while connecting to db: %s", err)
 		return
 	}
-	query := db.New(dbConn)
-	createJobResp, error2 := query.CreateJob(context, createJobParams)
-	if error2 != nil {
-		logger.Errorf("Error when creating job, error message is %s", error2)
-		ctx.JSON(http.StatusServiceUnavailable, gin.H{
-			"status": "failed",
-			"msg":    "Error when creating job",
-			"code":   http.StatusServiceUnavailable,
-		})
+	job, err := client.Query.CreateJob(ctx, createJobParams)
+	if err != nil {
+		logger.Error("error in call CreateJob: %s", err)
 		return
 	}
+
 	ctx.JSON(http.StatusOK, gin.H{
-		"status": "success",
-		"code":   200,
-		"result": createJobResp,
+		"result": job,
 	})
 
 }
 
 func GetJobs(ctx *gin.Context) {
-	context := ctx.Request.Context()
-	dbConn, errDBconn := pgx.Connect(context, DBSource)
-	if errDBconn != nil {
-		logger.Errorf("error when connecting to the database, please contact your system administrator, error message is %s", errDBconn)
-		ctx.JSON(http.StatusServiceUnavailable, gin.H{
-			"status": "failed",
-			"msg":    "error when connecting to the database, please contact your system administrator",
-			"code":   http.StatusServiceUnavailable,
-		})
+	var jobs []db.Job
+	var err error
+	job_type := ctx.Query("type")
+	dbClient, err := NewDBClient(ctx)
+	if err != nil {
+		logger.Error("error while conecting to db for GetJobs: %s", err)
 		return
 	}
-	query := db.New(dbConn)
-
-	jobs, errorQuery := query.GetJobs(context)
-	if errorQuery != nil {
-		logger.Errorf("Error when retrieve jobs from database, error message is %s", errorQuery)
+	if len(job_type) > 0 { //return all jobs if no 'type' param
+		jobs, err = dbClient.Query.GetJobsByType(ctx, job_type)
+	} else {
+		jobs, err = dbClient.Query.GetJobs(ctx)
+	}
+	if err != nil {
+		logger.Errorf("Error when retrieve jobs from database, error message is %s", err)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{
 			"status": "failed",
 			"msg":    "Error when retrieve jobs from database",
@@ -225,6 +202,24 @@ func GetJobs(ctx *gin.Context) {
 		"code":   200,
 		"result": jobs,
 	})
+}
+
+func GetJobsByType(ctx *gin.Context) {
+	job_type := ctx.Query("type")
+	client, err := NewDBClient(ctx)
+	if err != nil {
+		logger.Error("error while connecting to db: %s", err)
+		return
+	}
+	jobs, err := client.Query.GetJobsByType(ctx, job_type)
+	if err != nil {
+		logger.Error("error while querying jobs by type: %s", err)
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{
+		"result": jobs,
+	})
+
 }
 func GetJobyID(ctx *gin.Context) {
 
@@ -311,6 +306,9 @@ func DeleteJob(ctx *gin.Context) {
 	}
 
 	err := query.DeleteImportStepByJobId(ctx, jobId)
+	if err != nil {
+		logger.Error(err)
+	}
 	err = query.DeleteDeployStepByJobId(ctx, jobId)
 	if err != nil {
 		msg := fmt.Sprintf("Internal Server Error while delete Steps: %s", err)
@@ -335,6 +333,7 @@ type StepReq struct {
 	Type              string   `json:"type"`
 	EndpointId        int      `json:"endpoint_id"`
 	EndpointName      string   `json:"endpoint_name"`
+	Endpoint          string   `json:"endpoint"`
 	TransportNodeId   int      `json:"transport_node_id"`
 	TransportNodeName string   `json:"transport_node_name"`
 	TransportRequests []int    `json:"transport_requests"`
@@ -378,6 +377,8 @@ func UpSertJobWithStep(ctx *gin.Context) {
 		Name:        jobReq.Name,
 		Description: jobReq.Description,
 		Status:      "Submitted",
+		ModifiedAt:  pgtype.Timestamptz{Time: time.Now(), Valid: true},
+		ModifiedBy:  pgtype.Text{String: "USER", Valid: true},
 	}
 
 	updateJobByIDResp, errorDBQuery := query.UpdateJobByID(ctx, *updateJobParams)
@@ -399,7 +400,6 @@ func UpSertJobWithStep(ctx *gin.Context) {
 					JobID:             jobReq.ID,
 					Status:            "Submitted",
 					Sequence:          i,
-					EndpointID:        step.EndpointId,
 					TransportNodeID:   step.TransportNodeId,
 					TransportNodeName: step.TransportNodeName,
 					TransportRequests: step.TransportRequests,
@@ -417,7 +417,6 @@ func UpSertJobWithStep(ctx *gin.Context) {
 				ID:                step.Id,
 				Sequence:          i,
 				Status:            "Submitted",
-				EndpointID:        step.EndpointId,
 				TransportNodeID:   step.TransportNodeId,
 				TransportNodeName: step.TransportNodeName,
 				TransportRequests: step.TransportRequests,
@@ -431,13 +430,12 @@ func UpSertJobWithStep(ctx *gin.Context) {
 		} else if step.Type == "Deploy" {
 			if step.Id == -1 {
 				_, err := query.InsertDeployStep(ctx, db.InsertDeployStepParams{
-					JobID:        jobReq.ID,
-					Status:       "Submitted",
-					Sequence:     i,
-					EndpointID:   step.EndpointId,
-					EndpointName: step.EndpointName,
-					PackageID:    step.PackageId,
-					ArtifactIds:  step.ArtifactIds,
+					JobID:       jobReq.ID,
+					Status:      "Submitted",
+					Sequence:    i,
+					Endpoint:    step.Endpoint,
+					PackageID:   step.PackageId,
+					ArtifactIds: step.ArtifactIds,
 				})
 				if err != nil {
 					ctx.JSON(http.StatusInternalServerError, gin.H{
@@ -449,13 +447,12 @@ func UpSertJobWithStep(ctx *gin.Context) {
 			}
 			// Update
 			_, err := query.UpdateDeployStep(ctx, db.UpdateDeployStepParams{
-				ID:           step.Id,
-				Status:       "Submitted",
-				Sequence:     i,
-				EndpointID:   step.EndpointId,
-				EndpointName: step.EndpointName,
-				PackageID:    step.PackageId,
-				ArtifactIds:  step.ArtifactIds,
+				ID:          step.Id,
+				Status:      "Submitted",
+				Sequence:    i,
+				Endpoint:    step.Endpoint,
+				PackageID:   step.PackageId,
+				ArtifactIds: step.ArtifactIds,
 			})
 			if err != nil {
 				ctx.JSON(http.StatusInternalServerError, gin.H{

@@ -1,47 +1,24 @@
 package handler
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/jackc/pgx/v5"
-	"github.wdf.sap.corp/maco-mmt/maco-deploy/db"
 	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/cpi"
 	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/log"
+	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/remotecall"
 	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/tms"
 )
 
 var logger = log.NewLogger().Sugar()
-var tmsEndpoint db.ApiEndpoint
-
-// init. get default TMS api Endpoint
-func init() {
-	ctx := context.Background()
-	conn, error := pgx.Connect(ctx, DBSource)
-	if error != nil {
-		logger.Panic("Failed to connect to DB: %s", error)
-		return
-	}
-	query := db.New(conn)
-	tmsEndpoint, error = query.GetApiEndpointById(ctx, 3)
-	if error != nil {
-		logger.Panic("Failed to fetch default tms endpoint: %s", error)
-	}
-}
 
 // get all packages within a cpi tenant
 func GetPackagesHandler(ctx *gin.Context) {
-	context := ctx.Request.Context()
-	dbClient := NewDBClient(ctx)
 	cpi_tenant := ctx.Query("tenant")
-
-	cpi_id, _ := strconv.Atoi(cpi_tenant)
-	query := db.New(dbClient.DBConn)
-	cpiEndpoint, _ := query.GetApiEndpointById(context, cpi_id)
-	cpiClient, error := cpi.NewCPIClient(context, cpiEndpoint.ClientId, cpiEndpoint.ClientSecret, cpiEndpoint.AuthUrl, cpiEndpoint.ApiUrl)
+	cpiClient, error := cpi.NewClient(ctx, cpi_tenant)
 	packages, error := cpiClient.GetPackages()
 	if error != nil {
 		logger.Error("error while retrieving packages: %s", error)
@@ -58,14 +35,10 @@ func GetPackagesHandler(ctx *gin.Context) {
 // get all iflows under a package
 func GetPackageIflowsHandler(ctx *gin.Context) {
 	context := ctx.Request.Context()
-	dbClient := NewDBClient(ctx)
 	cpi_tenant := ctx.Query("tenant")
 	packageID := ctx.Query("package")
 
-	cpi_id, _ := strconv.Atoi(cpi_tenant)
-	query := db.New(dbClient.DBConn)
-	cpiEndpoint, _ := query.GetApiEndpointById(context, cpi_id)
-	cpiClient, _ := cpi.NewCPIClient(context, cpiEndpoint.ClientId, cpiEndpoint.ClientSecret, cpiEndpoint.AuthUrl, cpiEndpoint.ApiUrl)
+	cpiClient, _ := cpi.NewClient(context, cpi_tenant)
 	iflows, error := cpiClient.GetPackageIflows(packageID)
 	if error != nil {
 		logger.Error("Error while retrieving iflows within a package")
@@ -81,7 +54,7 @@ func GetPackageIflowsHandler(ctx *gin.Context) {
 
 func GetTmsNodesHandler(ctx *gin.Context) {
 
-	tmsClient, error := tms.NewTMSClient(ctx, tmsEndpoint.ClientId, tmsEndpoint.ClientSecret, tmsEndpoint.AuthUrl, tmsEndpoint.ApiUrl)
+	tmsClient, error := tms.NewClient(ctx)
 	if error != nil {
 		return
 	}
@@ -105,7 +78,7 @@ func GetTranportRequestsHandler(ctx *gin.Context) {
 		return
 	}
 
-	tmsClient, error := tms.NewTMSClient(ctx, tmsEndpoint.ClientId, tmsEndpoint.ClientSecret, tmsEndpoint.AuthUrl, tmsEndpoint.ApiUrl)
+	tmsClient, error := tms.NewClient(ctx)
 	if error != nil {
 		logger.Error(error)
 		return
@@ -117,5 +90,26 @@ func GetTranportRequestsHandler(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"status": 200, "result": trs})
+}
 
+type DestinationResp struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+	Url  string `json:"url"`
+}
+
+func GetDestinationsHandler(ctx *gin.Context) {
+	var destList []DestinationResp
+	for i, v := range remotecall.DestEnv() {
+		if strings.HasPrefix(i, "DEST_CPIAPI") {
+			destList = append(destList, DestinationResp{
+				Name: v.Name,
+				Type: v.Type,
+				Url:  v.URL,
+			})
+		}
+	}
+	ctx.JSON(http.StatusOK, gin.H{
+		"result": destList,
+	})
 }

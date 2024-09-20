@@ -2,17 +2,12 @@ package tms
 
 import (
 	"context"
-	"os"
 	"testing"
 )
 
 func TestTms(t *testing.T) {
-	tms_auth_url, _ := os.LookupEnv("TMS_AUTH_URL")
-	tms_api_url, _ := os.LookupEnv("TMS_API_URL")
-	tms_auth_client_id, _ := os.LookupEnv("TMS_AUTH_CLIENT_ID")
-	tms_auth_client_secret, _ := os.LookupEnv("TMS_AUTH_CLIENT_SECRET")
 	ctx := context.Background()
-	tmsClient, err1 := NewTMSClient(ctx, tms_auth_client_id, tms_auth_client_secret, tms_auth_url, tms_api_url)
+	tmsClient, err1 := NewClient(ctx)
 	if err1 != nil {
 		t.Fatalf("Error when creating tms client, error message %s", err1)
 	}

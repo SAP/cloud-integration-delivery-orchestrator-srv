@@ -35,24 +35,7 @@ sql:
           - go_type:
               type: "int"
             db_type: "pg_catalog.int4"
-          - go_type:
-              type: "time.Time"
+          - go_type: "time.Time"
             db_type: "timestamptz"
-          - go_type:
-              type: "int"
-            column: step.templ_id
-          - go_type:
-              type: "string"
-            column: job.status
-          - go_type:
-              type: "string"
-            column: step.status
-          - go_type:
-              type: "string"
-            column: tmstmpl.status
-          - go_type:
-              type: "string"
-            column: cpitmpl.status
-          - go_type:
-              type: "string"
-            column: execution.status
+          - go_type: "string"
+            db_type: "varchar"

@@ -11,400 +11,45 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const createApiendpoint = `-- name: CreateApiendpoint :one
-INSERT INTO api_endpoint (
-  name,
-  type,
-  description,
-  status,
-  "authUrl",
-  "apiUrl",
-  "clientId",
-  "clientSecret",
-  "createdAt",
-  "createdBy",
-  "modifiedAt",
-  "modifiedBy"
-) VALUES (
-  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
-) RETURNING id, name, description, type, "authUrl", "apiUrl", "clientId", "clientSecret", status, "modifiedAt", "modifiedBy", "createdAt", "createdBy"
-`
-
-type CreateApiendpointParams struct {
-	Name         string      `db:"name" json:"name"`
-	Type         string      `db:"type" json:"type"`
-	Description  pgtype.Text `db:"description" json:"description"`
-	Status       string      `db:"status" json:"status"`
-	AuthUrl      string      `db:"authUrl" json:"authUrl"`
-	ApiUrl       string      `db:"apiUrl" json:"apiUrl"`
-	ClientId     string      `db:"clientId" json:"clientId"`
-	ClientSecret string      `db:"clientSecret" json:"clientSecret"`
-	CreatedAt    string      `db:"createdAt" json:"createdAt"`
-	CreatedBy    string      `db:"createdBy" json:"createdBy"`
-	ModifiedAt   string      `db:"modifiedAt" json:"modifiedAt"`
-	ModifiedBy   string      `db:"modifiedBy" json:"modifiedBy"`
-}
-
-func (q *Queries) CreateApiendpoint(ctx context.Context, arg CreateApiendpointParams) (ApiEndpoint, error) {
-	row := q.db.QueryRow(ctx, createApiendpoint,
-		arg.Name,
-		arg.Type,
-		arg.Description,
-		arg.Status,
-		arg.AuthUrl,
-		arg.ApiUrl,
-		arg.ClientId,
-		arg.ClientSecret,
-		arg.CreatedAt,
-		arg.CreatedBy,
-		arg.ModifiedAt,
-		arg.ModifiedBy,
-	)
-	var i ApiEndpoint
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Description,
-		&i.Type,
-		&i.AuthUrl,
-		&i.ApiUrl,
-		&i.ClientId,
-		&i.ClientSecret,
-		&i.Status,
-		&i.ModifiedAt,
-		&i.ModifiedBy,
-		&i.CreatedAt,
-		&i.CreatedBy,
-	)
-	return i, err
-}
-
-const createCPItmpl = `-- name: CreateCPItmpl :one
-INSERT  INTO cpitmpl (
-step_id,
-cpi_config_id,
-cpi_package_ids,
-cpi_iflow_ids,
-cpi_script_ids,
-status
-) VALUES (
-$1, $2, $3, $4, $5, $6
-)RETURNING id, step_id, cpi_config_id, cpi_package_ids, cpi_iflow_ids, cpi_script_ids, status
-`
-
-type CreateCPItmplParams struct {
-	StepID        int      `db:"step_id" json:"step_id"`
-	CpiConfigID   int      `db:"cpi_config_id" json:"cpi_config_id"`
-	CpiPackageIds []string `db:"cpi_package_ids" json:"cpi_package_ids"`
-	CpiIflowIds   []string `db:"cpi_iflow_ids" json:"cpi_iflow_ids"`
-	CpiScriptIds  []string `db:"cpi_script_ids" json:"cpi_script_ids"`
-	Status        string   `db:"status" json:"status"`
-}
-
-func (q *Queries) CreateCPItmpl(ctx context.Context, arg CreateCPItmplParams) (Cpitmpl, error) {
-	row := q.db.QueryRow(ctx, createCPItmpl,
-		arg.StepID,
-		arg.CpiConfigID,
-		arg.CpiPackageIds,
-		arg.CpiIflowIds,
-		arg.CpiScriptIds,
-		arg.Status,
-	)
-	var i Cpitmpl
-	err := row.Scan(
-		&i.ID,
-		&i.StepID,
-		&i.CpiConfigID,
-		&i.CpiPackageIds,
-		&i.CpiIflowIds,
-		&i.CpiScriptIds,
-		&i.Status,
-	)
-	return i, err
-}
-
-const createCpiArtifact = `-- name: CreateCpiArtifact :one
-INSERT  INTO cpiartifacts (
-cpi_tmpl_id,
-cpi_item_id,
-cpi_item_version
-) VALUES (
-$1, $2, $3
-)RETURNING id, cpi_tmpl_id, cpi_item_id, cpi_item_version
-`
-
-type CreateCpiArtifactParams struct {
-	CpiTmplID      int     `db:"cpi_tmpl_id" json:"cpi_tmpl_id"`
-	CpiItemID      string  `db:"cpi_item_id" json:"cpi_item_id"`
-	CpiItemVersion float32 `db:"cpi_item_version" json:"cpi_item_version"`
-}
-
-func (q *Queries) CreateCpiArtifact(ctx context.Context, arg CreateCpiArtifactParams) (Cpiartifact, error) {
-	row := q.db.QueryRow(ctx, createCpiArtifact, arg.CpiTmplID, arg.CpiItemID, arg.CpiItemVersion)
-	var i Cpiartifact
-	err := row.Scan(
-		&i.ID,
-		&i.CpiTmplID,
-		&i.CpiItemID,
-		&i.CpiItemVersion,
-	)
-	return i, err
-}
-
-const createGroup = `-- name: CreateGroup :one
-INSERT INTO groups (
-  group_name
-) VALUES (
-  $1
-) RETURNING id, group_name
-`
-
-func (q *Queries) CreateGroup(ctx context.Context, groupName string) (Group, error) {
-	row := q.db.QueryRow(ctx, createGroup, groupName)
-	var i Group
-	err := row.Scan(&i.ID, &i.GroupName)
-	return i, err
-}
-
 const createJob = `-- name: CreateJob :one
 INSERT INTO job (
   name,
   description,
-  status
+  status,
+  type,
+  created_by
 ) VALUES (
-  $1, $2, $3
-) RETURNING id, name, description, status
+  $1, $2, $3, $4, $5
+) RETURNING id, name, type, description, status, created_at, created_by, modified_at, modified_by
 `
 
 type CreateJobParams struct {
 	Name        pgtype.Text `db:"name" json:"name"`
 	Description pgtype.Text `db:"description" json:"description"`
 	Status      string      `db:"status" json:"status"`
+	Type        string      `db:"type" json:"type"`
+	CreatedBy   pgtype.Text `db:"created_by" json:"created_by"`
 }
 
 func (q *Queries) CreateJob(ctx context.Context, arg CreateJobParams) (Job, error) {
-	row := q.db.QueryRow(ctx, createJob, arg.Name, arg.Description, arg.Status)
+	row := q.db.QueryRow(ctx, createJob,
+		arg.Name,
+		arg.Description,
+		arg.Status,
+		arg.Type,
+		arg.CreatedBy,
+	)
 	var i Job
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
-		&i.Description,
-		&i.Status,
-	)
-	return i, err
-}
-
-const createStep = `-- name: CreateStep :one
-INSERT INTO step (
-    job_id,
-    name,
-    templ_type,
-    status
-) VALUES (
-    $1, $2, $3, $4
-) RETURNING id, job_id, name, templ_type, templ_id, status
-`
-
-type CreateStepParams struct {
-	JobID     int    `db:"job_id" json:"job_id"`
-	Name      string `db:"name" json:"name"`
-	TemplType string `db:"templ_type" json:"templ_type"`
-	Status    string `db:"status" json:"status"`
-}
-
-func (q *Queries) CreateStep(ctx context.Context, arg CreateStepParams) (Step, error) {
-	row := q.db.QueryRow(ctx, createStep,
-		arg.JobID,
-		arg.Name,
-		arg.TemplType,
-		arg.Status,
-	)
-	var i Step
-	err := row.Scan(
-		&i.ID,
-		&i.JobID,
-		&i.Name,
-		&i.TemplType,
-		&i.TemplID,
-		&i.Status,
-	)
-	return i, err
-}
-
-const createTMStmpl = `-- name: CreateTMStmpl :one
-INSERT  INTO tmstmpl (
-step_id,
-tms_config_id,
-tms_node_id,
-tms_tr_ids,
-status
-) VALUES (
-$1, $2, $3, $4, $5
-)RETURNING id, step_id, tms_config_id, tms_node_id, tms_tr_ids, status
-`
-
-type CreateTMStmplParams struct {
-	StepID      int    `db:"step_id" json:"step_id"`
-	TmsConfigID int    `db:"tms_config_id" json:"tms_config_id"`
-	TmsNodeID   int    `db:"tms_node_id" json:"tms_node_id"`
-	TmsTrIds    []int  `db:"tms_tr_ids" json:"tms_tr_ids"`
-	Status      string `db:"status" json:"status"`
-}
-
-func (q *Queries) CreateTMStmpl(ctx context.Context, arg CreateTMStmplParams) (Tmstmpl, error) {
-	row := q.db.QueryRow(ctx, createTMStmpl,
-		arg.StepID,
-		arg.TmsConfigID,
-		arg.TmsNodeID,
-		arg.TmsTrIds,
-		arg.Status,
-	)
-	var i Tmstmpl
-	err := row.Scan(
-		&i.ID,
-		&i.StepID,
-		&i.TmsConfigID,
-		&i.TmsNodeID,
-		&i.TmsTrIds,
-		&i.Status,
-	)
-	return i, err
-}
-
-const createUser = `-- name: CreateUser :one
-INSERT INTO users (
-  username,
-  hashed_password,
-  full_name,
-  email
-) VALUES (
-  $1, $2, $3, $4
-) RETURNING id, username, hashed_password, full_name, email, password_changed_at, created_at
-`
-
-type CreateUserParams struct {
-	Username       string `db:"username" json:"username"`
-	HashedPassword string `db:"hashed_password" json:"hashed_password"`
-	FullName       string `db:"full_name" json:"full_name"`
-	Email          string `db:"email" json:"email"`
-}
-
-func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
-	row := q.db.QueryRow(ctx, createUser,
-		arg.Username,
-		arg.HashedPassword,
-		arg.FullName,
-		arg.Email,
-	)
-	var i User
-	err := row.Scan(
-		&i.ID,
-		&i.Username,
-		&i.HashedPassword,
-		&i.FullName,
-		&i.Email,
-		&i.PasswordChangedAt,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
-const deleteApiEndpointById = `-- name: DeleteApiEndpointById :one
-DELETE FROM api_endpoint
-WHERE id = $1 RETURNING id, name, description, type, "authUrl", "apiUrl", "clientId", "clientSecret", status, "modifiedAt", "modifiedBy", "createdAt", "createdBy"
-`
-
-func (q *Queries) DeleteApiEndpointById(ctx context.Context, id int) (ApiEndpoint, error) {
-	row := q.db.QueryRow(ctx, deleteApiEndpointById, id)
-	var i ApiEndpoint
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Description,
 		&i.Type,
-		&i.AuthUrl,
-		&i.ApiUrl,
-		&i.ClientId,
-		&i.ClientSecret,
+		&i.Description,
 		&i.Status,
-		&i.ModifiedAt,
-		&i.ModifiedBy,
 		&i.CreatedAt,
 		&i.CreatedBy,
-	)
-	return i, err
-}
-
-const deleteCPItmpl = `-- name: DeleteCPItmpl :one
-DELETE FROM cpitmpl
-WHERE id = $1  RETURNING id, step_id, cpi_config_id, cpi_package_ids, cpi_iflow_ids, cpi_script_ids, status
-`
-
-func (q *Queries) DeleteCPItmpl(ctx context.Context, id int) (Cpitmpl, error) {
-	row := q.db.QueryRow(ctx, deleteCPItmpl, id)
-	var i Cpitmpl
-	err := row.Scan(
-		&i.ID,
-		&i.StepID,
-		&i.CpiConfigID,
-		&i.CpiPackageIds,
-		&i.CpiIflowIds,
-		&i.CpiScriptIds,
-		&i.Status,
-	)
-	return i, err
-}
-
-const deleteCPItmplByStepID = `-- name: DeleteCPItmplByStepID :one
-DELETE FROM cpitmpl
-WHERE id = $1  RETURNING id, step_id, cpi_config_id, cpi_package_ids, cpi_iflow_ids, cpi_script_ids, status
-`
-
-func (q *Queries) DeleteCPItmplByStepID(ctx context.Context, id int) (Cpitmpl, error) {
-	row := q.db.QueryRow(ctx, deleteCPItmplByStepID, id)
-	var i Cpitmpl
-	err := row.Scan(
-		&i.ID,
-		&i.StepID,
-		&i.CpiConfigID,
-		&i.CpiPackageIds,
-		&i.CpiIflowIds,
-		&i.CpiScriptIds,
-		&i.Status,
-	)
-	return i, err
-}
-
-const deleteCpiArtifactByCpiTmplID = `-- name: DeleteCpiArtifactByCpiTmplID :one
-DELETE FROM cpiartifacts
-WHERE cpi_tmpl_id = $1 RETURNING id, cpi_tmpl_id, cpi_item_id, cpi_item_version
-`
-
-func (q *Queries) DeleteCpiArtifactByCpiTmplID(ctx context.Context, cpiTmplID int) (Cpiartifact, error) {
-	row := q.db.QueryRow(ctx, deleteCpiArtifactByCpiTmplID, cpiTmplID)
-	var i Cpiartifact
-	err := row.Scan(
-		&i.ID,
-		&i.CpiTmplID,
-		&i.CpiItemID,
-		&i.CpiItemVersion,
-	)
-	return i, err
-}
-
-const deleteCpiArtifactByID = `-- name: DeleteCpiArtifactByID :one
-DELETE FROM cpiartifacts
-WHERE id = $1 RETURNING id, cpi_tmpl_id, cpi_item_id, cpi_item_version
-`
-
-func (q *Queries) DeleteCpiArtifactByID(ctx context.Context, id int) (Cpiartifact, error) {
-	row := q.db.QueryRow(ctx, deleteCpiArtifactByID, id)
-	var i Cpiartifact
-	err := row.Scan(
-		&i.ID,
-		&i.CpiTmplID,
-		&i.CpiItemID,
-		&i.CpiItemVersion,
+		&i.ModifiedAt,
+		&i.ModifiedBy,
 	)
 	return i, err
 }
@@ -451,7 +96,7 @@ func (q *Queries) DeleteImportStepByJobId(ctx context.Context, jobID int) error 
 
 const deleteJobByID = `-- name: DeleteJobByID :one
 DELETE FROM job
-WHERE id = $1 RETURNING id, name, description, status
+WHERE id = $1 RETURNING id, name, type, description, status, created_at, created_by, modified_at, modified_by
 `
 
 func (q *Queries) DeleteJobByID(ctx context.Context, id int) (Job, error) {
@@ -460,343 +105,19 @@ func (q *Queries) DeleteJobByID(ctx context.Context, id int) (Job, error) {
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
-		&i.Description,
-		&i.Status,
-	)
-	return i, err
-}
-
-const deleteStepByID = `-- name: DeleteStepByID :one
-DELETE FROM step
-WHERE id=$1 RETURNING id, job_id, name, templ_type, templ_id, status
-`
-
-func (q *Queries) DeleteStepByID(ctx context.Context, id int) (Step, error) {
-	row := q.db.QueryRow(ctx, deleteStepByID, id)
-	var i Step
-	err := row.Scan(
-		&i.ID,
-		&i.JobID,
-		&i.Name,
-		&i.TemplType,
-		&i.TemplID,
-		&i.Status,
-	)
-	return i, err
-}
-
-const deleteStepByJobID = `-- name: DeleteStepByJobID :many
-DELETE FROM step
-WHERE job_id=$1 RETURNING id, job_id, name, templ_type, templ_id, status
-`
-
-func (q *Queries) DeleteStepByJobID(ctx context.Context, jobID int) ([]Step, error) {
-	rows, err := q.db.Query(ctx, deleteStepByJobID, jobID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []Step{}
-	for rows.Next() {
-		var i Step
-		if err := rows.Scan(
-			&i.ID,
-			&i.JobID,
-			&i.Name,
-			&i.TemplType,
-			&i.TemplID,
-			&i.Status,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const deleteTMStmplByID = `-- name: DeleteTMStmplByID :one
-DELETE FROM tmstmpl
-WHERE id = $1  RETURNING id, step_id, tms_config_id, tms_node_id, tms_tr_ids, status
-`
-
-func (q *Queries) DeleteTMStmplByID(ctx context.Context, id int) (Tmstmpl, error) {
-	row := q.db.QueryRow(ctx, deleteTMStmplByID, id)
-	var i Tmstmpl
-	err := row.Scan(
-		&i.ID,
-		&i.StepID,
-		&i.TmsConfigID,
-		&i.TmsNodeID,
-		&i.TmsTrIds,
-		&i.Status,
-	)
-	return i, err
-}
-
-const deleteTMStmplByStepID = `-- name: DeleteTMStmplByStepID :one
-DELETE FROM tmstmpl
-WHERE step_id = $1  RETURNING id, step_id, tms_config_id, tms_node_id, tms_tr_ids, status
-`
-
-func (q *Queries) DeleteTMStmplByStepID(ctx context.Context, stepID int) (Tmstmpl, error) {
-	row := q.db.QueryRow(ctx, deleteTMStmplByStepID, stepID)
-	var i Tmstmpl
-	err := row.Scan(
-		&i.ID,
-		&i.StepID,
-		&i.TmsConfigID,
-		&i.TmsNodeID,
-		&i.TmsTrIds,
-		&i.Status,
-	)
-	return i, err
-}
-
-const getApiEndpointById = `-- name: GetApiEndpointById :one
-SELECT id, name, description, type, "authUrl", "apiUrl", "clientId", "clientSecret", status, "modifiedAt", "modifiedBy", "createdAt", "createdBy" FROM api_endpoint
-WHERE id = $1
-`
-
-func (q *Queries) GetApiEndpointById(ctx context.Context, id int) (ApiEndpoint, error) {
-	row := q.db.QueryRow(ctx, getApiEndpointById, id)
-	var i ApiEndpoint
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Description,
 		&i.Type,
-		&i.AuthUrl,
-		&i.ApiUrl,
-		&i.ClientId,
-		&i.ClientSecret,
+		&i.Description,
 		&i.Status,
-		&i.ModifiedAt,
-		&i.ModifiedBy,
 		&i.CreatedAt,
 		&i.CreatedBy,
+		&i.ModifiedAt,
+		&i.ModifiedBy,
 	)
 	return i, err
-}
-
-const getApiEndpointsAll = `-- name: GetApiEndpointsAll :many
-SELECT id, name, description, type, "authUrl", "apiUrl", "clientId", "clientSecret", status, "modifiedAt", "modifiedBy", "createdAt", "createdBy" FROM api_endpoint
-`
-
-func (q *Queries) GetApiEndpointsAll(ctx context.Context) ([]ApiEndpoint, error) {
-	rows, err := q.db.Query(ctx, getApiEndpointsAll)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ApiEndpoint{}
-	for rows.Next() {
-		var i ApiEndpoint
-		if err := rows.Scan(
-			&i.ID,
-			&i.Name,
-			&i.Description,
-			&i.Type,
-			&i.AuthUrl,
-			&i.ApiUrl,
-			&i.ClientId,
-			&i.ClientSecret,
-			&i.Status,
-			&i.ModifiedAt,
-			&i.ModifiedBy,
-			&i.CreatedAt,
-			&i.CreatedBy,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const getApiEndpointsByType = `-- name: GetApiEndpointsByType :many
-SELECT id, name, description, type, "authUrl", "apiUrl", "clientId", "clientSecret", status, "modifiedAt", "modifiedBy", "createdAt", "createdBy" FROM api_endpoint
-WHERE type = $1
-`
-
-func (q *Queries) GetApiEndpointsByType(ctx context.Context, type_ string) ([]ApiEndpoint, error) {
-	rows, err := q.db.Query(ctx, getApiEndpointsByType, type_)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ApiEndpoint{}
-	for rows.Next() {
-		var i ApiEndpoint
-		if err := rows.Scan(
-			&i.ID,
-			&i.Name,
-			&i.Description,
-			&i.Type,
-			&i.AuthUrl,
-			&i.ApiUrl,
-			&i.ClientId,
-			&i.ClientSecret,
-			&i.Status,
-			&i.ModifiedAt,
-			&i.ModifiedBy,
-			&i.CreatedAt,
-			&i.CreatedBy,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const getCPItmplByID = `-- name: GetCPItmplByID :one
-SELECT id, step_id, cpi_config_id, cpi_package_ids, cpi_iflow_ids, cpi_script_ids, status FROM cpitmpl
-WHERE id =$1 LIMIT 1
-`
-
-func (q *Queries) GetCPItmplByID(ctx context.Context, id int) (Cpitmpl, error) {
-	row := q.db.QueryRow(ctx, getCPItmplByID, id)
-	var i Cpitmpl
-	err := row.Scan(
-		&i.ID,
-		&i.StepID,
-		&i.CpiConfigID,
-		&i.CpiPackageIds,
-		&i.CpiIflowIds,
-		&i.CpiScriptIds,
-		&i.Status,
-	)
-	return i, err
-}
-
-const getCPItmplByStepID = `-- name: GetCPItmplByStepID :many
-SELECT id, step_id, cpi_config_id, cpi_package_ids, cpi_iflow_ids, cpi_script_ids, status FROM cpitmpl
-WHERE step_id = $1
-`
-
-func (q *Queries) GetCPItmplByStepID(ctx context.Context, stepID int) ([]Cpitmpl, error) {
-	rows, err := q.db.Query(ctx, getCPItmplByStepID, stepID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []Cpitmpl{}
-	for rows.Next() {
-		var i Cpitmpl
-		if err := rows.Scan(
-			&i.ID,
-			&i.StepID,
-			&i.CpiConfigID,
-			&i.CpiPackageIds,
-			&i.CpiIflowIds,
-			&i.CpiScriptIds,
-			&i.Status,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const getCpiArtifactByID = `-- name: GetCpiArtifactByID :one
-SELECT id, cpi_tmpl_id, cpi_item_id, cpi_item_version FROM cpiartifacts
-WHERE id = $1 LIMIT 1
-`
-
-func (q *Queries) GetCpiArtifactByID(ctx context.Context, id int) (Cpiartifact, error) {
-	row := q.db.QueryRow(ctx, getCpiArtifactByID, id)
-	var i Cpiartifact
-	err := row.Scan(
-		&i.ID,
-		&i.CpiTmplID,
-		&i.CpiItemID,
-		&i.CpiItemVersion,
-	)
-	return i, err
-}
-
-const getCpiArtifactsByCpiTmplID = `-- name: GetCpiArtifactsByCpiTmplID :many
-SELECT id, cpi_tmpl_id, cpi_item_id, cpi_item_version FROM cpiartifacts
-WHERE cpi_tmpl_id = $1
-`
-
-func (q *Queries) GetCpiArtifactsByCpiTmplID(ctx context.Context, cpiTmplID int) ([]Cpiartifact, error) {
-	rows, err := q.db.Query(ctx, getCpiArtifactsByCpiTmplID, cpiTmplID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []Cpiartifact{}
-	for rows.Next() {
-		var i Cpiartifact
-		if err := rows.Scan(
-			&i.ID,
-			&i.CpiTmplID,
-			&i.CpiItemID,
-			&i.CpiItemVersion,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const getGroup = `-- name: GetGroup :one
-SELECT id, group_name FROM groups
-WHERE group_name = $1 LIMIT 1
-`
-
-func (q *Queries) GetGroup(ctx context.Context, groupName string) (Group, error) {
-	row := q.db.QueryRow(ctx, getGroup, groupName)
-	var i Group
-	err := row.Scan(&i.ID, &i.GroupName)
-	return i, err
-}
-
-const getGroups = `-- name: GetGroups :many
-SELECT id, group_name FROM groups
-ORDER BY group_name
-`
-
-func (q *Queries) GetGroups(ctx context.Context) ([]Group, error) {
-	rows, err := q.db.Query(ctx, getGroups)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []Group{}
-	for rows.Next() {
-		var i Group
-		if err := rows.Scan(&i.ID, &i.GroupName); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const getJobByID = `-- name: GetJobByID :one
-SELECT id, name, description, status FROM job
+SELECT id, name, type, description, status, created_at, created_by, modified_at, modified_by FROM job
 WHERE id = $1 LIMIT 1
 `
 
@@ -806,14 +127,19 @@ func (q *Queries) GetJobByID(ctx context.Context, id int) (Job, error) {
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
+		&i.Type,
 		&i.Description,
 		&i.Status,
+		&i.CreatedAt,
+		&i.CreatedBy,
+		&i.ModifiedAt,
+		&i.ModifiedBy,
 	)
 	return i, err
 }
 
 const getJobs = `-- name: GetJobs :many
-SELECT id, name, description, status FROM job
+SELECT id, name, type, description, status, created_at, created_by, modified_at, modified_by FROM job
 `
 
 func (q *Queries) GetJobs(ctx context.Context) ([]Job, error) {
@@ -828,8 +154,13 @@ func (q *Queries) GetJobs(ctx context.Context) ([]Job, error) {
 		if err := rows.Scan(
 			&i.ID,
 			&i.Name,
+			&i.Type,
 			&i.Description,
 			&i.Status,
+			&i.CreatedAt,
+			&i.CreatedBy,
+			&i.ModifiedAt,
+			&i.ModifiedBy,
 		); err != nil {
 			return nil, err
 		}
@@ -841,31 +172,12 @@ func (q *Queries) GetJobs(ctx context.Context) ([]Job, error) {
 	return items, nil
 }
 
-const getStepByID = `-- name: GetStepByID :one
-SELECT id, job_id, name, templ_type, templ_id, status FROM step
-WHERE id =$1 LIMIT 1
+const getJobsByType = `-- name: GetJobsByType :many
+SELECT id, name, type, description, status, created_at, created_by, modified_at, modified_by FROM job WHERE type=$1
 `
 
-func (q *Queries) GetStepByID(ctx context.Context, id int) (Step, error) {
-	row := q.db.QueryRow(ctx, getStepByID, id)
-	var i Step
-	err := row.Scan(
-		&i.ID,
-		&i.JobID,
-		&i.Name,
-		&i.TemplType,
-		&i.TemplID,
-		&i.Status,
-	)
-	return i, err
-}
-
-const getSteps = `-- name: GetSteps :many
-SELECT id, name, description, status FROM job
-`
-
-func (q *Queries) GetSteps(ctx context.Context) ([]Job, error) {
-	rows, err := q.db.Query(ctx, getSteps)
+func (q *Queries) GetJobsByType(ctx context.Context, type_ string) ([]Job, error) {
+	rows, err := q.db.Query(ctx, getJobsByType, type_)
 	if err != nil {
 		return nil, err
 	}
@@ -876,143 +188,13 @@ func (q *Queries) GetSteps(ctx context.Context) ([]Job, error) {
 		if err := rows.Scan(
 			&i.ID,
 			&i.Name,
+			&i.Type,
 			&i.Description,
 			&i.Status,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const getStepsByJobID = `-- name: GetStepsByJobID :many
-SELECT id, job_id, name, templ_type, templ_id, status FROM step
-WHERE job_id =$1
-`
-
-func (q *Queries) GetStepsByJobID(ctx context.Context, jobID int) ([]Step, error) {
-	rows, err := q.db.Query(ctx, getStepsByJobID, jobID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []Step{}
-	for rows.Next() {
-		var i Step
-		if err := rows.Scan(
-			&i.ID,
-			&i.JobID,
-			&i.Name,
-			&i.TemplType,
-			&i.TemplID,
-			&i.Status,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const getTMStmpl = `-- name: GetTMStmpl :many
-SELECT id, step_id, tms_config_id, tms_node_id, tms_tr_ids, status FROM tmstmpl
-`
-
-func (q *Queries) GetTMStmpl(ctx context.Context) ([]Tmstmpl, error) {
-	rows, err := q.db.Query(ctx, getTMStmpl)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []Tmstmpl{}
-	for rows.Next() {
-		var i Tmstmpl
-		if err := rows.Scan(
-			&i.ID,
-			&i.StepID,
-			&i.TmsConfigID,
-			&i.TmsNodeID,
-			&i.TmsTrIds,
-			&i.Status,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const getTMStmplByID = `-- name: GetTMStmplByID :one
-SELECT id, step_id, tms_config_id, tms_node_id, tms_tr_ids, status FROM tmstmpl
-WHERE id =$1 LIMIT 1
-`
-
-func (q *Queries) GetTMStmplByID(ctx context.Context, id int) (Tmstmpl, error) {
-	row := q.db.QueryRow(ctx, getTMStmplByID, id)
-	var i Tmstmpl
-	err := row.Scan(
-		&i.ID,
-		&i.StepID,
-		&i.TmsConfigID,
-		&i.TmsNodeID,
-		&i.TmsTrIds,
-		&i.Status,
-	)
-	return i, err
-}
-
-const getUser = `-- name: GetUser :one
-SELECT id, username, hashed_password, full_name, email, password_changed_at, created_at FROM users
-WHERE username = $1 LIMIT 1
-`
-
-func (q *Queries) GetUser(ctx context.Context, username string) (User, error) {
-	row := q.db.QueryRow(ctx, getUser, username)
-	var i User
-	err := row.Scan(
-		&i.ID,
-		&i.Username,
-		&i.HashedPassword,
-		&i.FullName,
-		&i.Email,
-		&i.PasswordChangedAt,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
-const getUsers = `-- name: GetUsers :many
-SELECT id, username, hashed_password, full_name, email, password_changed_at, created_at FROM users
-ORDER BY username
-`
-
-func (q *Queries) GetUsers(ctx context.Context) ([]User, error) {
-	rows, err := q.db.Query(ctx, getUsers)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []User{}
-	for rows.Next() {
-		var i User
-		if err := rows.Scan(
-			&i.ID,
-			&i.Username,
-			&i.HashedPassword,
-			&i.FullName,
-			&i.Email,
-			&i.PasswordChangedAt,
 			&i.CreatedAt,
+			&i.CreatedBy,
+			&i.ModifiedAt,
+			&i.ModifiedBy,
 		); err != nil {
 			return nil, err
 		}
@@ -1029,23 +211,21 @@ INSERT INTO deploy_step (
   job_id,
   status,
   sequence,
-  endpoint_id,
-  endpoint_name,
+  endpoint,
   package_id,
   artifact_ids
 ) VALUES (
-  $1, $2, $3, $4, $5, $6, $7
-) RETURNING id, job_id, sequence, status, endpoint_id, endpoint_name, package_id, artifact_ids, created_at
+  $1, $2, $3, $4, $5, $6
+) RETURNING id, job_id, sequence, status, endpoint, package_id, artifact_ids
 `
 
 type InsertDeployStepParams struct {
-	JobID        int      `db:"job_id" json:"job_id"`
-	Status       string   `db:"status" json:"status"`
-	Sequence     int      `db:"sequence" json:"sequence"`
-	EndpointID   int      `db:"endpoint_id" json:"endpoint_id"`
-	EndpointName string   `db:"endpoint_name" json:"endpoint_name"`
-	PackageID    string   `db:"package_id" json:"package_id"`
-	ArtifactIds  []string `db:"artifact_ids" json:"artifact_ids"`
+	JobID       int      `db:"job_id" json:"job_id"`
+	Status      string   `db:"status" json:"status"`
+	Sequence    int      `db:"sequence" json:"sequence"`
+	Endpoint    string   `db:"endpoint" json:"endpoint"`
+	PackageID   string   `db:"package_id" json:"package_id"`
+	ArtifactIds []string `db:"artifact_ids" json:"artifact_ids"`
 }
 
 func (q *Queries) InsertDeployStep(ctx context.Context, arg InsertDeployStepParams) (DeployStep, error) {
@@ -1053,8 +233,7 @@ func (q *Queries) InsertDeployStep(ctx context.Context, arg InsertDeployStepPara
 		arg.JobID,
 		arg.Status,
 		arg.Sequence,
-		arg.EndpointID,
-		arg.EndpointName,
+		arg.Endpoint,
 		arg.PackageID,
 		arg.ArtifactIds,
 	)
@@ -1064,11 +243,9 @@ func (q *Queries) InsertDeployStep(ctx context.Context, arg InsertDeployStepPara
 		&i.JobID,
 		&i.Sequence,
 		&i.Status,
-		&i.EndpointID,
-		&i.EndpointName,
+		&i.Endpoint,
 		&i.PackageID,
 		&i.ArtifactIds,
-		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -1078,20 +255,18 @@ INSERT INTO import_step (
   job_id,
   status,
   sequence,
-  endpoint_id,
   transport_node_id,
   transport_node_name,
   transport_requests
 ) VALUES (
-  $1, $2, $3, $4, $5, $6, $7
-) RETURNING id, job_id, sequence, status, endpoint_id, transport_node_id, transport_node_name, transport_requests, created_at
+  $1, $2, $3, $4, $5, $6
+) RETURNING id, job_id, sequence, status, transport_node_id, transport_node_name, transport_requests
 `
 
 type InsertImportStepParams struct {
 	JobID             int    `db:"job_id" json:"job_id"`
 	Status            string `db:"status" json:"status"`
 	Sequence          int    `db:"sequence" json:"sequence"`
-	EndpointID        int    `db:"endpoint_id" json:"endpoint_id"`
 	TransportNodeID   int    `db:"transport_node_id" json:"transport_node_id"`
 	TransportNodeName string `db:"transport_node_name" json:"transport_node_name"`
 	TransportRequests []int  `db:"transport_requests" json:"transport_requests"`
@@ -1102,7 +277,6 @@ func (q *Queries) InsertImportStep(ctx context.Context, arg InsertImportStepPara
 		arg.JobID,
 		arg.Status,
 		arg.Sequence,
-		arg.EndpointID,
 		arg.TransportNodeID,
 		arg.TransportNodeName,
 		arg.TransportRequests,
@@ -1113,17 +287,15 @@ func (q *Queries) InsertImportStep(ctx context.Context, arg InsertImportStepPara
 		&i.JobID,
 		&i.Sequence,
 		&i.Status,
-		&i.EndpointID,
 		&i.TransportNodeID,
 		&i.TransportNodeName,
 		&i.TransportRequests,
-		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const selectDeployStepsByJobId = `-- name: SelectDeployStepsByJobId :many
-SELECT id, job_id, sequence, status, endpoint_id, endpoint_name, package_id, artifact_ids, created_at FROM deploy_step WHERE job_id=$1
+SELECT id, job_id, sequence, status, endpoint, package_id, artifact_ids FROM deploy_step WHERE job_id=$1
 `
 
 func (q *Queries) SelectDeployStepsByJobId(ctx context.Context, jobID int) ([]DeployStep, error) {
@@ -1140,11 +312,9 @@ func (q *Queries) SelectDeployStepsByJobId(ctx context.Context, jobID int) ([]De
 			&i.JobID,
 			&i.Sequence,
 			&i.Status,
-			&i.EndpointID,
-			&i.EndpointName,
+			&i.Endpoint,
 			&i.PackageID,
 			&i.ArtifactIds,
-			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1157,7 +327,7 @@ func (q *Queries) SelectDeployStepsByJobId(ctx context.Context, jobID int) ([]De
 }
 
 const selectImportStepsByJobId = `-- name: SelectImportStepsByJobId :many
-SELECT id, job_id, sequence, status, endpoint_id, transport_node_id, transport_node_name, transport_requests, created_at From import_step WHERE job_id=$1
+SELECT id, job_id, sequence, status, transport_node_id, transport_node_name, transport_requests From import_step WHERE job_id=$1
 `
 
 func (q *Queries) SelectImportStepsByJobId(ctx context.Context, jobID int) ([]ImportStep, error) {
@@ -1174,11 +344,9 @@ func (q *Queries) SelectImportStepsByJobId(ctx context.Context, jobID int) ([]Im
 			&i.JobID,
 			&i.Sequence,
 			&i.Status,
-			&i.EndpointID,
 			&i.TransportNodeID,
 			&i.TransportNodeName,
 			&i.TransportRequests,
-			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1190,147 +358,27 @@ func (q *Queries) SelectImportStepsByJobId(ctx context.Context, jobID int) ([]Im
 	return items, nil
 }
 
-const updateApiEndpointById = `-- name: UpdateApiEndpointById :one
-UPDATE  api_endpoint
-SET name = $2, type=$3, description=$4, "authUrl"=$5, "apiUrl"=$6, "clientId"=$7, "clientSecret"=$8, status=$9
-WHERE id = $1  RETURNING id, name, description, type, "authUrl", "apiUrl", "clientId", "clientSecret", status, "modifiedAt", "modifiedBy", "createdAt", "createdBy"
-`
-
-type UpdateApiEndpointByIdParams struct {
-	ID           int         `db:"id" json:"id"`
-	Name         string      `db:"name" json:"name"`
-	Type         string      `db:"type" json:"type"`
-	Description  pgtype.Text `db:"description" json:"description"`
-	AuthUrl      string      `db:"authUrl" json:"authUrl"`
-	ApiUrl       string      `db:"apiUrl" json:"apiUrl"`
-	ClientId     string      `db:"clientId" json:"clientId"`
-	ClientSecret string      `db:"clientSecret" json:"clientSecret"`
-	Status       string      `db:"status" json:"status"`
-}
-
-func (q *Queries) UpdateApiEndpointById(ctx context.Context, arg UpdateApiEndpointByIdParams) (ApiEndpoint, error) {
-	row := q.db.QueryRow(ctx, updateApiEndpointById,
-		arg.ID,
-		arg.Name,
-		arg.Type,
-		arg.Description,
-		arg.AuthUrl,
-		arg.ApiUrl,
-		arg.ClientId,
-		arg.ClientSecret,
-		arg.Status,
-	)
-	var i ApiEndpoint
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Description,
-		&i.Type,
-		&i.AuthUrl,
-		&i.ApiUrl,
-		&i.ClientId,
-		&i.ClientSecret,
-		&i.Status,
-		&i.ModifiedAt,
-		&i.ModifiedBy,
-		&i.CreatedAt,
-		&i.CreatedBy,
-	)
-	return i, err
-}
-
-const updateCPItmplByID = `-- name: UpdateCPItmplByID :one
-UPDATE cpitmpl
-SET step_id=$2, cpi_config_id=$3, cpi_package_ids=$4, cpi_iflow_ids=$5, cpi_script_ids=$6, status=$7
-WHERE id=$1 RETURNING id, step_id, cpi_config_id, cpi_package_ids, cpi_iflow_ids, cpi_script_ids, status
-`
-
-type UpdateCPItmplByIDParams struct {
-	ID            int      `db:"id" json:"id"`
-	StepID        int      `db:"step_id" json:"step_id"`
-	CpiConfigID   int      `db:"cpi_config_id" json:"cpi_config_id"`
-	CpiPackageIds []string `db:"cpi_package_ids" json:"cpi_package_ids"`
-	CpiIflowIds   []string `db:"cpi_iflow_ids" json:"cpi_iflow_ids"`
-	CpiScriptIds  []string `db:"cpi_script_ids" json:"cpi_script_ids"`
-	Status        string   `db:"status" json:"status"`
-}
-
-func (q *Queries) UpdateCPItmplByID(ctx context.Context, arg UpdateCPItmplByIDParams) (Cpitmpl, error) {
-	row := q.db.QueryRow(ctx, updateCPItmplByID,
-		arg.ID,
-		arg.StepID,
-		arg.CpiConfigID,
-		arg.CpiPackageIds,
-		arg.CpiIflowIds,
-		arg.CpiScriptIds,
-		arg.Status,
-	)
-	var i Cpitmpl
-	err := row.Scan(
-		&i.ID,
-		&i.StepID,
-		&i.CpiConfigID,
-		&i.CpiPackageIds,
-		&i.CpiIflowIds,
-		&i.CpiScriptIds,
-		&i.Status,
-	)
-	return i, err
-}
-
-const updateCpiArtifact = `-- name: UpdateCpiArtifact :one
-UPDATE cpiartifacts
-SET cpi_tmpl_id = $2,  cpi_item_id = $3, cpi_item_version = $4
-WHERE id = $1 RETURNING id, cpi_tmpl_id, cpi_item_id, cpi_item_version
-`
-
-type UpdateCpiArtifactParams struct {
-	ID             int     `db:"id" json:"id"`
-	CpiTmplID      int     `db:"cpi_tmpl_id" json:"cpi_tmpl_id"`
-	CpiItemID      string  `db:"cpi_item_id" json:"cpi_item_id"`
-	CpiItemVersion float32 `db:"cpi_item_version" json:"cpi_item_version"`
-}
-
-func (q *Queries) UpdateCpiArtifact(ctx context.Context, arg UpdateCpiArtifactParams) (Cpiartifact, error) {
-	row := q.db.QueryRow(ctx, updateCpiArtifact,
-		arg.ID,
-		arg.CpiTmplID,
-		arg.CpiItemID,
-		arg.CpiItemVersion,
-	)
-	var i Cpiartifact
-	err := row.Scan(
-		&i.ID,
-		&i.CpiTmplID,
-		&i.CpiItemID,
-		&i.CpiItemVersion,
-	)
-	return i, err
-}
-
 const updateDeployStep = `-- name: UpdateDeployStep :one
 UPDATE deploy_step
-SET status=$2, endpoint_id=$3, sequence=$4, endpoint_name=$5, package_id=$6, artifact_ids=$7
-WHERE id=$1 RETURNING id, job_id, sequence, status, endpoint_id, endpoint_name, package_id, artifact_ids, created_at
+SET status=$2, endpoint=$3, sequence=$4, package_id=$5, artifact_ids=$6
+WHERE id=$1 RETURNING id, job_id, sequence, status, endpoint, package_id, artifact_ids
 `
 
 type UpdateDeployStepParams struct {
-	ID           int      `db:"id" json:"id"`
-	Status       string   `db:"status" json:"status"`
-	EndpointID   int      `db:"endpoint_id" json:"endpoint_id"`
-	Sequence     int      `db:"sequence" json:"sequence"`
-	EndpointName string   `db:"endpoint_name" json:"endpoint_name"`
-	PackageID    string   `db:"package_id" json:"package_id"`
-	ArtifactIds  []string `db:"artifact_ids" json:"artifact_ids"`
+	ID          int      `db:"id" json:"id"`
+	Status      string   `db:"status" json:"status"`
+	Endpoint    string   `db:"endpoint" json:"endpoint"`
+	Sequence    int      `db:"sequence" json:"sequence"`
+	PackageID   string   `db:"package_id" json:"package_id"`
+	ArtifactIds []string `db:"artifact_ids" json:"artifact_ids"`
 }
 
 func (q *Queries) UpdateDeployStep(ctx context.Context, arg UpdateDeployStepParams) (DeployStep, error) {
 	row := q.db.QueryRow(ctx, updateDeployStep,
 		arg.ID,
 		arg.Status,
-		arg.EndpointID,
+		arg.Endpoint,
 		arg.Sequence,
-		arg.EndpointName,
 		arg.PackageID,
 		arg.ArtifactIds,
 	)
@@ -1340,40 +388,36 @@ func (q *Queries) UpdateDeployStep(ctx context.Context, arg UpdateDeployStepPara
 		&i.JobID,
 		&i.Sequence,
 		&i.Status,
-		&i.EndpointID,
-		&i.EndpointName,
+		&i.Endpoint,
 		&i.PackageID,
 		&i.ArtifactIds,
-		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const updateImportStep = `-- name: UpdateImportStep :one
 UPDATE import_step
-SET status=$2, endpoint_id=$3, transport_node_id=$4, transport_node_name=$5, transport_requests=$6, sequence=$7
-WHERE id=$1 RETURNING id, job_id, sequence, status, endpoint_id, transport_node_id, transport_node_name, transport_requests, created_at
+SET status=$2, sequence=$3, transport_node_id=$4, transport_node_name=$5, transport_requests=$6
+WHERE id=$1 RETURNING id, job_id, sequence, status, transport_node_id, transport_node_name, transport_requests
 `
 
 type UpdateImportStepParams struct {
 	ID                int    `db:"id" json:"id"`
 	Status            string `db:"status" json:"status"`
-	EndpointID        int    `db:"endpoint_id" json:"endpoint_id"`
+	Sequence          int    `db:"sequence" json:"sequence"`
 	TransportNodeID   int    `db:"transport_node_id" json:"transport_node_id"`
 	TransportNodeName string `db:"transport_node_name" json:"transport_node_name"`
 	TransportRequests []int  `db:"transport_requests" json:"transport_requests"`
-	Sequence          int    `db:"sequence" json:"sequence"`
 }
 
 func (q *Queries) UpdateImportStep(ctx context.Context, arg UpdateImportStepParams) (ImportStep, error) {
 	row := q.db.QueryRow(ctx, updateImportStep,
 		arg.ID,
 		arg.Status,
-		arg.EndpointID,
+		arg.Sequence,
 		arg.TransportNodeID,
 		arg.TransportNodeName,
 		arg.TransportRequests,
-		arg.Sequence,
 	)
 	var i ImportStep
 	err := row.Scan(
@@ -1381,26 +425,31 @@ func (q *Queries) UpdateImportStep(ctx context.Context, arg UpdateImportStepPara
 		&i.JobID,
 		&i.Sequence,
 		&i.Status,
-		&i.EndpointID,
 		&i.TransportNodeID,
 		&i.TransportNodeName,
 		&i.TransportRequests,
-		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const updateJobByID = `-- name: UpdateJobByID :one
 UPDATE job
-SET name=$2, description=$3, status=$4
-WHERE id=$1 RETURNING id, name, description, status
+SET 
+  name=$2, 
+  description=$3, 
+  status=$4, 
+  modified_at=$5, 
+  modified_by=$6
+WHERE id=$1 RETURNING id, name, type, description, status, created_at, created_by, modified_at, modified_by
 `
 
 type UpdateJobByIDParams struct {
-	ID          int         `db:"id" json:"id"`
-	Name        pgtype.Text `db:"name" json:"name"`
-	Description pgtype.Text `db:"description" json:"description"`
-	Status      string      `db:"status" json:"status"`
+	ID          int                `db:"id" json:"id"`
+	Name        pgtype.Text        `db:"name" json:"name"`
+	Description pgtype.Text        `db:"description" json:"description"`
+	Status      string             `db:"status" json:"status"`
+	ModifiedAt  pgtype.Timestamptz `db:"modified_at" json:"modified_at"`
+	ModifiedBy  pgtype.Text        `db:"modified_by" json:"modified_by"`
 }
 
 func (q *Queries) UpdateJobByID(ctx context.Context, arg UpdateJobByIDParams) (Job, error) {
@@ -1409,83 +458,20 @@ func (q *Queries) UpdateJobByID(ctx context.Context, arg UpdateJobByIDParams) (J
 		arg.Name,
 		arg.Description,
 		arg.Status,
+		arg.ModifiedAt,
+		arg.ModifiedBy,
 	)
 	var i Job
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
+		&i.Type,
 		&i.Description,
 		&i.Status,
-	)
-	return i, err
-}
-
-const updateStepByID = `-- name: UpdateStepByID :one
-UPDATE step
-SET job_id=$2, name=$3, templ_type=$3, templ_id=$4, status=$5
-WHERE id = $1 RETURNING id, job_id, name, templ_type, templ_id, status
-`
-
-type UpdateStepByIDParams struct {
-	ID      int    `db:"id" json:"id"`
-	JobID   int    `db:"job_id" json:"job_id"`
-	Name    string `db:"name" json:"name"`
-	TemplID int    `db:"templ_id" json:"templ_id"`
-	Status  string `db:"status" json:"status"`
-}
-
-func (q *Queries) UpdateStepByID(ctx context.Context, arg UpdateStepByIDParams) (Step, error) {
-	row := q.db.QueryRow(ctx, updateStepByID,
-		arg.ID,
-		arg.JobID,
-		arg.Name,
-		arg.TemplID,
-		arg.Status,
-	)
-	var i Step
-	err := row.Scan(
-		&i.ID,
-		&i.JobID,
-		&i.Name,
-		&i.TemplType,
-		&i.TemplID,
-		&i.Status,
-	)
-	return i, err
-}
-
-const updateTMStmplByID = `-- name: UpdateTMStmplByID :one
-UPDATE tmstmpl
-SET step_id=$2, tms_config_id=$3, tms_node_id=$4, tms_tr_ids=$5, status=$6
-WHERE id=$1 RETURNING id, step_id, tms_config_id, tms_node_id, tms_tr_ids, status
-`
-
-type UpdateTMStmplByIDParams struct {
-	ID          int    `db:"id" json:"id"`
-	StepID      int    `db:"step_id" json:"step_id"`
-	TmsConfigID int    `db:"tms_config_id" json:"tms_config_id"`
-	TmsNodeID   int    `db:"tms_node_id" json:"tms_node_id"`
-	TmsTrIds    []int  `db:"tms_tr_ids" json:"tms_tr_ids"`
-	Status      string `db:"status" json:"status"`
-}
-
-func (q *Queries) UpdateTMStmplByID(ctx context.Context, arg UpdateTMStmplByIDParams) (Tmstmpl, error) {
-	row := q.db.QueryRow(ctx, updateTMStmplByID,
-		arg.ID,
-		arg.StepID,
-		arg.TmsConfigID,
-		arg.TmsNodeID,
-		arg.TmsTrIds,
-		arg.Status,
-	)
-	var i Tmstmpl
-	err := row.Scan(
-		&i.ID,
-		&i.StepID,
-		&i.TmsConfigID,
-		&i.TmsNodeID,
-		&i.TmsTrIds,
-		&i.Status,
+		&i.CreatedAt,
+		&i.CreatedBy,
+		&i.ModifiedAt,
+		&i.ModifiedBy,
 	)
 	return i, err
 }

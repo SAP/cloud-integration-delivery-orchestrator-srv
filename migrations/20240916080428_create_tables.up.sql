@@ -8,9 +8,9 @@ CREATE TABLE "execution_log" (
 CREATE TABLE "job" (
   "id" SERIAL PRIMARY KEY,
   "name" varchar,
-  "type" varchar NOT NULL, -- deploy undeploy import
+  "type" varchar, -- deploy undeploy import
   "description" varchar,
-  "status" varchar NOT NULL,
+  "status" varchar,
   "created_at" timestamptz NOT NULL DEFAULT (now()),
   "created_by" varchar,
   "modified_at" timestamptz NOT NULL DEFAULT (now()),
