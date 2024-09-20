@@ -139,6 +139,7 @@ func (c *HttpClient) Do(request *HttpRequest) (*[]byte, error) {
 	token := fmt.Sprintf("Bearer %s", c.AccessToken)
 	req.Header.Add("Authorization", token)
 	req.Header.Add("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json;charset=UTF-8")
 	resp, errReq := c.HttpClient.Do(req)
 
 	if errReq != nil {
