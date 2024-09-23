@@ -5,10 +5,13 @@ import (
 	"fmt"
 	"os"
 
+	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/log"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
+	"moul.io/zapgorm2"
 )
+
+var logger = zapgorm2.New(log.NewLogger())
 
 func init() {
 	//dsn := "host=127.0.0.1 user=postgres password=passw0rd dbname=macodeploy port=5432 sslmode=disable TimeZone=Asia/Shanghai"
@@ -26,7 +29,7 @@ func init() {
 		if pgSslRootCert != "" {
 			err := os.WriteFile("root.crt", []byte(pgSslRootCert), 0644)
 			if err != nil {
-				panic(err)
+				logger.ZapLogger.Sugar().Fatalf("failed to write root.crt, %s", err)
 			}
 		}
 		pgSslCert := postgresCredentials.Sslcert
@@ -34,7 +37,7 @@ func init() {
 		if pgSslCert != "" {
 			err := os.WriteFile("client.crt", []byte(pgSslCert), 0644)
 			if err != nil {
-				panic(err)
+				logger.ZapLogger.Sugar().Fatalf("failed to write client.crt, %s", err)
 			}
 		}
 
@@ -43,7 +46,7 @@ func init() {
 		if pgSslKey != "" {
 			err := os.WriteFile("client.key", []byte(pgSslKey), 0644)
 			if err != nil {
-				panic(err)
+				logger.ZapLogger.Sugar().Fatalf("failed to write client.key, %s", err)
 			}
 		}
 		dsn = fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=verify-full sslrootcert=root.crt sslkey=client.key sslcert=client.crt", pgHost, pgUser, pgPass, pgDBname, pgPort)
@@ -52,7 +55,7 @@ func init() {
 	}
 
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Info),
+		Logger: logger,
 	})
 	if err != nil {
 		panic(err)

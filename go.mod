@@ -18,6 +18,7 @@ require (
 	github.com/lib/pq v1.10.9 // indirect
 	gorm.io/driver/postgres v1.5.9 // indirect
 	gorm.io/gorm v1.25.12 // indirect
+	moul.io/zapgorm2 v1.3.0 // indirect
 )
 
 require (
