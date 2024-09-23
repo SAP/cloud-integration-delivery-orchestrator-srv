@@ -175,6 +175,7 @@ type PackageIflowsResp struct {
 	} `json:"d"`
 }
 
+// get all iflows in a package
 func (c *CpiClient) GetPackageIflows(packageID string) ([]IflowItem, error) {
 	childCtx, cancel := context.WithCancel(c.Context)
 	defer cancel()
@@ -267,7 +268,7 @@ func (c *CpiClient) DeployIflow(iflowID string, iflowVersion string) (string, er
 	logger.Infof("Starting to deploy iflow %s  on tenant %s\n", iflowID, fullURL)
 	request := remotecall.HttpRequest{
 		Ctx:    childCtx,
-		Method: http.MethodGet,
+		Method: http.MethodPost,
 		ApiURL: fullURL,
 	}
 	respBodyContent, errReq := c.Do(&request)
@@ -352,7 +353,8 @@ type ScriptCollectionsResp struct {
 	} `json:"d"`
 }
 
-func (c *CpiClient) GetPackageScripts(packageID string) ([]ScriptCollectionItem, error) {
+// get all script collections under a package
+func (c *CpiClient) GetPackageScriptcollections(packageID string) ([]ScriptCollectionItem, error) {
 	childCtx, cancel := context.WithCancel(c.Context)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/IntegrationPackages('%s')/ScriptCollectionDesigntimeArtifacts", c.ApiURL, packageID)
@@ -382,7 +384,8 @@ type ScriptCollectionResp struct {
 	D ScriptCollectionItem `json:"d"`
 }
 
-func (c *CpiClient) GetPackageScript(scriptCollectionID string, scriptCollectionVersion string) (ScriptCollectionItem, error) {
+// get a design time script collection
+func (c *CpiClient) GetScriptCollection(scriptCollectionID string, scriptCollectionVersion string) (ScriptCollectionItem, error) {
 	childCtx, cancel := context.WithCancel(c.Context)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/ScriptCollectionDesigntimeArtifacts(Id='%s',Version='%s')", c.ApiURL, scriptCollectionID, scriptCollectionVersion)
@@ -412,11 +415,11 @@ func (c *CpiClient) DeployScriptCollection(scriptCollectionID string, scriptColl
 	childCtx, cancel := context.WithCancel(c.Context)
 	defer cancel()
 	var taskID string
-	fullURL := fmt.Sprintf("%s/DeployScriptCollectionDesigntimeArtifact(Id='%s',Version='%s')", c.ApiURL, scriptCollectionID, scriptCollectionVersion)
+	fullURL := fmt.Sprintf("%s/DeployScriptCollectionDesigntimeArtifact?Id='%s'&Version='%s'", c.ApiURL, scriptCollectionID, scriptCollectionVersion)
 	logger.Infof("Starting to deploy script collection %s in package from cpi tenant %s\n", scriptCollectionID, fullURL)
 	request := remotecall.HttpRequest{
 		Ctx:    childCtx,
-		Method: http.MethodGet,
+		Method: http.MethodPost,
 		ApiURL: fullURL,
 	}
 	respBodyContent, errReq := c.Do(&request)

@@ -3,14 +3,12 @@ package handler
 import (
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/cpi"
 	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/log"
 	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/remotecall"
-	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/tms"
 )
 
 var logger = log.NewLogger().Sugar()
@@ -19,6 +17,10 @@ var logger = log.NewLogger().Sugar()
 func GetPackagesHandler(ctx *gin.Context) {
 	cpi_tenant := ctx.Query("tenant")
 	cpiClient, error := cpi.NewClient(ctx, cpi_tenant)
+	if error != nil {
+		logger.Error("error while retrieving packages: %s", error)
+		return
+	}
 	packages, error := cpiClient.GetPackages()
 	if error != nil {
 		logger.Error("error while retrieving packages: %s", error)
@@ -34,11 +36,10 @@ func GetPackagesHandler(ctx *gin.Context) {
 
 // get all iflows under a package
 func GetPackageIflowsHandler(ctx *gin.Context) {
-	context := ctx.Request.Context()
 	cpi_tenant := ctx.Query("tenant")
 	packageID := ctx.Query("package")
 
-	cpiClient, _ := cpi.NewClient(context, cpi_tenant)
+	cpiClient, _ := cpi.NewClient(ctx, cpi_tenant)
 	iflows, error := cpiClient.GetPackageIflows(packageID)
 	if error != nil {
 		logger.Error("Error while retrieving iflows within a package")
@@ -49,49 +50,61 @@ func GetPackageIflowsHandler(ctx *gin.Context) {
 		"status": "success",
 		"result": iflows,
 	})
+}
+
+type ArtifactResp struct {
+	ID          string `json:"Id"`
+	Version     string `json:"Version"`
+	PackageID   string `json:"PackageId"`
+	Name        string `json:"Name"`
+	Description string `json:"Description"`
+	Type        string `json:"Type"`
+}
+
+// include type: script collection, iflow artifacts
+func GetPackageArtifactsHandler(ctx *gin.Context) {
+	cpi_tenant := ctx.Query("tenant")
+	packageID := ctx.Query("package")
+	client, err := cpi.NewClient(ctx, cpi_tenant)
+	if err != nil {
+		return
+	}
+	artifactResp := make([]ArtifactResp, 0)
+	iflows, err := client.GetPackageIflows(packageID)
+	if err != nil {
+		return
+	}
+	scriptColls, err := client.GetPackageScriptcollections(packageID)
+	if err != nil {
+		return
+	}
+	for _, v := range scriptColls {
+		artifactResp = append(artifactResp, ArtifactResp{
+			ID:          v.ID,
+			Version:     v.Version,
+			PackageID:   v.PackageID,
+			Name:        v.Name,
+			Description: v.Description,
+			Type:        "Script Collection",
+		})
+	}
+	for _, v := range iflows {
+		artifactResp = append(artifactResp, ArtifactResp{
+			ID:          v.ID,
+			Version:     v.Version,
+			PackageID:   v.PackageID,
+			Name:        v.Name,
+			Description: v.Description,
+			Type:        "Integration Flow",
+		})
+	}
+	ctx.JSON(http.StatusOK, gin.H{
+		"result": artifactResp,
+	})
 
 }
 
-func GetTmsNodesHandler(ctx *gin.Context) {
-
-	tmsClient, error := tms.NewClient(ctx)
-	if error != nil {
-		return
-	}
-	tmsNodes, error := tmsClient.GetNodes()
-	if error != nil {
-		errorMsg := fmt.Sprintf("Error while retrieving tms Nodes: %s", error)
-		ctx.JSON(http.StatusBadRequest, gin.H{"status": 500, "result": errorMsg})
-		return
-	}
-	ctx.JSON(http.StatusOK, gin.H{"status": 200, "result": tmsNodes})
-	return
-}
-
-func GetTranportRequestsHandler(ctx *gin.Context) {
-	trNode := ctx.Query("transportNode")
-	nodeId, error := strconv.Atoi(trNode)
-	if error != nil {
-		errorMsg := fmt.Sprintf("Invalid transport node id %s: %s", trNode, error)
-		logger.Error(errorMsg)
-		ctx.JSON(http.StatusBadRequest, gin.H{"status": 500, "result": errorMsg})
-		return
-	}
-
-	tmsClient, error := tms.NewClient(ctx)
-	if error != nil {
-		logger.Error(error)
-		return
-	}
-	trs, error := tmsClient.GetNodeTransportRequests(nodeId)
-	if error != nil {
-		errorMsg := fmt.Sprintf("Error while get node trs: %s", error)
-		logger.Error(errorMsg)
-		return
-	}
-	ctx.JSON(http.StatusOK, gin.H{"status": 200, "result": trs})
-}
-
+// do not return entire destination instance, hide credentials
 type DestinationResp struct {
 	Name string `json:"name"`
 	Type string `json:"type"`

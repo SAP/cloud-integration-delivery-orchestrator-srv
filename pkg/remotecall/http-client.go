@@ -134,12 +134,12 @@ func (c *HttpClient) Do(request *HttpRequest) (*[]byte, error) {
 		req, _ = http.NewRequestWithContext(childCtx, request.Method, request.ApiURL, nil)
 	} else {
 		req, _ = http.NewRequestWithContext(childCtx, request.Method, request.ApiURL, request.RequestBody)
+		req.Header.Set("Content-Type", "application/json;charset=UTF-8")
 	}
 
 	token := fmt.Sprintf("Bearer %s", c.AccessToken)
 	req.Header.Add("Authorization", token)
 	req.Header.Add("Accept", "application/json")
-	req.Header.Set("Content-Type", "application/json;charset=UTF-8")
 	resp, errReq := c.HttpClient.Do(req)
 
 	if errReq != nil {
@@ -205,7 +205,6 @@ func destinations(env *Env) error {
 		return err
 	}
 
-	fmt.Print(destinations)
 	m := make(map[string]Destination)
 	for _, v := range destinations {
 		m[v.Name] = v

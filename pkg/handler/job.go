@@ -1,521 +1,287 @@
 package handler
 
 import (
+	"context"
 	"fmt"
 	"net/http"
-	"sort"
 	"strconv"
-	"time"
 
 	// "time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/lib/pq"
+	"github.com/mitchellh/mapstructure"
 	"github.wdf.sap.corp/maco-mmt/maco-deploy/db"
 	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/cpi"
 	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/tms"
 )
 
-type Step interface {
-	GetSeq() int
-	Execute(ctx *gin.Context, query *db.Queries) error
-}
-type ImportStepResp struct {
-	db.ImportStep
-	Type string `json:"type"`
-}
-type DeployStepResp struct {
-	db.DeployStep
-	Type string `json:"type"`
-}
-
-func (s *ImportStepResp) GetSeq() int {
-	return s.Sequence
-}
-
-func (s *DeployStepResp) GetSeq() int {
-	return s.Sequence
-}
-
-func (s *ImportStepResp) Execute(ctx *gin.Context, query *db.Queries) error {
-	logger.Infof("Starting to execute import task id %d", s.ID)
-	tmsClient, error := tms.NewClient(ctx)
-	if error != nil {
-		return error
-	}
-
-	importActionID, error := tmsClient.ImportTransportRequest(s.TransportNodeID, s.TransportRequests)
-	if error != nil {
-		return fmt.Errorf("error while importing Transport Requests on node (%s): %v: %s", s.TransportNodeName, s.TransportRequests, error)
-	}
-	status := "DEPLOYING"
-	for status == "DEPLOYING" {
-		status, _ = tmsClient.GetActionResult(importActionID)
-		time.Sleep(time.Second * 15)
-	}
-	actionResp, _ := tmsClient.GetActionResultLog(importActionID)
-	logger.Info(actionResp)
-	if status != "SUCCESS" {
-		return fmt.Errorf("error when importting transport requests: %s", error)
-	}
-	logger.Info("Transport requests %v is/are import successfully for job %s", s.TransportRequests, s.JobID)
-	return nil
-
-}
-
-func (s *DeployStepResp) Execute(ctx *gin.Context, query *db.Queries) error {
-	logger.Infof("Starting to execute deployment task %d", s.JobID)
-
-	cpiClient, errorCpiClient := cpi.NewClient(ctx, s.Endpoint)
-	if errorCpiClient != nil {
-		return fmt.Errorf("error when authenticating to cpi tenant, error message is %s", errorCpiClient)
-	}
-	for _, iflow := range s.ArtifactIds {
-		cpiClient.DeployIflow(string(iflow), "active")
-	}
-	return nil
-}
-
-type JobResp struct {
-	db.Job
-	Steps []Step `json:"steps"`
-}
-
-// Get job detail with step list
-func GetJobByID(ctx *gin.Context) {
-	jobParam := ctx.Param("id")
-	jobId, err := strconv.Atoi(jobParam)
+// Get job detail with step list, by jobid
+func GetJobAndStepsByID(ctx *gin.Context) {
+	jobId, err := strconv.Atoi(ctx.Param("id"))
 	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"msg": fmt.Sprintf("invalid job id %d: %s", jobId, err),
+		})
 		return
 	}
-
-	job, steps, err := getJobwithSteps(ctx, jobId)
-	if err != nil {
+	var job db.Job
+	if err := db.Conn().First(&job, jobId).Error; err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{
-			"result": err,
+			"msg": fmt.Sprintf("error while querying job %d: %s", jobId, err),
+		})
+		return
+	}
+	var steps interface{}
+
+	if job.Type == "Import" {
+		var importSteps []db.ImportStep
+		if err := db.Conn().Where(db.ImportStep{JobId: job.ID}).Find(&importSteps).Error; err != nil {
+			ctx.JSON(http.StatusInternalServerError,
+				gin.H{"msg": fmt.Sprintf("error while querying Import Steps of job %d: %s", job.ID, err)},
+			)
+			return
+		}
+		steps = importSteps
+	} else if job.Type == "Deploy" {
+		var deployStep []db.DeployStep
+		if err := db.Conn().Where(db.DeployStep{JobId: job.ID}).Find(&deployStep).Error; err != nil {
+			ctx.JSON(http.StatusInternalServerError,
+				gin.H{"msg": fmt.Sprintf("error while querying Deploy Steps of job %d: %s", job.ID, err)},
+			)
+			return
+		}
+		steps = deployStep
+	} else if job.Type == "Undepoloy" {
+		// todo
+	} else {
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"msg": fmt.Sprintf("invalid job type: %s", job.Type),
 		})
 		return
 	}
 
-	jobResp := &JobResp{
-		*job,
-		steps,
-	}
 	ctx.JSON(http.StatusOK, gin.H{
-		"result": jobResp,
+		"result": struct {
+			db.Job
+			Steps any `json:"Steps"`
+		}{
+			job,
+			steps,
+		},
 	})
-}
-
-func getJobwithSteps(ctx *gin.Context, jobId int) (*db.Job, []Step, error) {
-	conn, err := pgx.Connect(ctx, DBSource)
-	if err != nil {
-		return nil, nil, err
-	}
-	query := db.New(conn)
-	// get import steps
-	importSteps, err := query.SelectImportStepsByJobId(ctx, jobId)
-	if err != nil {
-		return nil, nil, err
-	}
-	// get deploy steps
-	deploySteps, err := query.SelectDeployStepsByJobId(ctx, jobId)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	steps := make([]Step, 0)
-	for _, p := range importSteps {
-		steps = append(steps, &ImportStepResp{p, "Import"})
-	}
-	for _, p := range deploySteps {
-		steps = append(steps, &DeployStepResp{p, "Deploy"})
-	}
-	// sort by sequence
-	sort.Slice(steps, func(i, j int) bool {
-		return steps[i].GetSeq() < steps[j].GetSeq()
-	})
-
-	// get job
-	job, err := query.GetJobByID(ctx, jobId)
-	if err != nil {
-		return nil, nil, err
-	}
-	return &job, steps, nil
 }
 
 func CreateJob(ctx *gin.Context) {
-	var createJobParams db.CreateJobParams
-	err := ctx.BindJSON(&createJobParams)
-	if err != nil {
+	var job db.Job = db.Job{}
+	if err := ctx.BindJSON(&job); err != nil {
 		logger.Errorf("invalid request, error message is %s", err)
 		ctx.JSON(http.StatusBadRequest, gin.H{
-			"status": "failed",
-			"msg":    "invalid request",
-			"code":   http.StatusBadRequest,
+			"msg": "invalid request param",
 		})
 		return
 	}
-	createJobParams.Status = "Submitted"
-	client, err := NewDBClient(ctx)
-	if err != nil {
-		logger.Error("error while connecting to db: %s", err)
+	job.Status = "Submitted"
+	if err := db.Conn().Save(&job).Error; err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"msg": "error while creating job",
+		})
 		return
 	}
-	job, err := client.Query.CreateJob(ctx, createJobParams)
-	if err != nil {
-		logger.Error("error in call CreateJob: %s", err)
-		return
-	}
-
 	ctx.JSON(http.StatusOK, gin.H{
 		"result": job,
-	})
-
-}
-
-func GetJobs(ctx *gin.Context) {
-	var jobs []db.Job
-	var err error
-	job_type := ctx.Query("type")
-	dbClient, err := NewDBClient(ctx)
-	if err != nil {
-		logger.Error("error while conecting to db for GetJobs: %s", err)
-		return
-	}
-	if len(job_type) > 0 { //return all jobs if no 'type' param
-		jobs, err = dbClient.Query.GetJobsByType(ctx, job_type)
-	} else {
-		jobs, err = dbClient.Query.GetJobs(ctx)
-	}
-	if err != nil {
-		logger.Errorf("Error when retrieve jobs from database, error message is %s", err)
-		ctx.JSON(http.StatusServiceUnavailable, gin.H{
-			"status": "failed",
-			"msg":    "Error when retrieve jobs from database",
-			"code":   http.StatusServiceUnavailable,
-		})
-		return
-	}
-	ctx.JSON(http.StatusOK, gin.H{
-		"status": "success",
-		"code":   200,
-		"result": jobs,
 	})
 }
 
 func GetJobsByType(ctx *gin.Context) {
 	job_type := ctx.Query("type")
-	client, err := NewDBClient(ctx)
-	if err != nil {
-		logger.Error("error while connecting to db: %s", err)
-		return
-	}
-	jobs, err := client.Query.GetJobsByType(ctx, job_type)
-	if err != nil {
-		logger.Error("error while querying jobs by type: %s", err)
+
+	var jobs []db.Job
+
+	if err := db.Conn().Where(map[string]interface{}{"type": job_type}).Find(&jobs).Error; err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"msg": err,
+		})
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{
 		"result": jobs,
 	})
-
-}
-func GetJobyID(ctx *gin.Context) {
-
-	context := ctx.Request.Context()
-	id := ctx.Param("id")
-	if id == "" {
-		logger.Error("invalid request, please supply the id in the url")
-		ctx.JSON(http.StatusBadRequest, gin.H{
-			"status": "failed",
-			"msg":    "invalid request",
-			"code":   http.StatusBadRequest,
-		})
-		return
-	}
-
-	dbConn, errDBconn := pgx.Connect(context, DBSource)
-	if errDBconn != nil {
-		logger.Errorf("error when connecting to the database, please contact your system administrator, error message is %s", errDBconn)
-		ctx.JSON(http.StatusServiceUnavailable, gin.H{
-			"status": "failed",
-			"msg":    "error when connecting to the database, please contact your system administrator",
-			"code":   http.StatusServiceUnavailable,
-		})
-		return
-	}
-	query := db.New(dbConn)
-
-	idnumber, _ := strconv.Atoi(id)
-	logger.Infof("getting job with id %d", idnumber)
-	job, errorDBQuery := query.GetJobByID(context, idnumber)
-	if errorDBQuery != nil {
-		logger.Errorf("Error when retrieve job from database, error message is %s", errorDBQuery)
-		ctx.JSON(http.StatusServiceUnavailable, gin.H{
-			"status": "failed",
-			"msg":    "Error when retrieve job from database",
-			"code":   http.StatusServiceUnavailable,
-		})
-		return
-	}
-
-	ctx.JSON(http.StatusOK, gin.H{
-		"status": "success",
-		"code":   200,
-		"result": job,
-	})
 }
 
 // Delete job and steps within it
 func DeleteJob(ctx *gin.Context) {
-
-	context := ctx.Request.Context()
-	dbConn, errDBconn := pgx.Connect(context, DBSource)
-	if errDBconn != nil {
-		logger.Errorf("error when connecting to the database, please contact your system administrator, error message is %s", errDBconn)
-		ctx.JSON(http.StatusServiceUnavailable, gin.H{
-			"status": "failed",
-			"msg":    "error when connecting to the database, please contact your system administrator",
-			"code":   http.StatusServiceUnavailable,
-		})
-		return
-	}
-
-	query := db.New(dbConn)
 	id := ctx.Param("id")
 	if id == "" {
 		ctx.JSON(http.StatusBadRequest, gin.H{
-			"status": "failed",
-			"msg":    "no id available, please specify the id of config",
-			"code":   http.StatusBadRequest,
+			"msg": "no id available, please specify the id of config",
 		})
 		return
 	}
 	jobId, _ := strconv.Atoi(id)
 
-	job, errorDBQuery := query.DeleteJobByID(context, jobId)
-	if errorDBQuery != nil {
-		logger.Errorf("Error when deleting job, error message is %s", errorDBQuery)
-		ctx.JSON(http.StatusServiceUnavailable, gin.H{
-			"status": "failed",
-			"msg":    "Error when deleting job",
-			"code":   http.StatusServiceUnavailable,
-		})
-		return
-	}
-
-	err := query.DeleteImportStepByJobId(ctx, jobId)
-	if err != nil {
-		logger.Error(err)
-	}
-	err = query.DeleteDeployStepByJobId(ctx, jobId)
-	if err != nil {
-		msg := fmt.Sprintf("Internal Server Error while delete Steps: %s", err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{
-			"msg": msg,
-		})
+	if err := db.Conn().Delete(&db.Job{}, jobId).Error; err != nil {
 		return
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{
-		"status": "success",
-		"msg":    "deleted",
-		"code":   http.StatusOK,
-		"id":     job.ID,
+		"result": jobId,
 	})
 
-}
-
-type StepReq struct {
-	Id                int      `json:"id"`
-	Status            string   `json:"status"`
-	Type              string   `json:"type"`
-	EndpointId        int      `json:"endpoint_id"`
-	EndpointName      string   `json:"endpoint_name"`
-	Endpoint          string   `json:"endpoint"`
-	TransportNodeId   int      `json:"transport_node_id"`
-	TransportNodeName string   `json:"transport_node_name"`
-	TransportRequests []int    `json:"transport_requests"`
-	PackageId         string   `json:"package_id"`
-	ArtifactIds       []string `json:"artifact_ids"`
-}
-type JobReq struct {
-	db.Job
-	Steps []StepReq `json:"steps"`
 }
 
 // Update or Insert Job and steps within it
 func UpSertJobWithStep(ctx *gin.Context) {
-	var jobReq JobReq
-
-	err := ctx.BindJSON(&jobReq)
-	if err != nil {
-		logger.Errorf("invalid request, error message is %s", err)
+	var jobReq struct {
+		db.Job
+		Steps []map[string]interface{} `json:"steps"`
+	}
+	if err := ctx.BindJSON(&jobReq); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{
-			"status": "failed",
-			"msg":    "invalid request",
-			"code":   http.StatusBadRequest,
+			"msg": "invalid request",
 		})
 		return
 	}
-
-	dbConn, errDBconn := pgx.Connect(ctx, DBSource)
-	if errDBconn != nil {
-		logger.Errorf("error when connecting to the database, please contact your system administrator, error message is %s", errDBconn)
-		ctx.JSON(http.StatusServiceUnavailable, gin.H{
-			"status": "failed",
-			"msg":    "error when connecting to the database",
-			"code":   http.StatusServiceUnavailable,
-		})
-		return
-	}
-	query := db.New(dbConn)
-	// Update Job itself
-	updateJobParams := &db.UpdateJobByIDParams{
-		ID:          jobReq.ID,
-		Name:        jobReq.Name,
-		Description: jobReq.Description,
-		Status:      "Submitted",
-		ModifiedAt:  pgtype.Timestamptz{Time: time.Now(), Valid: true},
-		ModifiedBy:  pgtype.Text{String: "USER", Valid: true},
-	}
-
-	updateJobByIDResp, errorDBQuery := query.UpdateJobByID(ctx, *updateJobParams)
-	if errorDBQuery != nil {
-		logger.Errorf("Error when updating job from database, error message is %s", errorDBQuery)
-		ctx.JSON(http.StatusServiceUnavailable, gin.H{
-			"status": "failed",
-			"msg":    "Error when updating job",
-			"code":   http.StatusServiceUnavailable,
-		})
+	// save job
+	jobReq.Job.Status = "Saved"
+	if err := db.Conn().Save(&jobReq.Job).Error; err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"msg": err})
 		return
 	}
 
-	// Update steps within the step
-	for i, step := range jobReq.Steps {
-		if step.Type == "Import" {
-			if step.Id == -1 { //Do Insert
-				_, err := query.InsertImportStep(ctx, db.InsertImportStepParams{
-					JobID:             jobReq.ID,
-					Status:            "Submitted",
-					Sequence:          i,
-					TransportNodeID:   step.TransportNodeId,
-					TransportNodeName: step.TransportNodeName,
-					TransportRequests: step.TransportRequests,
-				})
-				if err != nil {
-					ctx.JSON(http.StatusInternalServerError, gin.H{
-						"msg": fmt.Sprintf("Internal Server Error: %s", err),
-					})
-					return
-				}
-				continue
-			}
-			//Do Update
-			_, err := query.UpdateImportStep(ctx, db.UpdateImportStepParams{
-				ID:                step.Id,
-				Sequence:          i,
-				Status:            "Submitted",
-				TransportNodeID:   step.TransportNodeId,
-				TransportNodeName: step.TransportNodeName,
-				TransportRequests: step.TransportRequests,
+	if len(jobReq.Steps) == 0 {
+		ctx.JSON(http.StatusOK, gin.H{
+			"msg": "success",
+		})
+		return
+	}
+	// upsert steps of this job
+	if jobReq.Type == "Import" {
+		var steps []db.ImportStep
+		mapstructure.Decode(jobReq.Steps, &steps)
+		for i := range steps {
+			steps[i].JobId = jobReq.ID
+			steps[i].Sequence = uint(i)
+			steps[i].Status = "Saved"
+		}
+		if err := db.Conn().Save(&steps).Error; err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{
+				"msg": fmt.Sprintf("error while saving steps: %s", err),
 			})
-			if err != nil {
-				ctx.JSON(http.StatusInternalServerError, gin.H{
-					"msg": fmt.Sprintf("Internal Server Error: %s", err),
-				})
-				return
-			}
-		} else if step.Type == "Deploy" {
-			if step.Id == -1 {
-				_, err := query.InsertDeployStep(ctx, db.InsertDeployStepParams{
-					JobID:       jobReq.ID,
-					Status:      "Submitted",
-					Sequence:    i,
-					Endpoint:    step.Endpoint,
-					PackageID:   step.PackageId,
-					ArtifactIds: step.ArtifactIds,
-				})
-				if err != nil {
-					ctx.JSON(http.StatusInternalServerError, gin.H{
-						"msg": fmt.Sprintf("Internal Server Error: %s", err),
-					})
-					return
-				}
-				continue
-			}
-			// Update
-			_, err := query.UpdateDeployStep(ctx, db.UpdateDeployStepParams{
-				ID:          step.Id,
-				Status:      "Submitted",
-				Sequence:    i,
-				Endpoint:    step.Endpoint,
-				PackageID:   step.PackageId,
-				ArtifactIds: step.ArtifactIds,
-			})
-			if err != nil {
-				ctx.JSON(http.StatusInternalServerError, gin.H{
-					"msg": fmt.Sprintf("Internal Server Error: %s", err),
-				})
-				return
-			}
-
+			return
 		}
 
+	} else if jobReq.Type == "Deploy" {
+		var steps []db.DeployStep
+		mapstructure.Decode(jobReq.Steps, &steps)
+		for i := range jobReq.Steps {
+			steps[i].JobId = jobReq.ID
+			steps[i].Sequence = uint(i)
+			steps[i].Status = "Saved"
+		}
+		db.Conn().Save(&steps)
+	} else if jobReq.Type == "Undeploy" {
+		// todo
+	} else {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"msg": fmt.Sprintf("invalid job type %s", jobReq.Type),
+		})
+		return
 	}
-
 	ctx.JSON(http.StatusOK, gin.H{
-		"status": "success",
-		"code":   200,
-		"result": updateJobByIDResp,
+		"msg": "success",
 	})
-
 }
 func ExecuteJob(ctx *gin.Context) {
-	context := ctx.Request.Context()
-	id := ctx.Param("id")
-	if id == "" {
-		logger.Error("invalid request, please supply the id in the url")
-		ctx.JSON(http.StatusBadRequest, gin.H{
-			"status": "failed",
-			"msg":    "invalid request",
-			"code":   http.StatusBadRequest,
-		})
-		return
-	}
-
-	logger.Infof("get job config for %s", id)
-	dbConn, errDBconn := pgx.Connect(context, DBSource)
-	if errDBconn != nil {
-		logger.Errorf("error when connecting to the database, please contact your system administrator, error message is %s", errDBconn)
-		ctx.JSON(http.StatusServiceUnavailable, gin.H{
-			"status": "failed",
-			"msg":    "error when connecting to the database",
-			"code":   http.StatusServiceUnavailable,
-		})
-		return
-	}
-	query := db.New(dbConn)
-	idNumber, _ := strconv.Atoi(id)
-	_, errorDBQuery := query.GetJobByID(context, idNumber)
-	if errorDBQuery != nil {
-		logger.Errorf("Error when getting job from database, error message is %s", errorDBQuery)
-		ctx.JSON(http.StatusServiceUnavailable, gin.H{
-			"status": "failed",
-			"msg":    "Error when executing job",
-			"code":   http.StatusServiceUnavailable,
-		})
-		return
-	}
-	job, steps, err := getJobwithSteps(ctx, idNumber)
+	jobId, err := strconv.Atoi(ctx.Param("id"))
 	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"msg": fmt.Sprintf("invalid job id: %s", err),
+		})
 		return
 	}
-
-	logger.Infof("job %d has steps %v", id, steps)
-	for i, step := range steps {
-		logger.Infof("Processing step %d of job %d ", i, job.ID)
-		step.Execute(ctx, query)
+	// query job
+	var job db.Job
+	if err := db.Conn().First(&job, jobId).Error; err != nil {
+		return
 	}
+	//execute and update steps
+	if job.Type == "Import" {
+		var steps []db.ImportStep
+		if err := db.Conn().Where(&db.ImportStep{JobId: job.ID}).Find(&steps).Error; err != nil {
+			return
+		}
+		for _, step := range steps {
+			actionId, err := executeImport(ctx, step)
+			if err != nil {
+				return
+			}
+			if err := db.Conn().Model(&step).Updates(db.ImportStep{ActionId: actionId, Status: "Running"}).Error; err != nil {
+				return
+			}
+		}
+	} else if job.Type == "Deploy" {
+		var steps []db.DeployStep
+		if err := db.Conn().Where(&db.DeployStep{JobId: job.ID}).Find(&steps).Error; err != nil {
+			return
+		}
+		// execute steps
+		for _, step := range steps {
+			taskIds, err := executeDeploy(ctx, step)
+			if err != nil {
+				db.Conn().Model(&db.Job{}).Where("id=?", job.ID).Update("status", "Error")
+				return
+			}
+			// update actionIds
+			if err := db.Conn().Model(&step).Updates(db.DeployStep{TaskIds: pq.StringArray(taskIds), Status: "Running"}).Error; err != nil {
+				return
+			}
+		}
+	} else if job.Type == "Undeploy" {
+		//todo
+	} else {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"msg": fmt.Sprintf("unexpected job type: %s", job.Type),
+		})
+	}
+
+}
+
+// returns job id
+func executeImport(ctx context.Context, step db.ImportStep) (uint, error) {
+	client, err := tms.NewClient(ctx)
+	if err != nil {
+		return 0, err
+	}
+	actionId, err := client.ImportTransportRequest(step.TransportNodeId, step.TransportRequests)
+	if err != nil {
+		return 0, err
+	}
+	return actionId, nil
+}
+
+// returns taskIds or err
+func executeDeploy(ctx context.Context, step db.DeployStep) ([]string, error) {
+	client, err := cpi.NewClient(ctx, step.Endpoint)
+	if err != nil {
+		return nil, err
+	}
+	taskIds := make([]string, 0)
+	for i, artifactId := range step.ArtifactIds {
+		var actionID string
+		// currently support two types of artifacts
+		if step.ArtifactTypes[i] == "Integration Flow" {
+			actionID, err = client.DeployIflow(artifactId, "active")
+			if err != nil {
+				return nil, err
+			}
+		} else if step.ArtifactTypes[i] == "Script Collection" {
+			actionID, err = client.DeployScriptCollection(artifactId, "active")
+			if err != nil {
+				return nil, err
+			}
+		}
+		taskIds = append(taskIds, actionID)
+	}
+	return taskIds, nil
 }

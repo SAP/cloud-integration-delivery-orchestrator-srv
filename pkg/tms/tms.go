@@ -185,7 +185,7 @@ func (t *TmsClient) GetNodeTransportRequests(nodeID int) ([]NodeTransportRequest
 }
 
 type ReqImportTransportRequests struct {
-	TransportRequests []int `json:"transportRequests"`
+	TransportRequests []int32 `json:"transportRequests"`
 }
 
 type ReqImportTransportResp struct {
@@ -193,12 +193,12 @@ type ReqImportTransportResp struct {
 	MonitoringURL string `json:"monitoringURL"`
 }
 
-func (t *TmsClient) ImportTransportRequest(nodeID int, transportRequestIDs []int) (int, error) {
+func (t *TmsClient) ImportTransportRequest(nodeID uint, transportRequestIDs []int32) (uint, error) {
 	childCtx, cancel := context.WithCancel(t.Context)
 	defer cancel()
 
 	fullURL := fmt.Sprintf("%s/nodes/%d/transportRequests/import", t.ApiURL, nodeID)
-	var actionID int
+	var actionID uint
 	requestBodyContent := ReqImportTransportRequests{
 		TransportRequests: transportRequestIDs,
 	}
@@ -226,7 +226,7 @@ func (t *TmsClient) ImportTransportRequest(nodeID int, transportRequestIDs []int
 		logger.Errorf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
 		return actionID, jsonUnmarshalError
 	}
-	actionID = reqImportTransportResp.ActionID
+	actionID = uint(reqImportTransportResp.ActionID)
 	return actionID, nil
 }
 

@@ -39,13 +39,13 @@ func TestCPIPackages(t *testing.T) {
 			t.Logf("iflow info %#v\n", iflowItemInfo)
 		}
 
-		scriptCollections, err6 := client.GetPackageScripts(packageItemInfo.ID)
+		scriptCollections, err6 := client.GetPackageScriptcollections(packageItemInfo.ID)
 		if err6 != nil {
 			t.Fatalf("error when getting all script collections in package %s info, %v\n  ", packageItemInfo.Name, err6)
 		}
 
 		for _, scriptCollection := range scriptCollections {
-			scriptCollectionInfo, err7 := client.GetPackageScript(scriptCollection.ID, scriptCollection.PackageID)
+			scriptCollectionInfo, err7 := client.GetScriptCollection(scriptCollection.ID, scriptCollection.PackageID)
 			if err7 != nil {
 				t.Fatalf("error when getting script collections %s info, %v\n  ", scriptCollectionInfo.ID, err7)
 			}

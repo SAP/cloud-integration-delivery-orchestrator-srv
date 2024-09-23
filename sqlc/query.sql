@@ -69,6 +69,11 @@ UPDATE import_step
 SET status=$2, sequence=$3, transport_node_id=$4, transport_node_name=$5, transport_requests=$6
 WHERE id=$1 RETURNING *;
 
+-- name: UpdateActionId :one
+UPDATE import_step
+SET action_id=$2
+WHERE id=$1 RETURNING *;
+
 
 -- name: UpdateDeployStep :one
 UPDATE deploy_step
@@ -91,3 +96,26 @@ WHERE id=$1;
 -- name: DeleteDeployStepById :exec
 DELETE FROM deploy_step
 WHERE id=$1;
+
+
+-- name: SelectArtifactStatusByJobJd :many
+SELECT * FROM artifact_status
+WHERE "jobId"=$1;
+
+-- name: InsertArtifactStatus :one
+INSERT INTO artifact_status(
+  "jobId",
+  step_id,
+  artifact_type,
+  artifact_id,
+  task_id,
+  status
+) VALUES (
+  $1, $2, $3, $4, $5, $6
+) RETURNING *;
+
+-- name: updateArtifactStatus :one
+UPDATE artifact_status
+SET task_id=$2, status=$3, artifact_type=$4, artifact_id=$5
+WHERE id=$1
+RETURNING *;
