@@ -11,6 +11,7 @@ require (
 )
 
 require (
+	github.com/cloudfoundry-community/go-cfenv v1.18.0 // indirect
 	github.com/ishidawataru/sctp v0.0.0-20230406120618-7ff4192f6ff2 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
