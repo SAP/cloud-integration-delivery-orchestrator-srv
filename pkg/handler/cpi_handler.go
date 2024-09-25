@@ -6,12 +6,11 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.wdf.sap.corp/maco-mmt/maco-deploy/env"
 	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/cpi"
-	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/log"
-	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/remotecall"
 )
 
-var logger = log.NewLogger().Sugar()
+var logger = env.Logger()
 
 // get all packages within a cpi tenant
 func GetPackagesHandler(ctx *gin.Context) {
@@ -113,7 +112,7 @@ type DestinationResp struct {
 
 func GetDestinationsHandler(ctx *gin.Context) {
 	var destList []DestinationResp
-	for i, v := range remotecall.DestEnv() {
+	for i, v := range env.Destinations() {
 		if strings.HasPrefix(i, "DEST_CPIAPI") {
 			destList = append(destList, DestinationResp{
 				Name: v.Name,

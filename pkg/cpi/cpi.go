@@ -7,11 +7,10 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/log"
-	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/remotecall"
+	"github.wdf.sap.corp/maco-mmt/maco-deploy/env"
 )
 
-var logger = log.NewLogger().Sugar()
+var logger = env.Logger()
 
 type CPIPackage struct {
 	ID                string `json:"Id"`
@@ -40,13 +39,13 @@ type PackagesResponse struct {
 }
 
 type CpiClient struct {
-	remotecall.HttpClient
+	env.HttpClient
 }
 
 func NewClient(ctx context.Context, tenant string) (*CpiClient, error) {
-	cpiDest := remotecall.DestEnv()[tenant]
+	cpiDest := env.Destinations()[tenant]
 	apiUrl := fmt.Sprintf("%s/v1", cpiDest.URL)
-	client, err := remotecall.NewClient(ctx, cpiDest.ClientId, cpiDest.ClientSecret, cpiDest.TokenServiceURL, apiUrl)
+	client, err := env.NewClient(ctx, cpiDest.ClientId, cpiDest.ClientSecret, cpiDest.TokenServiceURL, apiUrl)
 	return &CpiClient{*client}, err
 }
 
@@ -55,7 +54,7 @@ func (c *CpiClient) GetPackages() ([]CPIPackage, error) {
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/IntegrationPackages", c.ApiURL)
 	logger.Infof("Starting to get all packages from cpi tenant %s\n", fullURL)
-	request := remotecall.HttpRequest{
+	request := env.HttpRequest{
 		Ctx:    childCtx,
 		Method: http.MethodGet,
 		ApiURL: fullURL,
@@ -87,7 +86,7 @@ func (c *CpiClient) GetPackage(packageID string) (CPIPackage, error) {
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/IntegrationPackages('%s')", c.ApiURL, packageID)
 	logger.Infof("Starting to get packages %s from cpi tenant %s\n", packageID, fullURL)
-	request := remotecall.HttpRequest{
+	request := env.HttpRequest{
 		Ctx:    childCtx,
 		Method: http.MethodGet,
 		ApiURL: fullURL,
@@ -128,7 +127,7 @@ func (c *CpiClient) ImportPackage(cpiPackage importPackageRequest) (CPIPackage, 
 	fullURL := fmt.Sprintf("%s/IntegrationPackages", c.ApiURL)
 	logger.Infof("Starting to import package to cpi tenant %s\n", fullURL)
 	requestBodyJson, _ := json.Marshal(cpiPackage)
-	request := remotecall.HttpRequest{
+	request := env.HttpRequest{
 		Ctx:         childCtx,
 		Method:      http.MethodPost,
 		ApiURL:      fullURL,
@@ -181,7 +180,7 @@ func (c *CpiClient) GetPackageIflows(packageID string) ([]IflowItem, error) {
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/IntegrationPackages('%s')/IntegrationDesigntimeArtifacts", c.ApiURL, packageID)
 	logger.Infof("Starting to get all iflows in package %s from cpi tenant %s\n", packageID, fullURL)
-	request := remotecall.HttpRequest{
+	request := env.HttpRequest{
 		Ctx:    childCtx,
 		Method: http.MethodGet,
 		ApiURL: fullURL,
@@ -211,7 +210,7 @@ func (c *CpiClient) GetPackageIflow(packageID string, iflowID string, iflowVersi
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/IntegrationPackages('%s')/IntegrationDesigntimeArtifacts(Id='%s',Version='%s')", c.ApiURL, packageID, iflowID, iflowVersion)
 	logger.Infof("Starting to get iflow %s in package %s from cpi tenant %s\n", iflowID, packageID, fullURL)
-	request := remotecall.HttpRequest{
+	request := env.HttpRequest{
 		Ctx:    childCtx,
 		Method: http.MethodGet,
 		ApiURL: fullURL,
@@ -239,7 +238,7 @@ func (c *CpiClient) GetIflow(iflowID string, iflowVersion string) (IflowItem, er
 	fullURL := fmt.Sprintf("%s/IntegrationDesigntimeArtifacts(Id='%s',Version='%s')", c.ApiURL, iflowID, iflowVersion)
 
 	logger.Infof("Starting to get iflow %s from cpi tenant %s\n", iflowID, fullURL)
-	request := remotecall.HttpRequest{
+	request := env.HttpRequest{
 		Ctx:    childCtx,
 		Method: http.MethodGet,
 		ApiURL: fullURL,
@@ -266,7 +265,7 @@ func (c *CpiClient) DeployIflow(iflowID string, iflowVersion string) (string, er
 	var taskID string
 	fullURL := fmt.Sprintf("%s/DeployIntegrationDesigntimeArtifact?Id='%s'&Version='%s'", c.ApiURL, iflowID, iflowVersion)
 	logger.Infof("Starting to deploy iflow %s  on tenant %s\n", iflowID, fullURL)
-	request := remotecall.HttpRequest{
+	request := env.HttpRequest{
 		Ctx:    childCtx,
 		Method: http.MethodPost,
 		ApiURL: fullURL,
@@ -297,7 +296,7 @@ func (c *CpiClient) CheckDeployStatus(taskID string) (string, error) {
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/BuildAndDeployStatus(TaskId='%s')", c.ApiURL, taskID)
 	logger.Infof("Checking the deploy status for task id  %s on tenant %s\n", taskID, fullURL)
-	request := remotecall.HttpRequest{
+	request := env.HttpRequest{
 		Ctx:    childCtx,
 		Method: http.MethodGet,
 		ApiURL: fullURL,
@@ -324,7 +323,7 @@ func (c *CpiClient) DeleteIflow(iflowID string, iflowVersion string) error {
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/IntegrationDesigntimeArtifacts(Id='%s',Version='%s')", c.ApiURL, iflowID, iflowVersion)
 	logger.Infof("Starting to delete iflow %s on tenant %s\n", iflowID, fullURL)
-	request := remotecall.HttpRequest{
+	request := env.HttpRequest{
 		Ctx:    childCtx,
 		Method: http.MethodGet,
 		ApiURL: fullURL,
@@ -359,7 +358,7 @@ func (c *CpiClient) GetPackageScriptcollections(packageID string) ([]ScriptColle
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/IntegrationPackages('%s')/ScriptCollectionDesigntimeArtifacts", c.ApiURL, packageID)
 	logger.Infof("Starting to get all iflows in package %s from cpi tenant %s\n", packageID, fullURL)
-	request := remotecall.HttpRequest{
+	request := env.HttpRequest{
 		Ctx:    childCtx,
 		Method: http.MethodGet,
 		ApiURL: fullURL,
@@ -390,7 +389,7 @@ func (c *CpiClient) GetScriptCollection(scriptCollectionID string, scriptCollect
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/ScriptCollectionDesigntimeArtifacts(Id='%s',Version='%s')", c.ApiURL, scriptCollectionID, scriptCollectionVersion)
 	logger.Infof("Starting to get script collection %s in package from cpi tenant %s\n", scriptCollectionID, fullURL)
-	request := remotecall.HttpRequest{
+	request := env.HttpRequest{
 		Ctx:    childCtx,
 		Method: http.MethodGet,
 		ApiURL: fullURL,
@@ -417,7 +416,7 @@ func (c *CpiClient) DeployScriptCollection(scriptCollectionID string, scriptColl
 	var taskID string
 	fullURL := fmt.Sprintf("%s/DeployScriptCollectionDesigntimeArtifact?Id='%s'&Version='%s'", c.ApiURL, scriptCollectionID, scriptCollectionVersion)
 	logger.Infof("Starting to deploy script collection %s in package from cpi tenant %s\n", scriptCollectionID, fullURL)
-	request := remotecall.HttpRequest{
+	request := env.HttpRequest{
 		Ctx:    childCtx,
 		Method: http.MethodPost,
 		ApiURL: fullURL,
@@ -436,7 +435,7 @@ func (c *CpiClient) DeleteScriptCollection(scriptCollectionID string, scriptColl
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/ScriptCollectionDesigntimeArtifacts(Id='%s',Version='%s')", c.ApiURL, scriptCollectionID, scriptCollectionVersion)
 	logger.Infof("Starting to delete script collection %s on tenant %s\n", scriptCollectionID, fullURL)
-	request := remotecall.HttpRequest{
+	request := env.HttpRequest{
 		Ctx:    childCtx,
 		Method: http.MethodGet,
 		ApiURL: fullURL,
@@ -456,7 +455,7 @@ func (c *CpiClient) UndeployRuntimeArtifacts(artifactID string) error {
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/IntegrationRuntimeArtifacts('%s')", c.ApiURL, artifactID)
 	logger.Infof("Starting to undeploy artifact %s on tenant %s\n", artifactID, fullURL)
-	request := remotecall.HttpRequest{
+	request := env.HttpRequest{
 		Ctx:    childCtx,
 		Method: http.MethodGet,
 		ApiURL: fullURL,

@@ -8,11 +8,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/log"
-	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/remotecall"
+	"github.wdf.sap.corp/maco-mmt/maco-deploy/env"
 )
 
-var logger = log.NewLogger().Sugar()
+var logger = env.Logger()
 
 type TMSNode struct {
 	ID                   int    `json:"id"`
@@ -38,13 +37,13 @@ type TMSNodesResp struct {
 	Nodes []TMSNode `json:"nodes"`
 }
 type TmsClient struct {
-	remotecall.HttpClient
+	env.HttpClient
 }
 
 func NewClient(ctx context.Context) (*TmsClient, error) {
-	v := remotecall.TmsEnv()
-	apiUrl := fmt.Sprintf("%s/v2", v.Uri)
-	client, err := remotecall.NewClient(ctx, v.Uaa.Clientid, v.Uaa.Clientsecret, v.Uaa.Url, apiUrl)
+	v := env.TmsCred()
+	apiUrl := fmt.Sprintf("%s/v2", v.ApiUrl)
+	client, err := env.NewClient(ctx, v.Clientid, v.Clientsecret, v.AuthUrl, apiUrl)
 	return &TmsClient{*client}, err
 }
 
@@ -53,7 +52,7 @@ func (t *TmsClient) GetNodes() ([]TMSNode, error) {
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/nodes", t.ApiURL)
 	logger.Infof("Starting to get all tms nodes from %s\n", fullURL)
-	request := remotecall.HttpRequest{
+	request := env.HttpRequest{
 		Ctx:    childCtx,
 		ApiURL: fullURL,
 		Method: http.MethodGet,
@@ -98,7 +97,7 @@ func (t *TmsClient) GetNode(nodeID int) (TMSNode, error) {
 
 	fullURL := fmt.Sprintf("%s/nodes/%d", t.ApiURL, nodeID)
 	logger.Infof("Starting to get tms node from  %s\n", fullURL)
-	request := remotecall.HttpRequest{
+	request := env.HttpRequest{
 		Ctx:    childCtx,
 		ApiURL: fullURL,
 		Method: http.MethodGet,
@@ -162,7 +161,7 @@ func (t *TmsClient) GetNodeTransportRequests(nodeID int) ([]NodeTransportRequest
 	fullURL := fmt.Sprintf("%s/nodes/%d/transportRequests?status=in,re,er,fa", t.ApiURL, nodeID)
 	logger.Infof("Starting to get tranport requests for node %s from  %s\n", nodeID, fullURL)
 
-	request := remotecall.HttpRequest{
+	request := env.HttpRequest{
 		Ctx:    childCtx,
 		ApiURL: fullURL,
 		Method: http.MethodGet,
@@ -206,7 +205,7 @@ func (t *TmsClient) ImportTransportRequest(nodeID uint, transportRequestIDs []in
 	requestBodyJson, _ := json.Marshal(requestBodyContent)
 	logger.Infof("Starting to get all packages from cpi tenant %s\n", fullURL)
 
-	request := remotecall.HttpRequest{
+	request := env.HttpRequest{
 		Ctx:         childCtx,
 		ApiURL:      fullURL,
 		Method:      http.MethodPost,
@@ -255,7 +254,7 @@ func (t *TmsClient) GetActionResult(actionID int) (string, error) {
 	childCtx, cancel := context.WithCancel(t.Context)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/actions/%d", t.ApiURL, actionID)
-	request := remotecall.HttpRequest{
+	request := env.HttpRequest{
 		Ctx:    childCtx,
 		ApiURL: fullURL,
 		Method: http.MethodGet,
@@ -307,7 +306,7 @@ func (t *TmsClient) GetActionResultLog(actionID int) (ActionLogResp, error) {
 	childCtx, cancel := context.WithCancel(t.Context)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/actions/%d/logs", t.ApiURL, actionID)
-	request := remotecall.HttpRequest{
+	request := env.HttpRequest{
 		Ctx:    childCtx,
 		ApiURL: fullURL,
 		Method: http.MethodGet,

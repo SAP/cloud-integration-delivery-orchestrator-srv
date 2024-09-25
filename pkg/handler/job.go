@@ -162,7 +162,9 @@ func UpSertJobWithStep(ctx *gin.Context) {
 		for i := range steps {
 			steps[i].JobId = jobReq.ID
 			steps[i].Sequence = uint(i)
-			steps[i].Status = "Saved"
+			if steps[i].Status == "Draft" {
+				steps[i].Status = "Saved"
+			}
 		}
 		if err := db.Conn().Save(&steps).Error; err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{
@@ -170,14 +172,15 @@ func UpSertJobWithStep(ctx *gin.Context) {
 			})
 			return
 		}
-
 	} else if jobReq.Type == "Deploy" {
 		var steps []db.DeployStep
 		mapstructure.Decode(jobReq.Steps, &steps)
 		for i := range jobReq.Steps {
 			steps[i].JobId = jobReq.ID
 			steps[i].Sequence = uint(i)
-			steps[i].Status = "Saved"
+			if steps[i].Status == "Draft" {
+				steps[i].Status = "Saved"
+			}
 		}
 		db.Conn().Save(&steps)
 	} else if jobReq.Type == "Undeploy" {
@@ -200,40 +203,58 @@ func ExecuteJob(ctx *gin.Context) {
 		})
 		return
 	}
+
 	// query job
 	var job db.Job
 	if err := db.Conn().First(&job, jobId).Error; err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"msg": fmt.Sprintf("failed to query job %d", jobId),
+		})
 		return
 	}
 	//execute and update steps
 	if job.Type == "Import" {
 		var steps []db.ImportStep
 		if err := db.Conn().Where(&db.ImportStep{JobId: job.ID}).Find(&steps).Error; err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"msg": fmt.Sprintf("failed to query steps of job %d", jobId)})
 			return
 		}
 		for _, step := range steps {
-			actionId, err := executeImport(ctx, step)
-			if err != nil {
+			actionId, ExecErr := executeImport(ctx, step)
+			if ExecErr != nil {
+				db.Conn().Model(&step).Updates(&db.ImportStep{Status: "Error"})
+				db.Conn().Create(&db.ExecutionLog{JobId: job.ID, StepId: step.ID, StepType: job.Type, Log: ExecErr.Error()})
 				return
 			}
 			if err := db.Conn().Model(&step).Updates(db.ImportStep{ActionId: actionId, Status: "Running"}).Error; err != nil {
+				ctx.JSON(http.StatusInternalServerError, gin.H{"msg": fmt.Sprintf("err while updating execution status of step %d", step.ID)})
 				return
 			}
 		}
 	} else if job.Type == "Deploy" {
 		var steps []db.DeployStep
-		if err := db.Conn().Where(&db.DeployStep{JobId: job.ID}).Find(&steps).Error; err != nil {
+		if dbErr := db.Conn().Where(&db.DeployStep{JobId: job.ID}).Find(&steps).Error; dbErr != nil {
+			ctx.JSON(http.StatusInternalServerError, fmt.Sprintf("error while querying steps of job %d: %s", job.ID, dbErr))
 			return
 		}
 		// execute steps
 		for _, step := range steps {
-			taskIds, err := executeDeploy(ctx, step)
-			if err != nil {
-				db.Conn().Model(&db.Job{}).Where("id=?", job.ID).Update("status", "Error")
+			if step.Status != "Saved" && step.Status != "Error" { // skip Running/Finished
+				continue
+			}
+			// execute Saved/Error steps
+			taskIds, taskStatuses, execErr := executeDeploy(ctx, step)
+			// update actionIds
+			if dbErr := db.Conn().Model(&step).Updates(db.DeployStep{
+				TaskIds:      pq.StringArray(taskIds),
+				Status:       If(execErr == nil, "Running", "Error"),
+				TaskStatuses: pq.StringArray(taskStatuses),
+			}).Error; dbErr != nil {
+				ctx.JSON(http.StatusInternalServerError, gin.H{"msg": fmt.Sprintf("error while updating execution status of step %d in db: %s", step.ID, dbErr)})
 				return
 			}
-			// update actionIds
-			if err := db.Conn().Model(&step).Updates(db.DeployStep{TaskIds: pq.StringArray(taskIds), Status: "Running"}).Error; err != nil {
+			if execErr != nil { // execution error
+				db.Conn().Create(&db.ExecutionLog{JobId: job.ID, StepId: step.ID, StepType: job.Type, Log: execErr.Error()})
 				return
 			}
 		}
@@ -245,43 +266,60 @@ func ExecuteJob(ctx *gin.Context) {
 		})
 	}
 
+	db.Conn().Model(&job).Updates(db.Job{Status: "Running"})
+
+	ctx.JSON(http.StatusAccepted, gin.H{
+		"msg": "Job Triggered",
+	})
+
 }
 
 // returns job id
 func executeImport(ctx context.Context, step db.ImportStep) (uint, error) {
 	client, err := tms.NewClient(ctx)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("failed to create tms client: %s", err)
 	}
 	actionId, err := client.ImportTransportRequest(step.TransportNodeId, step.TransportRequests)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("failed to trigger trs(%v) in node %s(%d): %s", step.TransportRequests, step.TransportNodeName, step.TransportNodeId, err)
 	}
 	return actionId, nil
 }
 
-// returns taskIds or err
-func executeDeploy(ctx context.Context, step db.DeployStep) ([]string, error) {
+// returns taskIds, taskStatuses, err
+// all artifacts will be triggered.
+func executeDeploy(ctx context.Context, step db.DeployStep) ([]string, []string, error) {
+	taskIds := make([]string, len(step.ArtifactIds))
+	taskStatuses := make([]string, len(step.ArtifactIds))
+	var err error
 	client, err := cpi.NewClient(ctx, step.Endpoint)
 	if err != nil {
-		return nil, err
+		return taskIds, taskStatuses, err
 	}
-	taskIds := make([]string, 0)
 	for i, artifactId := range step.ArtifactIds {
 		var actionID string
 		// currently support two types of artifacts
 		if step.ArtifactTypes[i] == "Integration Flow" {
 			actionID, err = client.DeployIflow(artifactId, "active")
-			if err != nil {
-				return nil, err
-			}
 		} else if step.ArtifactTypes[i] == "Script Collection" {
 			actionID, err = client.DeployScriptCollection(artifactId, "active")
-			if err != nil {
-				return nil, err
-			}
 		}
-		taskIds = append(taskIds, actionID)
+		if err != nil {
+			err = fmt.Errorf("error triggering step %d of %s (%s): %s", step.Sequence, artifactId, step.ArtifactTypes[i], err)
+			taskStatuses[i] = err.Error()
+			taskIds[0] = "0"
+			continue
+		}
+		taskStatuses[i] = "Running"
+		taskIds[i] = actionID
 	}
-	return taskIds, nil
+	return taskIds, taskStatuses, err
+}
+
+func If(isTrue bool, a, b string) string {
+	if isTrue {
+		return a
+	}
+	return b
 }

@@ -5,14 +5,15 @@ import (
 
 	ginzap "github.com/gin-contrib/zap"
 	"github.com/gin-gonic/gin"
+	"github.wdf.sap.corp/maco-mmt/maco-deploy/env"
 	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/handler"
-	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/log"
 )
+
+var logger = env.Logger().Desugar()
 
 func main() {
 	//engine := gin.New()
 	router := gin.New()
-	var logger = log.NewLogger()
 	router.Use(ginzap.Ginzap(logger, time.RFC3339, true))
 	router.Use(ginzap.RecoveryWithZap(logger, true))
 	v1Group := router.Group("/api/v1")
