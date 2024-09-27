@@ -62,3 +62,4 @@ provide environment variables: VCAP_SERVICES. need three service bindings:
 - postgresql-db
 - destination
 - transport
+put the file in root directory of the repo
