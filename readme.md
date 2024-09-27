@@ -55,3 +55,10 @@
 - https://github.com/crewjam/saml
 - https://github.com/russellhaering/gosaml2
 - github.com/appleboy/gin-jwt/v2
+
+
+## default-env.json
+provide environment variables: VCAP_SERVICES. need three service bindings:
+- postgresql-db
+- destination
+- transport
