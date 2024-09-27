@@ -42,6 +42,12 @@ func GetJobAndStepsByID(ctx *gin.Context) {
 			)
 			return
 		}
+		if err := checkImportStatus(ctx, importSteps); err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{
+				"msg": fmt.Sprintf("error while updating status of steps: %s", err),
+			})
+			return
+		}
 		steps = importSteps
 	} else if job.Type == "Deploy" {
 		var deployStep []db.DeployStep
@@ -49,6 +55,10 @@ func GetJobAndStepsByID(ctx *gin.Context) {
 			ctx.JSON(http.StatusInternalServerError,
 				gin.H{"msg": fmt.Sprintf("error while querying Deploy Steps of job %d: %s", job.ID, err)},
 			)
+			return
+		}
+		if err := checkDeployStatus(ctx, deployStep); err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"msg": fmt.Sprintf("error while checking deploying status: %s", err)})
 			return
 		}
 		steps = deployStep
@@ -239,7 +249,7 @@ func ExecuteJob(ctx *gin.Context) {
 		}
 		// execute steps
 		for _, step := range steps {
-			if step.Status != "Saved" && step.Status != "Error" { // skip Running/Finished
+			if step.Status == "Finished" || len(step.ArtifactIds) == 0 { // skip Running/Finished
 				continue
 			}
 			// execute Saved/Error steps
@@ -322,4 +332,65 @@ func If(isTrue bool, a, b string) string {
 		return a
 	}
 	return b
+}
+
+// check execution status of running deploy step
+func checkDeployStatus(ctx context.Context, steps []db.DeployStep) error {
+	for i, step := range steps { // Running/Error steps should check status
+		if step.Status == "Finished" || step.Status == "Saved" || len(step.TaskIds) == 0 { // taskids is 0/nil means deploying has not been triggerd yet
+			continue
+		}
+		statusSet := make(map[string]bool, 0)
+		for j, taskId := range step.TaskIds {
+			// possible statuses: Success, Fail, Deploying, Fail_On_License_Error
+			if step.TaskStatuses[j] == "Success" {
+				continue
+			}
+			cpiClient, err := cpi.NewClient(ctx, step.Endpoint)
+			if err != nil {
+				return fmt.Errorf("failed to connect to cpi endpoint: %s: %s", step.Endpoint, err)
+			}
+			status, err := cpiClient.CheckDeployStatus(taskId)
+			if err != nil {
+				return fmt.Errorf("error while checking status of step %d, taskId: %s: %s", i, taskId, err)
+			}
+			step.TaskStatuses[j] = status
+			statusSet[status] = true
+		}
+		// update step status
+		if statusSet["Fail"] || statusSet["Fail_On_License_Error"] {
+			step.Status = "Error"
+		} else if statusSet["Deploying"] {
+			step.Status = "Running"
+		} else {
+			step.Status = "Finished"
+		}
+		if err := db.Conn().Model(&step).Updates(step).Error; err != nil {
+			return fmt.Errorf("error while updating status of step %d: %s", i, err)
+		}
+
+	}
+	return nil
+}
+
+func checkImportStatus(ctx context.Context, steps []db.ImportStep) error {
+	cpiClient, err := tms.NewClient(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to connect to tms: %s", err)
+	}
+	// possible statuses: succeeded, warning, error, fatal, running, initial, unknown
+	for i, step := range steps {
+		if step.Status == "succeed" || step.ActionId == 0 {
+			continue
+		}
+		status, err := cpiClient.GetActionResult(step.ActionId)
+		if err != nil {
+			return fmt.Errorf("error while getting status of action id %d of step %d", step.ActionId, i)
+		}
+		step.Status = status
+		if err := db.Conn().Model(&step).Updates(step).Error; err != nil {
+			return fmt.Errorf("error while updating status of step %d (actionId: %d): %s", i, step.ActionId, err)
+		}
+	}
+	return nil
 }

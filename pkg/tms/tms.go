@@ -250,7 +250,8 @@ type ActionResultResp struct {
 	} `json:"transportRequests"`
 }
 
-func (t *TmsClient) GetActionResult(actionID int) (string, error) {
+// succeeded, warning, error, fatal, running, initial, unknown
+func (t *TmsClient) GetActionResult(actionID uint) (string, error) {
 	childCtx, cancel := context.WithCancel(t.Context)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/actions/%d", t.ApiURL, actionID)
@@ -301,7 +302,7 @@ type ActionLogResp struct {
 	} `json:"logs"`
 }
 
-func (t *TmsClient) GetActionResultLog(actionID int) (ActionLogResp, error) {
+func (t *TmsClient) GetActionResultLog(actionID uint) (ActionLogResp, error) {
 
 	childCtx, cancel := context.WithCancel(t.Context)
 	defer cancel()

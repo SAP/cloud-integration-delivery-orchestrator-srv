@@ -259,6 +259,7 @@ func (c *CpiClient) GetIflow(iflowID string, iflowVersion string) (IflowItem, er
 	return iflowResp.D, nil
 }
 
+// Deploy a design time integration flow
 func (c *CpiClient) DeployIflow(iflowID string, iflowVersion string) (string, error) {
 	childCtx, cancel := context.WithCancel(c.Context)
 	defer cancel()
@@ -291,6 +292,7 @@ type DeployStatus struct {
 	} `json:"d"`
 }
 
+// Success, Fail, Deploying, Fail_On_License_Error
 func (c *CpiClient) CheckDeployStatus(taskID string) (string, error) {
 	childCtx, cancel := context.WithCancel(c.Context)
 	defer cancel()
@@ -410,6 +412,7 @@ func (c *CpiClient) GetScriptCollection(scriptCollectionID string, scriptCollect
 	return scriptCollectionResp.D, nil
 }
 
+// deploy a design time script collection
 func (c *CpiClient) DeployScriptCollection(scriptCollectionID string, scriptCollectionVersion string) (string, error) {
 	childCtx, cancel := context.WithCancel(c.Context)
 	defer cancel()
