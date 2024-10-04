@@ -50,18 +50,18 @@ func GetJobAndStepsByID(ctx *gin.Context) {
 		}
 		steps = importSteps
 	} else if job.Type == "Deploy" {
-		var deployStep []db.DeployStep
-		if err := db.Conn().Where(db.DeployStep{JobId: job.ID}).Find(&deployStep).Error; err != nil {
+		var deploySteps []db.DeployStep
+		if err := db.Conn().Where(db.DeployStep{JobId: job.ID}).Find(&deploySteps).Error; err != nil {
 			ctx.JSON(http.StatusInternalServerError,
 				gin.H{"msg": fmt.Sprintf("error while querying Deploy Steps of job %d: %s", job.ID, err)},
 			)
 			return
 		}
-		if err := checkDeployStatus(ctx, deployStep); err != nil {
+		if err := checkDeployStatus(ctx, deploySteps); err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"msg": fmt.Sprintf("error while checking deploying status: %s", err)})
 			return
 		}
-		steps = deployStep
+		steps = deploySteps
 	} else if job.Type == "Undepoloy" {
 		// todo
 	} else {
@@ -71,13 +71,23 @@ func GetJobAndStepsByID(ctx *gin.Context) {
 		return
 	}
 
+	var jobLogs []db.ExecutionLog
+	if err := db.Conn().Where(db.ExecutionLog{JobId: job.ID}).Find(&jobLogs).Error; err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"msg": fmt.Sprintf("error while querying logs of job %d: %s", job.ID, err),
+		})
+		return
+	}
+
 	ctx.JSON(http.StatusOK, gin.H{
 		"result": struct {
 			db.Job
-			Steps any `json:"Steps"`
+			Steps         any               `json:"Steps"`
+			ExecutionLogs []db.ExecutionLog `json:"ExecutionLogs"`
 		}{
 			job,
 			steps,
+			jobLogs,
 		},
 	})
 }
@@ -233,7 +243,7 @@ func ExecuteJob(ctx *gin.Context) {
 			actionId, ExecErr := executeImport(ctx, step)
 			if ExecErr != nil {
 				db.Conn().Model(&step).Updates(&db.ImportStep{Status: "Error"})
-				db.Conn().Create(&db.ExecutionLog{JobId: job.ID, StepId: step.ID, StepType: job.Type, Log: ExecErr.Error()})
+				db.Conn().Create(&db.ExecutionLog{JobId: job.ID, StepId: step.ID, Sequence: step.Sequence, StepType: job.Type, Log: ExecErr.Error()})
 				return
 			}
 			if err := db.Conn().Model(&step).Updates(db.ImportStep{ActionId: actionId, Status: "Running"}).Error; err != nil {
@@ -264,7 +274,7 @@ func ExecuteJob(ctx *gin.Context) {
 				return
 			}
 			if execErr != nil { // execution error
-				db.Conn().Create(&db.ExecutionLog{JobId: job.ID, StepId: step.ID, StepType: job.Type, Log: execErr.Error()})
+				db.Conn().Create(&db.ExecutionLog{JobId: job.ID, StepId: step.ID, Sequence: step.Sequence, StepType: job.Type, Log: execErr.Error()})
 				return
 			}
 		}
@@ -380,12 +390,20 @@ func checkImportStatus(ctx context.Context, steps []db.ImportStep) error {
 	}
 	// possible statuses: succeeded, warning, error, fatal, running, initial, unknown
 	for i, step := range steps {
-		if step.Status == "succeed" || step.ActionId == 0 {
+		if step.Status == "Finished" || step.ActionId == 0 {
 			continue
 		}
 		status, err := cpiClient.GetActionResult(step.ActionId)
 		if err != nil {
 			return fmt.Errorf("error while getting status of action id %d of step %d", step.ActionId, i)
+		}
+		// update status, map to Finished/Error/Running
+		if status == "succeeded" {
+			status = "Finished"
+		} else if status == "error" || status == "fatal" {
+			status = "Error"
+		} else if status == "running" {
+			status = "Running"
 		}
 		step.Status = status
 		if err := db.Conn().Model(&step).Updates(step).Error; err != nil {

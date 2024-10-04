@@ -63,3 +63,13 @@ provide environment variables: VCAP_SERVICES. need three service bindings:
 - destination
 - transport
 put the file in root directory of the repo
+
+## TODO List
+Frontend:
+- status check display in step Component(success, failed, running).
+- datatable should support search.
+
+Backend:
+- undeploy artifacts
+- cache for oauth tokens
+- ppms and blackduck change request(further feature)

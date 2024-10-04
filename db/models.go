@@ -43,6 +43,7 @@ type ExecutionLog struct {
 	gorm.Model
 	JobId    uint
 	StepId   uint
+	Sequence uint
 	StepType string
 	Log      string
 }
