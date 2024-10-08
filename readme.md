@@ -70,6 +70,8 @@ Frontend:
 - datatable should support search.
 
 Backend:
+- maco400 authentications
+- optimize job execution log display
 - undeploy artifacts
 - cache for oauth tokens
 - ppms and blackduck change request(further feature)
