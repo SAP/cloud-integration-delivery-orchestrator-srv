@@ -13,7 +13,7 @@ sqlgen: |
 	@echo ">> generating db code"
 	$(SQLC) -f sqlc/sqlc.yaml  generate
 
-build: | sqlgen
+build:
 	@echo ">> building binaries"
 	$(GO) build -o build/maco-deploy
 
