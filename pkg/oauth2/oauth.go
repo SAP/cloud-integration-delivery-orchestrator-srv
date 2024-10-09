@@ -1,54 +1,29 @@
 package oauth2
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
+	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 )
 
-var client_id = "74653741-4458-4cc6-902a-4681533d1509"
+var client_id = "e413f654a5f193da8bed"
 var client_secret = "REDACTED"
 
-// https://accounts.sap.com/oauth2/authorize?
-// client_id=9ba20f68-c7db-4901-b498-72b05a3851af&
-// response_type=code&
-// redirect_uri=https%3A%2F%2Fstage-devops.authentication.sap.hana.ondemand.com%2Flogin%2Fcallback%2Fldap&
-// state=mHMOvXgzx9
-// &scope=email+openid+profile
-// &nonce=GJ0MxoCjdD6z
-
 func Login(ctx *gin.Context) {
-	response_type := "code"
-	scope := "email+openid+profile"
-	state := "state-maco-deploy"
-	redirect_uri := "http://localhost:9000/auth"
-	domain := "https://maco.accounts400.ondemand.com/oauth2/authorize"
-
-	param := fmt.Sprintf("response_type=%s&scope=%s&client_id=%s&state=%s&redirect_uri=%s", response_type, scope, client_id, state, redirect_uri)
-
-	auth_uri := fmt.Sprintf("%s?%s", domain, param)
-
-	req, err := http.NewRequestWithContext(ctx, "GET", auth_uri, nil)
-	if err != nil {
-		fmt.Println("Error creating request:", err)
+	session := sessions.Default(ctx)
+	id := session.Get("User")
+	if id == nil {
+		url := fmt.Sprintf("https://github.wdf.sap.corp/login/oauth/authorize?client_id=%s&response_type=code&redirect_uri=http://localhost:9000/auth&state=123", client_id)
+		ctx.Redirect(http.StatusFound, url)
 		return
 	}
-	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Add("Authorization", fmt.Sprintf("Basic %s:%s", client_id, client_secret))
-	response, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return
-	}
-	body, err := io.ReadAll(response.Body)
-	if err != nil {
-		return
-	}
-
-	ctx.Data(http.StatusOK, "text/html; charset=utf-8", body)
-
+	ctx.JSON(http.StatusOK, gin.H{"message": "Already logged in", "data": session.Get("User")})
 }
 
 func OauthCallback(ctx *gin.Context) {
@@ -56,14 +31,13 @@ func OauthCallback(ctx *gin.Context) {
 	state := ctx.Query("state")
 	fmt.Println("state:", state)
 
-	token_url := "https://maco.accounts400.ondemand.com/oauth2/token"
-	payload := fmt.Sprintf("grant_type=authorization_code&code=%s&redirect_uri=%s&client_id=%s", code, "http://localhost:9000/auth", client_id)
+	token_url := "https://github.wdf.sap.corp/login/oauth/access_token"
+	payload := fmt.Sprintf("code=%s&redirect_uri=%s&client_id=%s&client_secret=%s", code, "http://localhost:9000/auth", client_id, client_secret)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, token_url, strings.NewReader(payload))
 	if err != nil {
 		return
 	}
-	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Add("Authorization", fmt.Sprintf("Basic %s:%s", client_id, client_secret))
+	req.Header.Add("Accept", "application/json")
 	response, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return
@@ -72,6 +46,75 @@ func OauthCallback(ctx *gin.Context) {
 	if err != nil {
 		return
 	}
-	fmt.Println(string(body))
+	var token TokenResponse
+	if err := json.Unmarshal(body, &token); err != nil {
+		return
+	}
 
+	// fetch user info
+	user_url := "https://github.wdf.sap.corp/api/v3/user"
+	req, err = http.NewRequestWithContext(ctx, http.MethodGet, user_url, nil)
+	if err != nil {
+		return
+	}
+	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", token.AccessToken))
+	response, err = http.DefaultClient.Do(req)
+	if err != nil {
+		return
+	}
+	body, err = io.ReadAll(response.Body)
+	if err != nil {
+		return
+	}
+	var user User
+	if err := json.Unmarshal(body, &user); err != nil {
+		return
+	}
+	// update session
+	session := sessions.Default(ctx)
+	session.Set("User", user)
+	session.Save()
+	ctx.JSON(http.StatusOK, gin.H{"data": user})
+}
+
+type TokenResponse struct {
+	AccessToken string `json:"access_token"`
+	Scope       string `json:"scope"`
+	TokenType   string `json:"token_type"`
+}
+
+type User struct {
+	AvatarURL         string      `json:"avatar_url"`
+	Bio               interface{} `json:"bio"`
+	Blog              string      `json:"blog"`
+	Company           interface{} `json:"company"`
+	CreatedAt         time.Time   `json:"created_at"`
+	Email             string      `json:"email"`
+	EventsURL         string      `json:"events_url"`
+	Followers         int         `json:"followers"`
+	FollowersURL      string      `json:"followers_url"`
+	Following         int         `json:"following"`
+	FollowingURL      string      `json:"following_url"`
+	GistsURL          string      `json:"gists_url"`
+	GravatarID        string      `json:"gravatar_id"`
+	Hireable          interface{} `json:"hireable"`
+	HTMLURL           string      `json:"html_url"`
+	ID                int         `json:"id"`
+	Location          interface{} `json:"location"`
+	Login             string      `json:"login"`
+	Name              string      `json:"name"`
+	NodeID            string      `json:"node_id"`
+	OrganizationsURL  string      `json:"organizations_url"`
+	PublicGists       int         `json:"public_gists"`
+	PublicRepos       int         `json:"public_repos"`
+	ReceivedEventsURL string      `json:"received_events_url"`
+	ReposURL          string      `json:"repos_url"`
+	SiteAdmin         bool        `json:"site_admin"`
+	StarredURL        string      `json:"starred_url"`
+	SubscriptionsURL  string      `json:"subscriptions_url"`
+	SuspendedAt       interface{} `json:"suspended_at"`
+	TwitterUsername   interface{} `json:"twitter_username"`
+	Type              string      `json:"type"`
+	UpdatedAt         time.Time   `json:"updated_at"`
+	URL               string      `json:"url"`
 }

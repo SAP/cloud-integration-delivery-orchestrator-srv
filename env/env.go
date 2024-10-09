@@ -81,6 +81,7 @@ type Destination struct {
 
 func readEnv() VcapServices {
 	var content []byte
+	logger.Info("Reading VCAP_SERVICES")
 	envVal, ok := os.LookupEnv("VCAP_SERVICES")
 	if !ok { // read from dafault-env.json
 		logger.Info("failed to read env VCAP_SERVICES. Try to read file default-env.json")
@@ -104,7 +105,7 @@ func readEnv() VcapServices {
 	var vcap VcapServices
 	content = []byte(envVal)
 	if err := json.Unmarshal(content, &vcap); err != nil {
-		panic("")
+		panic("Failed to unmarshal VCAP_SERVICES: " + err.Error())
 	}
 	return vcap
 }

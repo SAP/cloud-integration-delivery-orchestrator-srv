@@ -3,6 +3,8 @@ package main
 import (
 	"time"
 
+	"github.com/gin-contrib/sessions"
+	"github.com/gin-contrib/sessions/cookie"
 	ginzap "github.com/gin-contrib/zap"
 	"github.com/gin-gonic/gin"
 	"github.wdf.sap.corp/maco-mmt/maco-deploy/env"
@@ -17,6 +19,10 @@ func main() {
 	router := gin.New()
 	router.Use(ginzap.Ginzap(logger, time.RFC3339, true))
 	router.Use(ginzap.RecoveryWithZap(logger, true))
+
+	store := cookie.NewStore([]byte("secret"))
+	router.Use(sessions.Sessions("mmtdevops", store))
+
 	v1Group := router.Group("/api/v1")
 	{
 		v1Group.GET("/job", handler.GetJobsByType)

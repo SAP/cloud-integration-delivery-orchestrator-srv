@@ -49,7 +49,9 @@ func init() {
 		// 		logger.ZapLogger.Sugar().Fatalf("failed to write client.key, %s", err)
 		// 	}
 		// }
-		dsn = fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=verify-full sslrootcert=root.crt sslkey=client.key sslcert=client.crt", pgHost, pgUser, pgPass, pgDBname, pgPort)
+		// dsn = fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=verify-full sslrootcert=root.crt sslkey=client.key sslcert=client.crt", pgHost, pgUser, pgPass, pgDBname, pgPort)
+
+		dsn = fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable", pgHost, pgUser, pgPass, pgDBname, pgPort)
 	} else {
 		dsn = "host=127.0.0.1 user=postgres password=passw0rd dbname=macodeploy port=5432 sslmode=disable"
 	}
