@@ -1,0 +1,11 @@
+
+applications:
+- name: stage-devops-srv-iflow-deploy
+  memory: 2G
+  disk_quota: 4G
+  path: build
+  command: ./maco-deploy
+  buildpack: binary_buildpack
+  services:
+  - mmt-devops-postgre
+
