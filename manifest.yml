@@ -7,7 +7,7 @@ applications:
   command: ./maco-deploy
   buildpack: binary_buildpack
   services:
-  - mmt-devops-postgre
+  - mmt-devops-pgsql
   - mmt_devops_destination
   - mmt-tms
 
