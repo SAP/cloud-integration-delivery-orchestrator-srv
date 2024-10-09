@@ -8,4 +8,6 @@ applications:
   buildpack: binary_buildpack
   services:
   - mmt-devops-postgre
+  - mmt_devops_destination
+  - mmt-tms
 
