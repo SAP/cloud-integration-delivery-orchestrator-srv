@@ -8,31 +8,21 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gin-contrib/sessions"
+	"github.com/gin-gonic/contrib/sessions"
 	"github.com/gin-gonic/gin"
 )
 
 var client_id = "e413f654a5f193da8bed"
 var client_secret = "REDACTED"
 
-func Login(ctx *gin.Context) {
-	session := sessions.Default(ctx)
-	id := session.Get("User")
-	if id == nil {
-		url := fmt.Sprintf("https://github.wdf.sap.corp/login/oauth/authorize?client_id=%s&response_type=code&redirect_uri=http://localhost:9000/auth&state=123", client_id)
-		ctx.Redirect(http.StatusFound, url)
-		return
-	}
-	ctx.JSON(http.StatusOK, gin.H{"message": "Already logged in", "data": session.Get("User")})
-}
-
-func OauthCallback(ctx *gin.Context) {
+func UserInfo(ctx *gin.Context) {
 	code := ctx.Query("code")
 	state := ctx.Query("state")
+	callbackUrl := ctx.Query("callback_url")
 	fmt.Println("state:", state)
 
 	token_url := "https://github.wdf.sap.corp/login/oauth/access_token"
-	payload := fmt.Sprintf("code=%s&redirect_uri=%s&client_id=%s&client_secret=%s", code, "http://localhost:9000/auth", client_id, client_secret)
+	payload := fmt.Sprintf("code=%s&redirect_uri=%s&client_id=%s&client_secret=%s", code, callbackUrl, client_id, client_secret)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, token_url, strings.NewReader(payload))
 	if err != nil {
 		return
@@ -66,15 +56,15 @@ func OauthCallback(ctx *gin.Context) {
 	if err != nil {
 		return
 	}
-	var user User
-	if err := json.Unmarshal(body, &user); err != nil {
+	var userInfo User
+	if err := json.Unmarshal(body, &userInfo); err != nil {
 		return
 	}
-	// update session
 	session := sessions.Default(ctx)
-	session.Set("User", user)
+	// update session
+	session.Set("User", userInfo)
 	session.Save()
-	ctx.JSON(http.StatusOK, gin.H{"data": user})
+	ctx.JSON(http.StatusOK, gin.H{"result": userInfo})
 }
 
 type TokenResponse struct {

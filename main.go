@@ -3,9 +3,8 @@ package main
 import (
 	"time"
 
-	"github.com/gin-contrib/sessions"
-	"github.com/gin-contrib/sessions/cookie"
 	ginzap "github.com/gin-contrib/zap"
+	"github.com/gin-gonic/contrib/sessions"
 	"github.com/gin-gonic/gin"
 	"github.wdf.sap.corp/maco-mmt/maco-deploy/env"
 	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/handler"
@@ -20,7 +19,7 @@ func main() {
 	router.Use(ginzap.Ginzap(logger, time.RFC3339, true))
 	router.Use(ginzap.RecoveryWithZap(logger, true))
 
-	store := cookie.NewStore([]byte("secret"))
+	store := sessions.NewCookieStore([]byte("secret"))
 	router.Use(sessions.Sessions("mmtdevops", store))
 
 	v1Group := router.Group("/api/v1")
@@ -41,9 +40,8 @@ func main() {
 		v1Group.DELETE("/step", handler.DeleteStep)
 
 		v1Group.GET("/destinations", handler.GetDestinationsHandler)
+		v1Group.GET("/userInfo", oauth2.UserInfo)
 	}
-	router.GET("/auth", oauth2.OauthCallback)
-	router.GET("/login", oauth2.Login)
 
 	if err := router.Run(":9000"); err != nil {
 		panic(err)

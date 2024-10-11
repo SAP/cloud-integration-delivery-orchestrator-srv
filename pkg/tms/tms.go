@@ -41,7 +41,7 @@ type TmsClient struct {
 }
 
 func NewClient(ctx context.Context) (*TmsClient, error) {
-	v := env.TmsCred()
+	v := env.TmsCredential()
 	apiUrl := fmt.Sprintf("%s/v2", v.ApiUrl)
 	client, err := env.NewClient(ctx, v.Clientid, v.Clientsecret, v.AuthUrl, apiUrl)
 	return &TmsClient{*client}, err

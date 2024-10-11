@@ -11,14 +11,17 @@ require (
 )
 
 require (
+	github.com/boj/redistore v0.0.0-20180917114910-cd5dcc76aeff // indirect
 	github.com/cloudfoundry-community/go-cfenv v1.18.0 // indirect
 	github.com/gin-contrib/sessions v1.0.1 // indirect
+	github.com/gomodule/redigo v2.0.0+incompatible // indirect
 	github.com/gorilla/context v1.1.2 // indirect
 	github.com/gorilla/securecookie v1.1.2 // indirect
 	github.com/gorilla/sessions v1.2.2 // indirect
 	github.com/ishidawataru/sctp v0.0.0-20230406120618-7ff4192f6ff2 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
+	github.com/joho/godotenv v1.5.1 // indirect
 	github.com/lib/pq v1.10.9 // indirect
 	gorm.io/driver/postgres v1.5.9 // indirect
 	gorm.io/gorm v1.25.12 // indirect
@@ -33,6 +36,7 @@ require (
 	github.com/docker/docker v27.2.0+incompatible
 	github.com/gabriel-vasile/mimetype v1.4.3 // indirect
 	github.com/gin-contrib/sse v0.1.0 // indirect
+	github.com/gin-gonic/contrib v0.0.0-20240508051311-c1c6bf0061b0
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-playground/validator/v10 v10.20.0 // indirect

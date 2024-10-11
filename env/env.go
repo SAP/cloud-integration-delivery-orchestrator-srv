@@ -4,26 +4,32 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
+	"strings"
 
+	"github.com/cloudfoundry-community/go-cfenv"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
 
 var destinationMap map[string]Destination
-var vcap VcapServices
 var logLevel zapcore.Level
 var logger *zap.SugaredLogger
 
+var appEnv *cfenv.App
+
 func init() {
+	var err error
+	appEnv, err = cfenv.Current()
+	if err != nil {
+		panic("Failed to load app env: " + err.Error())
+	}
 	logLevel = zap.InfoLevel
 	logger = NewLogger()
-	vcap = readEnv()
-	destinations()
-
+	initDestinations()
 }
+
 func Logger() *zap.SugaredLogger {
 	return logger
 }
@@ -31,18 +37,31 @@ func Logger() *zap.SugaredLogger {
 func Destinations() map[string]Destination {
 	return destinationMap
 }
-func TmsCred() Credentials {
-	credential := vcap.Transport[0].Credentials
+
+func TmsCredential() Credentials {
+	service, err := appEnv.Services.WithName("mmt-tms")
+	if err != nil {
+		Logger().Panic("Failed to get service instance mmt-tms")
+	}
+	apiUrl, _ := service.CredentialString("uri")
+	uaa, _ := service.Credentials["uaa"].(map[string]interface{})
+
 	return Credentials{
-		Clientid:     credential.Uaa.Clientid,
-		Clientsecret: credential.Uaa.Clientsecret,
-		AuthUrl:      credential.Uaa.URL,
-		ApiUrl:       credential.URI,
+		Clientid:     uaa["clientid"].(string),
+		Clientsecret: uaa["clientsecret"].(string),
+		AuthUrl:      uaa["url"].(string),
+		ApiUrl:       apiUrl,
 	}
 }
 
-func PostgreCred() PgCredentials {
-	return vcap.PostgresqlDb[0].Credentials
+func PostgreUri() string {
+	dbService, err := appEnv.Services.WithName("mmt-devops-pgsql")
+	if err != nil {
+		panic("Failed to get service mmt-devops-pgsql: " + err.Error())
+	}
+	uri, _ := dbService.CredentialString("uri")
+	return uri
+
 }
 
 type Credentials struct {
@@ -79,52 +98,26 @@ type Destination struct {
 	TokenServiceURL     string `json:"tokenServiceURL"`
 }
 
-func readEnv() VcapServices {
-	var content []byte
-	logger.Info("Reading VCAP_SERVICES")
-	envVal, ok := os.LookupEnv("VCAP_SERVICES")
-	if !ok { // read from dafault-env.json
-		logger.Info("failed to read env VCAP_SERVICES. Try to read file default-env.json")
-		file, err := os.Open("default-env.json")
-		if err != nil {
-			logger.Panic("can not find default-env.json")
-		}
-		defer file.Close()
-		content, err = io.ReadAll(file)
-		if err != nil {
-			logger.Panic("Faild to read file default-env.json")
-		}
-		var env struct {
-			VapServices VcapServices `json:"VCAP_SERVICES"`
-		}
-		if err := json.Unmarshal(content, &env); err != nil {
-			panic("")
-		}
-		return env.VapServices
-	}
-	var vcap VcapServices
-	content = []byte(envVal)
-	if err := json.Unmarshal(content, &vcap); err != nil {
-		panic("Failed to unmarshal VCAP_SERVICES: " + err.Error())
-	}
-	return vcap
-}
-
 // Get Destinations(including credentials)
-func destinations() {
+func initDestinations() {
 	ctx := context.Background()
-	credential := vcap.Destination[0].Credentials
-	apiUrl := credential.URI
-	authUrl := fmt.Sprintf("%s/oauth/token", credential.URL)
-	client, err := NewClient(ctx,
-		credential.Clientid,
-		credential.Clientsecret,
-		authUrl,
-		apiUrl,
-	)
+	service, err := appEnv.Services.WithName("mmt_devops_destination")
+	if err != nil {
+		logger.Panic("Failed to get service mmt_devops_destination")
+	}
+	authUrl, _ := service.CredentialString("url")
+	if !strings.HasSuffix(authUrl, "/oauth/token") {
+		authUrl = fmt.Sprintf("%s/oauth/token", authUrl)
+	}
+	apiUrl, _ := service.CredentialString("uri")
+	clientId, _ := service.CredentialString("clientid")
+	clientSecret, _ := service.CredentialString("clientsecret")
+	client, err := NewClient(ctx, clientId, clientSecret, authUrl, apiUrl)
 	if err != nil {
 		logger.Panic("Error Creating destination client")
+		return
 	}
+
 	apiUrl = fmt.Sprintf("%s/destination-configuration/v1/subaccountDestinations", apiUrl)
 	req := &HttpRequest{
 		Ctx:    ctx,
@@ -158,94 +151,4 @@ func NewLogger() *zap.SugaredLogger {
 	core := zapcore.NewTee(zapcore.NewCore(fileEncoder, zapcore.AddSync(os.Stdout), logLevel))
 	logger := zap.New(core)
 	return logger.Sugar()
-}
-
-type VcapServices struct {
-	Destination []struct {
-		BindingGUID string      `json:"binding_guid"`
-		BindingName interface{} `json:"binding_name"`
-		Credentials struct {
-			Clientid        string `json:"clientid"`
-			Clientsecret    string `json:"clientsecret"`
-			CredentialType  string `json:"credential-type"`
-			Identityzone    string `json:"identityzone"`
-			Instanceid      string `json:"instanceid"`
-			Tenantid        string `json:"tenantid"`
-			Tenantmode      string `json:"tenantmode"`
-			Uaadomain       string `json:"uaadomain"`
-			URI             string `json:"uri"`
-			URL             string `json:"url"`
-			Verificationkey string `json:"verificationkey"`
-			Xsappname       string `json:"xsappname"`
-		} `json:"credentials"`
-		InstanceGUID   string        `json:"instance_guid"`
-		InstanceName   string        `json:"instance_name"`
-		Label          string        `json:"label"`
-		Name           string        `json:"name"`
-		Plan           string        `json:"plan"`
-		Provider       interface{}   `json:"provider"`
-		SyslogDrainURL interface{}   `json:"syslog_drain_url"`
-		Tags           []string      `json:"tags"`
-		VolumeMounts   []interface{} `json:"volume_mounts"`
-	} `json:"destination"`
-	PostgresqlDb []struct {
-		BindingGUID string      `json:"binding_guid"`
-		BindingName interface{} `json:"binding_name"`
-		Credentials struct {
-			Dbname      string `json:"dbname"`
-			Hostname    string `json:"hostname"`
-			Password    string `json:"password"`
-			Port        string `json:"port"`
-			Sslcert     string `json:"sslcert"`
-			Sslrootcert string `json:"sslrootcert"`
-			URI         string `json:"uri"`
-			Urls        struct {
-				APIServer string `json:"api_server"`
-			} `json:"urls"`
-			Username string `json:"username"`
-		} `json:"credentials"`
-		InstanceGUID   string        `json:"instance_guid"`
-		InstanceName   string        `json:"instance_name"`
-		Label          string        `json:"label"`
-		Name           string        `json:"name"`
-		Plan           string        `json:"plan"`
-		Provider       interface{}   `json:"provider"`
-		SyslogDrainURL interface{}   `json:"syslog_drain_url"`
-		Tags           []string      `json:"tags"`
-		VolumeMounts   []interface{} `json:"volume_mounts"`
-	} `json:"postgresql-db"`
-	Transport []struct {
-		BindingGUID string      `json:"binding_guid"`
-		BindingName interface{} `json:"binding_name"`
-		Credentials struct {
-			Uaa struct {
-				Apiurl            string `json:"apiurl"`
-				Clientid          string `json:"clientid"`
-				Clientsecret      string `json:"clientsecret"`
-				CredentialType    string `json:"credential-type"`
-				Identityzone      string `json:"identityzone"`
-				Identityzoneid    string `json:"identityzoneid"`
-				Sburl             string `json:"sburl"`
-				ServiceInstanceID string `json:"serviceInstanceId"`
-				Subaccountid      string `json:"subaccountid"`
-				Tenantid          string `json:"tenantid"`
-				Tenantmode        string `json:"tenantmode"`
-				Uaadomain         string `json:"uaadomain"`
-				URL               string `json:"url"`
-				Verificationkey   string `json:"verificationkey"`
-				Xsappname         string `json:"xsappname"`
-				Zoneid            string `json:"zoneid"`
-			} `json:"uaa"`
-			URI string `json:"uri"`
-		} `json:"credentials"`
-		InstanceGUID   string        `json:"instance_guid"`
-		InstanceName   string        `json:"instance_name"`
-		Label          string        `json:"label"`
-		Name           string        `json:"name"`
-		Plan           string        `json:"plan"`
-		Provider       interface{}   `json:"provider"`
-		SyslogDrainURL interface{}   `json:"syslog_drain_url"`
-		Tags           []string      `json:"tags"`
-		VolumeMounts   []interface{} `json:"volume_mounts"`
-	} `json:"transport"`
 }
