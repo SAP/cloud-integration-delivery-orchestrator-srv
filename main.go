@@ -43,7 +43,7 @@ func main() {
 		v1Group.GET("/userInfo", oauth2.UserInfo)
 	}
 
-	if err := router.Run(":9000"); err != nil {
+	if err := router.Run(":8080"); err != nil {
 		panic(err)
 	}
 

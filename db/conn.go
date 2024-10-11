@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"os"
 
 	"github.wdf.sap.corp/maco-mmt/maco-deploy/env"
 	"gorm.io/driver/postgres"
@@ -14,14 +15,18 @@ var logger = zapgorm2.New(env.Logger().Desugar())
 func init() {
 	var conn *sql.DB
 	var err error
-	local := true
-	if !local {
+	remote, ok := os.LookupEnv("REMOTE")
+	if ok && remote == "true" {
+		env.Logger().Info("Connecting to remote database...")
 		dbUri := env.PostgreUri()
-		conn, _ = sql.Open("postgres", dbUri)
+		conn, err = sql.Open("postgres", dbUri)
+		if err != nil {
+			panic("failed to connect to remote database" + err.Error())
+		}
 	} else {
 		conn, err = sql.Open("postgres", "postgres://postgres:passw0rd@127.0.0.1:5432/macodeploy?sslmode=disable")
 		if err != nil {
-			panic("failed to connect database" + err.Error())
+			panic("failed to connect to local database" + err.Error())
 		}
 	}
 

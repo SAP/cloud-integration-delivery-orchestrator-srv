@@ -2,12 +2,12 @@
 applications:
 - name: stage-devops-srv-iflow-deploy
   memory: 2G
-  disk_quota: 4G
-  path: build
-  command: ./maco-deploy
-  buildpack: binary_buildpack
+  disk_quota: 2G
   services:
-  - mmt-devops-pgsql
-  - mmt_devops_destination
-  - mmt-tms
+    - mmt-devops-pgsql
+    - mmt_devops_destination
+    - mmt-tms
+  env:
+    REMOTE: true
+
 
