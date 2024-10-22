@@ -4,11 +4,9 @@ import (
 	"time"
 
 	ginzap "github.com/gin-contrib/zap"
-	"github.com/gin-gonic/contrib/sessions"
 	"github.com/gin-gonic/gin"
 	"github.wdf.sap.corp/maco-mmt/maco-deploy/env"
 	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/handler"
-	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/oauth2"
 )
 
 var logger = env.Logger().Desugar()
@@ -18,9 +16,8 @@ func main() {
 	router := gin.New()
 	router.Use(ginzap.Ginzap(logger, time.RFC3339, true))
 	router.Use(ginzap.RecoveryWithZap(logger, true))
-
-	store := sessions.NewCookieStore([]byte("secret"))
-	router.Use(sessions.Sessions("mmtdevops", store))
+	// router.Use(cors.Default()) // allow all origins
+	router.Use(AuthMiddleware())
 
 	v1Group := router.Group("/api/v1")
 	{
@@ -40,11 +37,22 @@ func main() {
 		v1Group.DELETE("/step", handler.DeleteStep)
 
 		v1Group.GET("/destinations", handler.GetDestinationsHandler)
-		v1Group.GET("/userInfo", oauth2.UserInfo)
 	}
 
 	if err := router.Run(":8080"); err != nil {
 		panic(err)
 	}
 
+}
+func AuthMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Do some authentication here
+		if len(c.Request.Header["X-User-Email"]) == 0 {
+			c.AbortWithStatusJSON(401, gin.H{"error": "Unauthorized. Please provide X-User-Email header"})
+			return
+		}
+		email := c.Request.Header["X-User-Email"][0]
+		c.Set("user", email)
+		c.Next()
+	}
 }

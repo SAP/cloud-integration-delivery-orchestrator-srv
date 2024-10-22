@@ -11,6 +11,10 @@ type Job struct {
 	Description string
 	Status      string
 	Type        string
+
+	CreatedBy   string
+	UpdatedBy   string
+	TriggeredBy string
 }
 
 type ImportStep struct {
@@ -22,6 +26,8 @@ type ImportStep struct {
 	TransportNodeName string
 	TransportRequests pq.Int32Array `gorm:"type:integer[]"`
 	ActionId          uint
+
+	UpdatedBy string
 }
 
 type DeployStep struct {
@@ -36,6 +42,8 @@ type DeployStep struct {
 	ArtifactVersions pq.StringArray `gorm:"type:varchar[]"`
 	TaskIds          pq.StringArray `gorm:"type:varchar[]"`
 	TaskStatuses     pq.StringArray `gorm:"type:varchar[]"`
+
+	UpdatedBy string
 }
 
 // execution log of a job
