@@ -24,7 +24,7 @@ func init() {
 			panic("failed to connect to remote database" + err.Error())
 		}
 	} else {
-		conn, err = sql.Open("postgres", "postgres://postgres:passw0rd@127.0.0.1:5432/macodeploy?sslmode=disable")
+		conn, err = sql.Open("pgx", "postgres://postgres:passw0rd@127.0.0.1:5432/macodeploy?sslmode=disable")
 		if err != nil {
 			panic("failed to connect to local database" + err.Error())
 		}

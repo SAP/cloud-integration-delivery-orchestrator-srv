@@ -102,7 +102,7 @@ func CreateJob(ctx *gin.Context) {
 	if err := ctx.BindJSON(&job); err != nil {
 		logger.Errorf("invalid request, error message is %s", err)
 		ctx.JSON(http.StatusBadRequest, gin.H{
-			"msg": "invalid request param",
+			"msg": fmt.Sprintf("invalid request: %s", err),
 		})
 		return
 	}
@@ -368,10 +368,11 @@ func checkDeployStatus(ctx context.Context, steps []db.DeployStep) (string, erro
 	jobStatusSet := make(map[string]int, 0)
 	for i, step := range steps { // Running/Error steps should check status
 		if step.Status == "Success" || step.Status == "Saved" || len(step.TaskIds) == 0 { // taskids is 0/nil means deploying has not been triggerd yet
+			jobStatusSet[step.Status] = jobStatusSet[step.Status] + 1
 			continue
 		}
 		statusSet := make(map[string]bool, 0)
-		for j, taskId := range step.TaskIds {
+		for j, taskId := range step.TaskIds { // each artifact as a delpoy task id, check status of each task
 			// possible statuses of CPI response: Success, Fail, Deploying, Fail_On_License_Error
 			if step.TaskStatuses[j] == "Success" { // skip already finished tasks
 				continue
@@ -401,7 +402,7 @@ func checkDeployStatus(ctx context.Context, steps []db.DeployStep) (string, erro
 			return "", fmt.Errorf("error while updating status of step %d: %s", i, err)
 		}
 	}
-	// update job status
+	// summarize job status
 	jobStatus := jobStatus(jobStatusSet)
 	return jobStatus, nil
 }
@@ -414,11 +415,12 @@ func checkImportStatus(ctx context.Context, steps []db.ImportStep) (string, erro
 		return "", fmt.Errorf("failed to connect to tms: %s", err)
 	}
 	jobStatusSet := make(map[string]int, 0)
-	// possible statuses: succeeded, warning, error, fatal, running, initial, unknown
 	for i, step := range steps {
-		if step.Status == "Success" || step.ActionId == 0 {
+		if step.Status == "Success" || step.Status == "Saved" || step.ActionId == 0 {
+			jobStatusSet[step.Status] = jobStatusSet[step.Status] + 1
 			continue
 		}
+		// possible statuses of tms action: succeeded, warning, error, fatal, running, initial, unknown
 		status, err := cpiClient.GetActionResult(step.ActionId)
 		if err != nil {
 			return "", fmt.Errorf("error while getting status of action id %d of step %d", step.ActionId, i)
@@ -448,12 +450,14 @@ func user(ctx *gin.Context) string {
 	return email.(string)
 }
 
-// Return job status based on steps' statusSet. Possible statuses: Error/Running/Success/Unknown
+// Return job status based on steps' statusSet. Possible statuses: Error/Running/Success/Unknown or Saved
 func jobStatus(statusSet map[string]int) string {
 	if statusSet["Error"] > 0 {
 		return "Error"
 	} else if statusSet["Running"] > 0 {
 		return "Running"
+	} else if statusSet["Saved"] > 0 {
+		return "Saved"
 	} else if statusSet["Success"] > 0 {
 		return "Success"
 	}
