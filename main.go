@@ -23,6 +23,7 @@ func main() {
 	{
 		v1Group.GET("/job", handler.GetJobsByType)
 		v1Group.POST("/job", handler.CreateJob)
+		v1Group.POST("job/copy/:id", handler.CopyJob)
 		v1Group.DELETE("/job/:id", handler.DeleteJob)
 		v1Group.PUT("/job", handler.UpSertJobWithStep) // update or insert steps within a job
 		v1Group.POST("/job/:id", handler.ExecuteJob)

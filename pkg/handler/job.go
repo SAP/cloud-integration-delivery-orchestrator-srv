@@ -106,7 +106,8 @@ func CreateJob(ctx *gin.Context) {
 		})
 		return
 	}
-	job.Status = "Submitted"
+	job.ID = 0
+	job.Status = "Saved"
 	job.CreatedBy = user(ctx)
 
 	if err := db.Conn().Save(&job).Error; err != nil {
@@ -118,6 +119,102 @@ func CreateJob(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{
 		"result": job,
 	})
+}
+
+func CopyJob(ctx *gin.Context) {
+	fromJobId, err := strconv.Atoi(ctx.Param("id"))
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"msg": fmt.Sprintf("invalid job id %d: %s", fromJobId, err),
+		})
+		return
+	}
+
+	var job db.Job
+	if err := db.Conn().First(&job, fromJobId).Error; err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"msg": fmt.Sprintf("error while querying job %s: %s", fromJobId, err),
+		})
+		return
+	}
+
+	job.ID = 0
+	job.Name = "Copy of - " + job.Name
+	job.Status = "Saved"
+	job.CreatedBy = user(ctx)
+	job.UpdatedBy = ""
+	job.Description = "Copied Desctiption - " + job.Description
+	// create a new job with the same steps. will write a new Job id
+	if err := db.Conn().Create(&job).Error; err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"msg": fmt.Sprintf("error while copying job: %s", err),
+		})
+		return
+	}
+	if job.Type == "Import" {
+		var steps []db.ImportStep
+		// query steps of the job
+		if err := db.Conn().Where(&db.ImportStep{JobId: uint(fromJobId)}).Find(&steps).Error; err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{
+				"msg": fmt.Sprintf("error while querying import steps of job %d: %s", fromJobId, err),
+			})
+			return
+		}
+		for i := range steps {
+			steps[i].ID = 0
+			steps[i].JobId = job.ID
+			steps[i].Status = "Saved"
+			steps[i].UpdatedBy = user(ctx)
+			steps[i].Sequence = uint(i)
+			steps[i].TransportRequests = pq.Int32Array{}
+			steps[i].ActionId = 0
+		}
+		if err := db.Conn().Create(&steps).Error; err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{
+				"msg": fmt.Sprintf("error while copying import steps: %s", err),
+			})
+			return
+		}
+	} else if job.Type == "Deploy" {
+		var steps []db.DeployStep
+		if err := db.Conn().Where(&db.DeployStep{JobId: uint(fromJobId)}).Find(&steps).Error; err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{
+				"msg": fmt.Sprintf("error while querying deploy steps of job %d: %s", fromJobId, err),
+			})
+			return
+		}
+		for i := range steps {
+			steps[i].ID = 0
+			steps[i].JobId = job.ID
+			steps[i].Status = "Saved"
+			steps[i].UpdatedBy = user(ctx)
+			steps[i].Sequence = uint(i)
+			steps[i].ArtifactIds = pq.StringArray{}
+			steps[i].ArtifactTypes = pq.StringArray{}
+			steps[i].ArtifactVersions = pq.StringArray{}
+			steps[i].TaskIds = pq.StringArray{}
+			steps[i].TaskStatuses = pq.StringArray{}
+		}
+		if err := db.Conn().Create(&steps).Error; err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{
+				"msg": fmt.Sprintf("error while copying deploy steps: %s", err),
+			})
+			return
+		}
+
+	} else if job.Type == "Undeploy" {
+
+	} else {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"msg": fmt.Sprintf("invalid job type: %s", job.Type),
+		})
+		return
+	}
+
+	ctx.Params = []gin.Param{
+		{Key: "id", Value: strconv.Itoa(int(job.ID))},
+	}
+	GetJobAndStepsByID(ctx)
 }
 
 func GetJobsByType(ctx *gin.Context) {
@@ -277,7 +374,7 @@ func ExecuteJob(ctx *gin.Context) {
 		}
 		// execute steps
 		for _, step := range steps {
-			if step.Status == "Finished" || len(step.ArtifactIds) == 0 { // skip Running/Finished
+			if step.Status == "Success" || step.Status == "Running" || len(step.ArtifactIds) == 0 { // skip Running/Success
 				continue
 			}
 			// execute Saved/Error steps
@@ -425,7 +522,7 @@ func checkImportStatus(ctx context.Context, steps []db.ImportStep) (string, erro
 		if err != nil {
 			return "", fmt.Errorf("error while getting status of action id %d of step %d", step.ActionId, i)
 		}
-		// update status, map to Finished/Error/Running
+		// update status, map to Success/Error/Running
 		if status == "succeeded" {
 			status = "Success"
 		} else if status == "error" || status == "fatal" {

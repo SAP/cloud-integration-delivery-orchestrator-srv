@@ -265,7 +265,7 @@ func (c *CpiClient) DeployIflow(iflowID string, iflowVersion string) (string, er
 	defer cancel()
 	var taskID string
 	fullURL := fmt.Sprintf("%s/DeployIntegrationDesigntimeArtifact?Id='%s'&Version='%s'", c.ApiURL, iflowID, iflowVersion)
-	logger.Infof("Starting to deploy iflow %s  on tenant %s\n", iflowID, fullURL)
+	logger.Infof("Starting to deploy iflow %s on tenant %s\n", iflowID, fullURL)
 	request := env.HttpRequest{
 		Ctx:    childCtx,
 		Method: http.MethodPost,
