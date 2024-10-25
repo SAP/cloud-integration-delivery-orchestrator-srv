@@ -19,7 +19,7 @@ func init() {
 	if ok && remote == "true" {
 		env.Logger().Info("Connecting to remote database...")
 		dbUri := env.PostgreUri()
-		conn, err = sql.Open("postgres", dbUri)
+		conn, err = sql.Open("pgx", dbUri)
 		if err != nil {
 			panic("failed to connect to remote database" + err.Error())
 		}
