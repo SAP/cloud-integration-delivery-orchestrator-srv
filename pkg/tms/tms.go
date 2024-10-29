@@ -251,7 +251,8 @@ type ActionResultResp struct {
 }
 
 // succeeded, warning, error, fatal, running, initial, unknown
-func (t *TmsClient) GetActionResult(actionID uint) (string, error) {
+// also return endedAt, if status is not running
+func (t *TmsClient) GetActionResult(actionID uint) (string, string, error) {
 	childCtx, cancel := context.WithCancel(t.Context)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/actions/%d", t.ApiURL, actionID)
@@ -263,16 +264,16 @@ func (t *TmsClient) GetActionResult(actionID uint) (string, error) {
 	respBodyContent, errReq := t.Do(&request)
 	if errReq != nil {
 		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
-		return "", errReq
+		return "", "", errReq
 
 	}
 	var actionResultResp ActionResultResp
 	jsonUnmarshalError := json.Unmarshal(*respBodyContent, &actionResultResp)
 	if jsonUnmarshalError != nil {
 		logger.Errorf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
-		return "", jsonUnmarshalError
+		return "", "", jsonUnmarshalError
 	}
-	return actionResultResp.Status, nil
+	return actionResultResp.Status, actionResultResp.EndedAt, nil
 }
 
 type ActionLogResp struct {

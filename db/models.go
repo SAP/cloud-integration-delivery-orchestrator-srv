@@ -1,6 +1,8 @@
 package db
 
 import (
+	"time"
+
 	"github.com/lib/pq"
 	"gorm.io/gorm"
 )
@@ -27,7 +29,10 @@ type ImportStep struct {
 	TransportRequests pq.Int32Array `gorm:"type:integer[]"`
 	ActionId          uint
 
-	UpdatedBy string
+	UpdatedBy   string
+	TriggeredBy string
+	TriggeredAt time.Time
+	EndedAt     time.Time
 }
 
 type DeployStep struct {
@@ -43,7 +48,10 @@ type DeployStep struct {
 	TaskIds          pq.StringArray `gorm:"type:varchar[]"`
 	TaskStatuses     pq.StringArray `gorm:"type:varchar[]"`
 
-	UpdatedBy string
+	UpdatedBy   string
+	TriggeredBy string
+	TriggeredAt time.Time
+	EndedAt     time.Time
 }
 
 // execution log of a job
