@@ -20,14 +20,15 @@ type Job struct {
 }
 
 type ImportStep struct {
-	gorm.Model        `mapstructure:",squash"`
-	JobId             uint
-	Sequence          uint
-	Status            string
-	TransportNodeId   uint
-	TransportNodeName string
-	TransportRequests pq.Int32Array `gorm:"type:integer[]"`
-	ActionId          uint
+	gorm.Model                   `mapstructure:",squash"`
+	JobId                        uint
+	Sequence                     uint
+	Status                       string
+	TransportNodeId              uint
+	TransportNodeName            string
+	TransportRequests            pq.Int32Array  `gorm:"type:integer[]"`
+	TransportRequestDesctritions pq.StringArray `gorm:"type:varchar[]"`
+	ActionId                     uint
 
 	UpdatedBy   string
 	TriggeredBy string
