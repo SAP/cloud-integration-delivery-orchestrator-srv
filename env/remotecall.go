@@ -11,10 +11,13 @@ import (
 )
 
 type HttpClient struct {
-	Context     context.Context
-	HttpClient  *http.Client
-	AccessToken string
-	ApiURL      string
+	Context      context.Context
+	HttpClient   *http.Client
+	AccessToken  string
+	ApiURL       string
+	ClientId     string
+	ClientSecret string
+	AuthUrl      string
 }
 type OauthResp struct {
 	AccessToken string `json:"access_token"`
@@ -31,7 +34,16 @@ type HttpRequest struct {
 	RequestBody *bytes.Buffer
 }
 
+var cacheClient map[string]*HttpClient
+
+// TODO: cache client, refresh token
 func NewClient(ctx context.Context, clientID string, clientSecret string, authUrl string, apiUrl string) (*HttpClient, error) {
+	if cacheClient == nil {
+		cacheClient = make(map[string]*HttpClient)
+	}
+	if cacheClient[clientID] != nil {
+		return cacheClient[clientID], nil
+	}
 	payload := strings.NewReader(fmt.Sprintf("grant_type=client_credentials&client_id=%s&client_secret=%s", clientID, clientSecret))
 	if !strings.HasSuffix(authUrl, "/oauth/token") {
 		authUrl = fmt.Sprintf("%s/oauth/token", authUrl)
@@ -58,12 +70,17 @@ func NewClient(ctx context.Context, clientID string, clientSecret string, authUr
 		logger.Errorf("Error when extract json data from response, %s", jsonUnmarshalErr)
 		return nil, jsonUnmarshalErr
 	}
-	return &HttpClient{
-		Context:     ctx,
-		HttpClient:  httpClient,
-		AccessToken: oauthResp.AccessToken,
-		ApiURL:      apiUrl,
-	}, nil
+	client := &HttpClient{
+		Context:      ctx,
+		HttpClient:   httpClient,
+		AccessToken:  oauthResp.AccessToken,
+		ApiURL:       apiUrl,
+		ClientId:     clientID,
+		ClientSecret: clientSecret,
+		AuthUrl:      authUrl,
+	}
+	cacheClient[clientID] = client
+	return client, nil
 }
 
 func (c *HttpClient) Do(request *HttpRequest) (*[]byte, error) {
@@ -87,6 +104,17 @@ func (c *HttpClient) Do(request *HttpRequest) (*[]byte, error) {
 		return nil, errReq
 	}
 	defer resp.Body.Close()
+	// refresh token
+	if resp.StatusCode == 401 {
+		logger.Error("Unauthorized. refresh token")
+		delete(cacheClient, c.ClientId) // remove cache
+		newClient, err := NewClient(c.Context, c.ClientId, c.ClientSecret, c.AuthUrl, c.ApiURL)
+		if err != nil {
+			logger.Errorf("Error when creating new client to refresh token: %s", err)
+			return nil, err
+		}
+		return newClient.Do(request)
+	}
 
 	respBody, errIOreader := io.ReadAll(resp.Body)
 

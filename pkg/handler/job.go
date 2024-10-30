@@ -244,6 +244,20 @@ func DeleteJob(ctx *gin.Context) {
 		return
 	}
 	jobId, _ := strconv.Atoi(id)
+	// error or running steps can't be deleted
+	var job db.Job
+	if err := db.Conn().First(&job, jobId).Error; err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"msg": fmt.Sprintf("error while querying job %d: %s", jobId, err),
+		})
+		return
+	}
+	if job.Status == JOB_STATUS_RUNNING || job.Status == JOB_STATUS_ERROR {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"msg": "Job is running or in error status, can't be deleted",
+		})
+		return
+	}
 
 	if err := db.Conn().Delete(&db.Job{}, jobId).Error; err != nil {
 		return
