@@ -460,7 +460,7 @@ func (c *CpiClient) UndeployRuntimeArtifacts(artifactID string) error {
 	logger.Infof("Starting to undeploy artifact %s on tenant %s\n", artifactID, fullURL)
 	request := env.HttpRequest{
 		Ctx:    childCtx,
-		Method: http.MethodGet,
+		Method: http.MethodDelete,
 		ApiURL: fullURL,
 	}
 	_, errReq := c.Do(&request)

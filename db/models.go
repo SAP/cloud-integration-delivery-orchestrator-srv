@@ -20,7 +20,7 @@ type Job struct {
 }
 
 type ImportStep struct {
-	gorm.Model                   `mapstructure:",squash"`
+	gorm.Model
 	JobId                        uint
 	Sequence                     uint
 	Status                       string
@@ -29,6 +29,7 @@ type ImportStep struct {
 	TransportRequests            pq.Int32Array  `gorm:"type:integer[]"`
 	TransportRequestDesctritions pq.StringArray `gorm:"type:varchar[]"`
 	ActionId                     uint
+	Type                         string
 
 	UpdatedBy   string
 	TriggeredBy string
@@ -37,7 +38,7 @@ type ImportStep struct {
 }
 
 type DeployStep struct {
-	gorm.Model       `mapstructure:",squash"`
+	gorm.Model
 	JobId            uint
 	Sequence         uint
 	Status           string
@@ -48,6 +49,7 @@ type DeployStep struct {
 	ArtifactVersions pq.StringArray `gorm:"type:varchar[]"`
 	TaskIds          pq.StringArray `gorm:"type:varchar[]"`
 	TaskStatuses     pq.StringArray `gorm:"type:varchar[]"`
+	Type             string
 
 	UpdatedBy   string
 	TriggeredBy string

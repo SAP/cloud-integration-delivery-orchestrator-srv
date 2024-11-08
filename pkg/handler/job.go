@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -11,7 +12,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/lib/pq"
-	"github.com/mitchellh/mapstructure"
 	"github.wdf.sap.corp/maco-mmt/maco-deploy/db"
 	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/cpi"
 	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/tms"
@@ -39,7 +39,7 @@ func GetJobAndStepsByID(ctx *gin.Context) {
 	if job.Type == "Import" {
 		var importSteps []db.ImportStep
 		var err error
-		if err = db.Conn().Where(db.ImportStep{JobId: job.ID}).Find(&importSteps).Error; err != nil {
+		if err = db.Conn().Where(db.ImportStep{JobId: job.ID}).Order("sequence").Find(&importSteps).Error; err != nil {
 			ctx.JSON(http.StatusInternalServerError,
 				gin.H{"msg": fmt.Sprintf("error while querying Import Steps of job %d: %s", job.ID, err)},
 			)
@@ -55,7 +55,7 @@ func GetJobAndStepsByID(ctx *gin.Context) {
 	} else if job.Type == "Deploy" {
 		var deploySteps []db.DeployStep
 		var err error
-		if err := db.Conn().Where(db.DeployStep{JobId: job.ID}).Find(&deploySteps).Error; err != nil {
+		if err := db.Conn().Where(db.DeployStep{JobId: job.ID}).Order("sequence").Find(&deploySteps).Error; err != nil {
 			ctx.JSON(http.StatusInternalServerError,
 				gin.H{"msg": fmt.Sprintf("error while querying Deploy Steps of job %d: %s", job.ID, err)},
 			)
@@ -269,40 +269,48 @@ func DeleteJob(ctx *gin.Context) {
 
 }
 
+type DeployJob struct {
+	db.Job
+	Steps []db.DeployStep
+}
+
+type ImportJob struct {
+	db.Job
+	Steps []db.ImportStep
+}
+
 // Update or Insert Job and steps within it
 func UpSertJobWithStep(ctx *gin.Context) {
-	var jobReq struct {
-		db.Job
-		Steps []map[string]interface{} `json:"steps"`
+	request, err := ctx.GetRawData()
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"msg": "invalid request"})
+		return
 	}
-	if err := ctx.BindJSON(&jobReq); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{
-			"msg": "invalid request",
-		})
+	// parse job
+	var job db.Job
+	if err := json.Unmarshal(request, &job); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"msg": "faied to unmarshal request: " + err.Error()})
 		return
 	}
 	// save job
-	jobReq.Job.Status = JOB_STATUS_SAVED
+	job.Status = JOB_STATUS_SAVED
 	user := user(ctx)
-	jobReq.Job.UpdatedBy = user
+	job.UpdatedBy = user
 
-	if err := db.Conn().Save(&jobReq.Job).Error; err != nil {
+	if err := db.Conn().Save(&job).Error; err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"msg": err})
 		return
 	}
-
-	if len(jobReq.Steps) == 0 {
-		ctx.JSON(http.StatusOK, gin.H{
-			"msg": "success",
-		})
-		return
-	}
 	// upsert steps of this job
-	if jobReq.Type == "Import" {
-		var steps []db.ImportStep
-		mapstructure.Decode(jobReq.Steps, &steps)
+	if job.Type == "Import" {
+		var importJob ImportJob
+		if err := json.Unmarshal(request, &importJob); err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"msg": "failed to unmarshal request: " + err.Error()})
+			return
+		}
+		steps := importJob.Steps
 		for i := range steps {
-			steps[i].JobId = jobReq.ID
+			steps[i].JobId = job.ID
 			steps[i].Sequence = uint(i)
 			if steps[i].Status == STEP_STATUS_DRAFT {
 				steps[i].Status = STEP_STATUS_SAVED
@@ -315,11 +323,15 @@ func UpSertJobWithStep(ctx *gin.Context) {
 			})
 			return
 		}
-	} else if jobReq.Type == "Deploy" {
-		var steps []db.DeployStep
-		mapstructure.Decode(jobReq.Steps, &steps)
-		for i := range jobReq.Steps {
-			steps[i].JobId = jobReq.ID
+	} else if job.Type == "Deploy" {
+		var deployJob DeployJob
+		if err := json.Unmarshal(request, &deployJob); err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"msg": "failed to unmarshal request: " + err.Error()})
+			return
+		}
+		steps := deployJob.Steps
+		for i := range steps {
+			steps[i].JobId = job.ID
 			steps[i].Sequence = uint(i)
 			if steps[i].Status == STEP_STATUS_DRAFT {
 				steps[i].Status = STEP_STATUS_SAVED
@@ -332,11 +344,11 @@ func UpSertJobWithStep(ctx *gin.Context) {
 			})
 			return
 		}
-	} else if jobReq.Type == "Undeploy" {
+	} else if job.Type == "Undeploy" {
 		// todo
 	} else {
 		ctx.JSON(http.StatusBadRequest, gin.H{
-			"msg": fmt.Sprintf("invalid job type %s", jobReq.Type),
+			"msg": fmt.Sprintf("invalid job type %s", job.Type),
 		})
 		return
 	}
