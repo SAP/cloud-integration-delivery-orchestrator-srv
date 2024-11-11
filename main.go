@@ -31,6 +31,7 @@ func main() {
 
 		v1Group.GET("/tanant/packages", handler.GetPackagesHandler)                   //get all packages under a tenant
 		v1Group.GET("/tenant/packages/artifacts", handler.GetPackageArtifactsHandler) // get all iflows under a package
+		v1Group.GET("/tenant/runtime", handler.GetRuntimeArtifacts)                   // get all runtime artifacts under a tenant
 
 		v1Group.GET("/tms/nodes", handler.GetTmsNodesHandler)
 		v1Group.GET("/tms/trs", handler.GetTranportRequestsHandler)

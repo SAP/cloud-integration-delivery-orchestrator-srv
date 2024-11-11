@@ -470,3 +470,69 @@ func (c *CpiClient) UndeployRuntimeArtifacts(artifactID string) error {
 	}
 	return nil
 }
+
+type RuntimeArtifactsResp struct {
+	D struct {
+		Results []RuntimeArtifact `json:"results"`
+	} `json:"d"`
+}
+
+type RuntimeArtifact struct {
+	ID         string `json:"Id"`
+	Version    string `json:"Version"`
+	Name       string `json:"Name"`
+	Type       string `json:"Type"`
+	DeployedBy string `json:"DeployedBy"`
+	DeployedOn string `json:"DeployedOn"`
+	Status     string `json:"Status"`
+}
+
+// Get all deployed(runtime) artifacts
+func (c *CpiClient) GetRuntimeArtifacts() ([]RuntimeArtifact, error) {
+	childCtx, cancel := context.WithCancel(c.Context)
+	defer cancel()
+
+	fullURL := fmt.Sprintf("%s/IntegrationRuntimeArtifacts", c.ApiURL)
+	logger.Infof("Starting to Get all deployed integration artifacts from cpi tenant %s\n", fullURL)
+	request := env.HttpRequest{
+		Ctx:    childCtx,
+		Method: http.MethodGet,
+		ApiURL: fullURL,
+	}
+	response, err := c.Do(&request)
+	if err != nil {
+		return nil, err
+	}
+	var runtimeArtifactsResp RuntimeArtifactsResp
+	if err := json.Unmarshal(*response, &runtimeArtifactsResp); err != nil {
+		return nil, err
+	}
+	return runtimeArtifactsResp.D.Results, nil
+}
+
+// Check the undeploy status of a runtime artifact, i.e., check if a artifact id exists in runtime.
+// If not, means the artifact has been undeployed successfully
+func (c *CpiClient) CheckUndeployStatus(artifactId string) (string, error) {
+	fullUrl := fmt.Sprintf("%s/IntegrationRuntimeArtifacts('%s')", c.ApiURL, artifactId)
+	logger.Infof("Starting to check undeploy status of artifact %s on tenant %s\n", artifactId, fullUrl)
+	request := env.HttpRequest{
+		Ctx:    c.Context,
+		Method: http.MethodGet,
+		ApiURL: fullUrl,
+	}
+	var response *[]byte
+	var err error
+	if response, err = c.Do(&request); err != nil {
+		return "", err
+	}
+	var runtimeArtifact RuntimeArtifact
+	if err := json.Unmarshal(*response, &runtimeArtifact); err != nil {
+		return "SUCCESS", nil
+	}
+	if runtimeArtifact.ID == "" {
+		logger.Infof("Artifact %s has been successfully undeployed", artifactId)
+		return "SUCCESS", nil
+	}
+	logger.Errorf("artifact %s is still in runtime", artifactId)
+	return "UNDEPLOYING", nil
+}

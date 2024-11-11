@@ -66,15 +66,18 @@ func GetPackageArtifactsHandler(ctx *gin.Context) {
 	packageID := ctx.Query("package")
 	client, err := cpi.NewClient(ctx, cpi_tenant)
 	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"status": http.StatusInternalServerError, "result": fmt.Sprintf("failed to create cpi client: %s", err)})
 		return
 	}
 	artifactResp := make([]ArtifactResp, 0)
 	iflows, err := client.GetPackageIflows(packageID)
 	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"status": http.StatusInternalServerError, "result": fmt.Sprintf("failed to get iflows: %s", err)})
 		return
 	}
 	scriptColls, err := client.GetPackageScriptcollections(packageID)
 	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"status": http.StatusInternalServerError, "result": fmt.Sprintf("failed to get script collections: %s", err)})
 		return
 	}
 	for _, v := range scriptColls {
@@ -123,5 +126,26 @@ func GetDestinationsHandler(ctx *gin.Context) {
 	}
 	ctx.JSON(http.StatusOK, gin.H{
 		"result": destList,
+	})
+}
+
+// Get all deployed(runtime) artifacts by cpi tenant
+func GetRuntimeArtifacts(ctx *gin.Context) {
+	cpi_tenant := ctx.Query("tenant")
+	if cpi_tenant == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"msg": "bad request: missing tenant"})
+		return
+	}
+	client, err := cpi.NewClient(ctx, cpi_tenant)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"msg": fmt.Sprintf("failed to create cpi client: %s", err)})
+		return
+	}
+	artifacts, err := client.GetRuntimeArtifacts()
+	if err != nil {
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{
+		"result": artifacts,
 	})
 }
