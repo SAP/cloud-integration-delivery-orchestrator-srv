@@ -305,8 +305,8 @@ func (c *CpiClient) CheckDeployStatus(taskID string) (string, error) {
 	}
 	respBodyContent, errReq := c.Do(&request)
 	if errReq != nil {
-		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
-		return "", errReq
+		logger.Errorf("Error when getting response content, the error message is %s", errReq)
+		return "", fmt.Errorf("error when getting response from %s: %s", fullURL, errReq)
 	}
 	var deployStatus DeployStatus
 	jsonUnmarshalError := json.Unmarshal(*respBodyContent, &deployStatus)
@@ -315,9 +315,7 @@ func (c *CpiClient) CheckDeployStatus(taskID string) (string, error) {
 		logger.Errorf("Error when unmarshal from json, error message %s\n", jsonUnmarshalError)
 		return "", jsonUnmarshalError
 	}
-
 	return deployStatus.D.Status, nil
-
 }
 
 func (c *CpiClient) DeleteIflow(iflowID string, iflowVersion string) error {
@@ -523,16 +521,16 @@ func (c *CpiClient) CheckUndeployStatus(artifactId string) (string, error) {
 	var response *[]byte
 	var err error
 	if response, err = c.Do(&request); err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to get undeploy stauts from %s: %s", fullUrl, err)
 	}
 	var runtimeArtifact RuntimeArtifact
 	if err := json.Unmarshal(*response, &runtimeArtifact); err != nil {
-		return "SUCCESS", nil
+		return "", fmt.Errorf("failed to unmarshal response: %s", err)
 	}
 	if runtimeArtifact.ID == "" {
 		logger.Infof("Artifact %s has been successfully undeployed", artifactId)
 		return "SUCCESS", nil
 	}
-	logger.Errorf("artifact %s is still in runtime", artifactId)
+	logger.Warnf("artifact %s is still in runtime", artifactId)
 	return "UNDEPLOYING", nil
 }
