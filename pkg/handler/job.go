@@ -387,42 +387,7 @@ func ExecuteJob(ctx *gin.Context) {
 		}
 		stepCh := make(chan *db.ImportStep, len(steps))
 		// execute import
-		go func(stepCh chan *db.ImportStep) {
-			for step := range stepCh {
-				if (step.Status == STEP_STATUS_SUCCESS || step.Status == STEP_STATUS_RUNNING) && step.ActionId != 0 { // skip Running/Success. 0 means not triggered successfully
-					continue
-				}
-				actionId, ExecErr := ExecuteImport(ctx, *step)
-				if ExecErr != nil {
-					db.Conn().Model(&step).Updates(&db.ImportStep{Status: STEP_STATUS_ERROR})
-					db.Conn().Create(&db.ExecutionLog{JobId: job.ID, StepId: step.ID, Sequence: step.Sequence, StepType: job.Type, Log: ExecErr.Error()})
-					return
-				}
-				// import job triggerred, update step status and trigger info, record actionId
-				if err := db.Conn().Model(&step).Updates(db.ImportStep{
-					ActionId: actionId, Status: STEP_STATUS_RUNNING,
-					TriggeredBy: user,
-					TriggeredAt: time.Now(),
-				}).Error; err != nil {
-					db.Conn().Model(&step).Updates(&db.ImportStep{Status: STEP_STATUS_ERROR})
-					db.Conn().Create(&db.ExecutionLog{JobId: job.ID, StepId: step.ID, Sequence: step.Sequence, StepType: job.Type, Log: fmt.Sprintf("DB err while updating execution status of step %d", step.ID)})
-					return
-				}
-				// check import status of the step
-				for {
-					var status string
-					var err error
-					status, err = updateImportStepStatus(ctx, *step)
-					if err != nil || status == STEP_STATUS_ERROR {
-						db.Conn().Model(&db.ImportStep{}).Updates(&db.ImportStep{Status: STEP_STATUS_ERROR})
-						db.Conn().Model(&db.ExecutionLog{}).Create(&db.ExecutionLog{JobId: step.JobId, StepId: step.ID, Sequence: step.Sequence, StepType: step.Type, Log: err.Error()})
-						return
-					}
-
-				}
-			}
-
-		}(stepCh)
+		go scheduleImport(stepCh, user)
 		for _, step := range steps {
 			stepCh <- &step
 		}
@@ -436,56 +401,7 @@ func ExecuteJob(ctx *gin.Context) {
 		// execute steps
 		stepCh := make(chan *db.DeployStep, len(steps))
 		// execute deploy
-		go func(stepCh chan *db.DeployStep) {
-			for step := range stepCh {
-				if step.Status == STEP_STATUS_SUCCESS || step.Status == STEP_STATUS_RUNNING || len(step.ArtifactIds) == 0 { // skip Running/Success
-					continue
-				}
-				// execute Saved/Error steps
-				var taskIds, taskStatuses []string
-				var execErr error
-				if step.Type == "Deploy" {
-					taskIds, taskStatuses, execErr = ExecuteDeploy(ctx, *step)
-				} else if step.Type == "Undeploy" {
-					taskIds, taskStatuses, execErr = ExecuteUndeploy(ctx, *step)
-				} else {
-					db.Conn().Model(&step).Updates(db.DeployStep{Status: STEP_STATUS_ERROR})
-					db.Conn().Create(&db.ExecutionLog{JobId: step.JobId, StepId: step.ID, Sequence: step.Sequence, StepType: step.Type, Log: fmt.Sprintf("unexpected step type: %s", step.Type)})
-					return
-				}
-				// update taskIds and status of steps
-				if dbErr := db.Conn().Model(&step).Updates(db.DeployStep{
-					TaskIds:      pq.StringArray(taskIds),
-					Status:       If(execErr == nil, STEP_STATUS_RUNNING, STEP_STATUS_ERROR),
-					TaskStatuses: pq.StringArray(taskStatuses),
-					TriggeredBy:  user,
-					TriggeredAt:  time.Now(),
-				}).Error; dbErr != nil {
-					db.Conn().Model(&step).Updates(db.DeployStep{Status: STEP_STATUS_ERROR})
-					db.Conn().Create(&db.ExecutionLog{JobId: step.JobId, StepId: step.ID, Sequence: step.Sequence, StepType: step.Type, Log: fmt.Sprintf("DB error while updating execution status of step %d in db: %s", step.ID, dbErr)})
-					return
-				}
-				if execErr != nil { // execution error
-					db.Conn().Model(&step).Updates(db.DeployStep{Status: STEP_STATUS_ERROR})
-					db.Conn().Create(&db.ExecutionLog{JobId: job.ID, StepId: step.ID, Sequence: step.Sequence, StepType: job.Type, Log: fmt.Sprintf("execution error: %s", execErr)})
-					return
-				}
-
-				// check deploy status of the job
-				for {
-					status, err := updateDeployStepStatus(ctx, step)
-					if status == STEP_STATUS_RUNNING {
-						time.Sleep(5 * time.Second) // sleep 5 seconds and check again
-						continue
-					}
-					if err != nil || status == STEP_STATUS_ERROR {
-						db.Conn().Model(&step).Updates(db.DeployStep{Status: STEP_STATUS_ERROR})
-						db.Conn().Create(&db.ExecutionLog{JobId: step.JobId, StepId: step.ID, Sequence: step.Sequence, StepType: step.Type, Log: err.Error()})
-					}
-					return
-				}
-			}
-		}(stepCh)
+		go scheduleDeploy(stepCh, user)
 		for _, step := range steps {
 			stepCh <- &step
 		}
@@ -506,6 +422,102 @@ func ExecuteJob(ctx *gin.Context) {
 
 }
 
+// execute deploy asynchronously, then check step status
+func scheduleDeploy(stepCh <-chan *db.DeployStep, user string) {
+	ctx := context.Background()
+	for step := range stepCh {
+		if step.Status == STEP_STATUS_SUCCESS || step.Status == STEP_STATUS_RUNNING || len(step.ArtifactIds) == 0 { // skip Running/Success
+			continue
+		}
+		// execute Saved/Error steps
+		var taskIds, taskStatuses []string
+		var execErr error
+		if step.Type == "Deploy" {
+			taskIds, taskStatuses, execErr = ExecuteDeploy(ctx, *step)
+		} else if step.Type == "Undeploy" {
+			taskIds, taskStatuses, execErr = ExecuteUndeploy(ctx, *step)
+		} else {
+			db.Conn().Model(&step).Updates(db.DeployStep{Status: STEP_STATUS_ERROR})
+			db.Conn().Create(&db.ExecutionLog{JobId: step.JobId, StepId: step.ID, Sequence: step.Sequence, StepType: step.Type, Log: fmt.Sprintf("unexpected step type: %s", step.Type)})
+			return
+		}
+		// update taskIds and status of steps
+		if dbErr := db.Conn().Model(&step).Updates(db.DeployStep{
+			TaskIds:      pq.StringArray(taskIds),
+			Status:       If(execErr == nil, STEP_STATUS_RUNNING, STEP_STATUS_ERROR),
+			TaskStatuses: pq.StringArray(taskStatuses),
+			TriggeredBy:  user,
+			TriggeredAt:  time.Now(),
+		}).Error; dbErr != nil {
+			db.Conn().Model(&step).Updates(db.DeployStep{Status: STEP_STATUS_ERROR})
+			db.Conn().Create(&db.ExecutionLog{JobId: step.JobId, StepId: step.ID, Sequence: step.Sequence, StepType: step.Type, Log: fmt.Sprintf("DB error while updating execution status of step %d in db: %s", step.ID, dbErr)})
+			return
+		}
+		if execErr != nil { // execution error
+			db.Conn().Model(&step).Updates(db.DeployStep{Status: STEP_STATUS_ERROR})
+			db.Conn().Create(&db.ExecutionLog{JobId: step.JobId, StepId: step.ID, Sequence: step.Sequence, StepType: step.Type, Log: fmt.Sprintf("execution error: %s", execErr)})
+			return
+		}
+
+		// check deploy status of the job
+		for {
+			status, err := updateDeployStepStatus(ctx, step)
+			if status == STEP_STATUS_RUNNING {
+				time.Sleep(5 * time.Second) // sleep 5 seconds and check again
+				continue
+			}
+			// ERROR, SUCCESS status must return
+			if err != nil || status == STEP_STATUS_ERROR {
+				db.Conn().Model(&step).Updates(db.DeployStep{Status: STEP_STATUS_ERROR})
+				db.Conn().Create(&db.ExecutionLog{JobId: step.JobId, StepId: step.ID, Sequence: step.Sequence, StepType: step.Type, Log: err.Error()})
+			}
+			return
+		}
+	}
+}
+
+// execute import step asynchronously, then check step status
+func scheduleImport(stepCh <-chan *db.ImportStep, user string) {
+	ctx := context.Background()
+	for step := range stepCh {
+		if (step.Status == STEP_STATUS_SUCCESS || step.Status == STEP_STATUS_RUNNING) && step.ActionId != 0 { // skip Running/Success. 0 means not triggered successfully
+			continue
+		}
+		actionId, ExecErr := ExecuteImport(ctx, *step)
+		if ExecErr != nil {
+			db.Conn().Model(&step).Updates(&db.ImportStep{Status: STEP_STATUS_ERROR})
+			db.Conn().Create(&db.ExecutionLog{JobId: step.JobId, StepId: step.ID, Sequence: step.Sequence, StepType: step.Type, Log: fmt.Sprintf("import step execution error: %s", ExecErr)})
+			return
+		}
+		// import job triggerred, update step status and trigger info, record actionId
+		if err := db.Conn().Model(&step).Updates(db.ImportStep{
+			ActionId: actionId, Status: STEP_STATUS_RUNNING,
+			TriggeredBy: user,
+			TriggeredAt: time.Now(),
+		}).Error; err != nil {
+			db.Conn().Model(&step).Updates(&db.ImportStep{Status: STEP_STATUS_ERROR})
+			db.Conn().Create(&db.ExecutionLog{JobId: step.JobId, StepId: step.ID, Sequence: step.Sequence, StepType: step.Type, Log: fmt.Sprintf("DB err during updating execution status of step %d", step.ID)})
+			return
+		}
+		// check import status of the step. if it is running, sleep 5 seconds and check again
+		for {
+			var status string
+			var err error
+			status, err = updateImportStepStatus(ctx, *step)
+			if status == STEP_STATUS_RUNNING {
+				time.Sleep(5 * time.Second)
+				continue
+			}
+			// other status like ERROR, SUCCESS, inital, unknown, etc... must return
+			if err != nil || status == STEP_STATUS_ERROR {
+				db.Conn().Model(&db.ImportStep{}).Updates(&db.ImportStep{Status: STEP_STATUS_ERROR})
+				db.Conn().Model(&db.ExecutionLog{}).Create(&db.ExecutionLog{JobId: step.JobId, StepId: step.ID, Sequence: step.Sequence, StepType: step.Type, Log: err.Error()})
+			}
+			return
+		}
+	}
+
+}
 func If(isTrue bool, a, b string) string {
 	if isTrue {
 		return a
