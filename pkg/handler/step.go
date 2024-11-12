@@ -104,24 +104,32 @@ func ExecuteUndeploy(ctx context.Context, step db.DeployStep) ([]string, []strin
 
 // check execution status of running DEPLOY steps then return summary status of the job
 // update steps' status to: Error/Running/Success; return job status: Error/Running/Success/Unknown
-func CheckDeployJobStatus(steps []db.DeployStep) (string, error) {
+func CheckDeployJobStatus(steps []db.DeployStep, job db.Job) string {
 	jobStatusSet := make(map[string]int, 0)
 	for i := range steps { // Running/Error steps should check status
 		jobStatusSet[steps[i].Status] = jobStatusSet[steps[i].Status] + 1
 	}
 	// summarize job status
 	jobStatus := mapToJobStatus(jobStatusSet)
-	return jobStatus, nil
+	// compared with current job status
+	if job.Status == JOB_STATUS_RUNNING && jobStatus == JOB_STATUS_SAVED { // means job just triggered
+		jobStatus = job.Status
+	}
+	return jobStatus
 }
 
 // update steps' status to: Error/Running/Success, or warning, initial, unkown.
 // return job status: Error/Running/Success/Unknown
-func CheckImportJobStatus(steps []db.ImportStep) (string, error) {
+func CheckImportJobStatus(steps []db.ImportStep, job db.Job) string {
 	jobStatusSet := make(map[string]int, 0)
 	for i := range steps {
 		jobStatusSet[steps[i].Status] = jobStatusSet[steps[i].Status] + 1
 	}
 	// update job status
 	jobStatus := mapToJobStatus(jobStatusSet)
-	return jobStatus, nil
+	// compared with current job status
+	if job.Status == JOB_STATUS_RUNNING && jobStatus == JOB_STATUS_SAVED { // means job just triggered
+		jobStatus = job.Status
+	}
+	return jobStatus
 }

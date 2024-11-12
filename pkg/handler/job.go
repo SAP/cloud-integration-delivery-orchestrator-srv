@@ -45,12 +45,7 @@ func GetJobAndStepsByID(ctx *gin.Context) {
 			)
 			return
 		}
-		if jobStatus, err = CheckImportJobStatus(importSteps); err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{
-				"msg": fmt.Sprintf("error while updating status of steps: %s", err),
-			})
-			return
-		}
+		jobStatus = CheckImportJobStatus(importSteps, job)
 		steps = importSteps
 	} else if job.Type == "Deploy" {
 		var deploySteps []db.DeployStep
@@ -61,10 +56,7 @@ func GetJobAndStepsByID(ctx *gin.Context) {
 			)
 			return
 		}
-		if jobStatus, err = CheckDeployJobStatus(deploySteps); err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"msg": fmt.Sprintf("error while checking deploying status: %s", err)})
-			return
-		}
+		jobStatus = CheckDeployJobStatus(deploySteps, job)
 		steps = deploySteps
 	} else if job.Type == "Undepoloy" {
 		// todo
@@ -76,7 +68,7 @@ func GetJobAndStepsByID(ctx *gin.Context) {
 	}
 
 	var jobLogs []db.ExecutionLog
-	if err := db.Conn().Where(db.ExecutionLog{JobId: job.ID}).Find(&jobLogs).Error; err != nil {
+	if err := db.Conn().Where(db.ExecutionLog{JobId: job.ID}).Order("id").Find(&jobLogs).Error; err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{
 			"msg": fmt.Sprintf("error while querying logs of job %d: %s", job.ID, err),
 		})
@@ -155,7 +147,7 @@ func CopyJob(ctx *gin.Context) {
 	if job.Type == "Import" {
 		var steps []db.ImportStep
 		// query steps of the job
-		if err := db.Conn().Where(&db.ImportStep{JobId: uint(fromJobId)}).Find(&steps).Error; err != nil {
+		if err := db.Conn().Where(&db.ImportStep{JobId: uint(fromJobId)}).Order("sequence").Find(&steps).Error; err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{
 				"msg": fmt.Sprintf("error while querying import steps of job %d: %s", fromJobId, err),
 			})
@@ -178,7 +170,7 @@ func CopyJob(ctx *gin.Context) {
 		}
 	} else if job.Type == "Deploy" {
 		var steps []db.DeployStep
-		if err := db.Conn().Where(&db.DeployStep{JobId: uint(fromJobId)}).Find(&steps).Error; err != nil {
+		if err := db.Conn().Where(&db.DeployStep{JobId: uint(fromJobId)}).Order("sequence").Find(&steps).Error; err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{
 				"msg": fmt.Sprintf("error while querying deploy steps of job %d: %s", fromJobId, err),
 			})
@@ -244,7 +236,7 @@ func DeleteJob(ctx *gin.Context) {
 		return
 	}
 	jobId, _ := strconv.Atoi(id)
-	// error or running steps can't be deleted
+	// error, running or success steps can't be deleted
 	var job db.Job
 	if err := db.Conn().First(&job, jobId).Error; err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{
@@ -252,14 +244,29 @@ func DeleteJob(ctx *gin.Context) {
 		})
 		return
 	}
-	if job.Status == JOB_STATUS_RUNNING || job.Status == JOB_STATUS_ERROR {
-		ctx.JSON(http.StatusBadRequest, gin.H{
-			"msg": "Job is running or in error status, can't be deleted",
-		})
+	if job.Status == JOB_STATUS_RUNNING || job.Status == JOB_STATUS_ERROR || job.Status == JOB_STATUS_SUCCESS {
+		ctx.JSON(http.StatusBadRequest, gin.H{"msg": fmt.Sprintf("job %d is %s, can't be deleted", jobId, job.Status)})
 		return
 	}
 
 	if err := db.Conn().Delete(&db.Job{}, jobId).Error; err != nil {
+		return
+	}
+	// delete steps
+	var err error
+	if job.Type == "Import" {
+		err = db.Conn().Where("job_id = ?", jobId).Delete(&db.ImportStep{}).Error
+	} else if job.Type == "Deploy" {
+		err = db.Conn().Where("job_id = ?", jobId).Delete(&db.DeployStep{}).Error
+	} else {
+		ctx.JSON(http.StatusBadRequest, gin.H{"msg": fmt.Sprintf("invalid job type %s", job.Type)})
+		return
+	}
+
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"msg": fmt.Sprintf("error while deleting steps of %s job %d: %s", job.Type, jobId, err),
+		})
 		return
 	}
 
@@ -310,12 +317,12 @@ func UpSertJobWithStep(ctx *gin.Context) {
 		}
 		steps := importJob.Steps
 		for i := range steps {
+			steps[i].Sequence = uint(i)
 			// running, success, error steps can't be updated
 			if steps[i].Status == STEP_STATUS_RUNNING || steps[i].Status == STEP_STATUS_SUCCESS || steps[i].Status == STEP_STATUS_ERROR {
 				continue
 			}
 			steps[i].JobId = job.ID
-			steps[i].Sequence = uint(i)
 			steps[i].Status = STEP_STATUS_SAVED
 			steps[i].UpdatedBy = user
 		}
@@ -381,20 +388,20 @@ func ExecuteJob(ctx *gin.Context) {
 	//execute and update steps
 	if job.Type == "Import" {
 		var steps []db.ImportStep
-		if err := db.Conn().Where(&db.ImportStep{JobId: job.ID}).Find(&steps).Error; err != nil {
+		if err := db.Conn().Where(&db.ImportStep{JobId: job.ID}).Order("sequence").Find(&steps).Error; err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"msg": fmt.Sprintf("failed to query steps of job %d", jobId)})
 			return
 		}
 		stepCh := make(chan *db.ImportStep, len(steps))
 		// execute import
 		go scheduleImport(stepCh, user)
-		for _, step := range steps {
-			stepCh <- &step
+		for i := range steps {
+			stepCh <- &steps[i]
 		}
 		close(stepCh)
 	} else if job.Type == "Deploy" {
 		var steps []db.DeployStep
-		if dbErr := db.Conn().Where(&db.DeployStep{JobId: job.ID}).Find(&steps).Error; dbErr != nil {
+		if dbErr := db.Conn().Where(&db.DeployStep{JobId: job.ID}).Order("sequence").Find(&steps).Error; dbErr != nil {
 			ctx.JSON(http.StatusInternalServerError, fmt.Sprintf("error while querying steps of job %d: %s", job.ID, dbErr))
 			return
 		}
@@ -402,8 +409,8 @@ func ExecuteJob(ctx *gin.Context) {
 		stepCh := make(chan *db.DeployStep, len(steps))
 		// execute deploy
 		go scheduleDeploy(stepCh, user)
-		for _, step := range steps {
-			stepCh <- &step
+		for i := range steps {
+			stepCh <- &steps[i]
 		}
 		close(stepCh)
 	} else if job.Type == "Undeploy" {
@@ -413,12 +420,13 @@ func ExecuteJob(ctx *gin.Context) {
 			"msg": fmt.Sprintf("unexpected job type: %s", job.Type),
 		})
 	}
+	// deploy/import job scheduled successfully, update job status
+	if err := db.Conn().Model(&job).Updates(db.Job{Status: JOB_STATUS_RUNNING, TriggeredBy: user}).Error; err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"msg": fmt.Sprintf("error while updating job status: %s", err)})
+		return
+	}
 
-	db.Conn().Model(&job).Updates(db.Job{Status: JOB_STATUS_RUNNING, TriggeredBy: user})
-
-	ctx.JSON(http.StatusAccepted, gin.H{
-		"msg": "Job Triggered",
-	})
+	ctx.JSON(http.StatusAccepted, gin.H{"msg": "Job Triggered"})
 
 }
 
@@ -466,12 +474,13 @@ func scheduleDeploy(stepCh <-chan *db.DeployStep, user string) {
 				time.Sleep(5 * time.Second) // sleep 5 seconds and check again
 				continue
 			}
-			// ERROR, SUCCESS status must return
+			// ERROR, SUCCESS status must break to execute next step
 			if err != nil || status == STEP_STATUS_ERROR {
 				db.Conn().Model(&step).Updates(db.DeployStep{Status: STEP_STATUS_ERROR})
 				db.Conn().Create(&db.ExecutionLog{JobId: step.JobId, StepId: step.ID, Sequence: step.Sequence, StepType: step.Type, Log: err.Error()})
+				return
 			}
-			return
+			break
 		}
 	}
 }
@@ -512,8 +521,9 @@ func scheduleImport(stepCh <-chan *db.ImportStep, user string) {
 			if err != nil || status == STEP_STATUS_ERROR {
 				db.Conn().Model(&db.ImportStep{}).Updates(&db.ImportStep{Status: STEP_STATUS_ERROR})
 				db.Conn().Model(&db.ExecutionLog{}).Create(&db.ExecutionLog{JobId: step.JobId, StepId: step.ID, Sequence: step.Sequence, StepType: step.Type, Log: err.Error()})
+				return
 			}
-			return
+			break
 		}
 	}
 
