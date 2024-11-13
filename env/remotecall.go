@@ -36,7 +36,6 @@ type HttpRequest struct {
 
 var cacheClient map[string]*HttpClient
 
-// TODO: cache client, refresh token
 func NewClient(ctx context.Context, clientID string, clientSecret string, authUrl string, apiUrl string) (*HttpClient, error) {
 	if cacheClient == nil {
 		cacheClient = make(map[string]*HttpClient)

@@ -79,3 +79,9 @@ Backend:
 
 ## user provided environment variables
 PORT = 9000
+
+## Deploy to CF
+```sh
+cf login -a https://api.cf.sap.hana.ondemand.com/ -o MaCo-devops -s DEVOPS
+cf push
+```
