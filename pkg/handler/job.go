@@ -273,6 +273,17 @@ func DeleteJob(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{
 		"result": jobId,
 	})
+}
+
+func JobCounts(ctx *gin.Context) {
+	var counts []map[string]interface{}
+	if err := db.Conn().Model(&db.Job{}).Select("COUNT(*) as count", "type").Group("type").Find(&counts).Error; err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"msg": fmt.Sprintf("error while querying job counts: %s", err)})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{
+		"result": counts,
+	})
 
 }
 
@@ -626,6 +637,9 @@ func updateDeployStepStatus(ctx context.Context, step *db.DeployStep) (string, e
 // returns import job status: SUCCESS, ERROR, RUNNING, warning, initial, unknown
 func updateImportStepStatus(ctx context.Context, step db.ImportStep) (string, error) {
 	tmsClient, err := tms.NewClient(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to create tms client: %s", err)
+	}
 	if step.Status == STEP_STATUS_SUCCESS || step.Status == STEP_STATUS_SAVED || step.ActionId == 0 {
 		return step.Status, nil
 	}

@@ -21,6 +21,7 @@ func main() {
 
 	v1Group := router.Group("/api/v1")
 	{
+		v1Group.GET("/count", handler.JobCounts)
 		v1Group.GET("/job", handler.GetJobsByType)
 		v1Group.POST("/job", handler.CreateJob)
 		v1Group.POST("job/copy/:id", handler.CopyJob)
