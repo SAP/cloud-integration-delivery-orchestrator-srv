@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"github.wdf.sap.corp/maco-mmt/maco-deploy/db"
 	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/tms"
 )
 
@@ -40,6 +41,14 @@ func GetTranportRequestsHandler(ctx *gin.Context) {
 		return
 	}
 	trs, error := tmsClient.GetNodeTransportRequests(nodeId)
+	trResp := make([]db.TransportRequest, len(trs))
+	for i := range trs {
+		trResp[i] = db.TransportRequest{
+			ID:          trs[i].ID,
+			Description: trs[i].Description,
+			Status:      trs[i].Status,
+		}
+	}
 	if error != nil {
 		errorMsg := fmt.Sprintf("Error while get node trs: %s", error)
 		logger.Error(errorMsg)
@@ -47,3 +56,6 @@ func GetTranportRequestsHandler(ctx *gin.Context) {
 	}
 	ctx.JSON(http.StatusOK, gin.H{"status": 200, "result": trs})
 }
+
+// TODO: monitoring and logging if transport request is not
+// successful: https://api.sap.com/api/TMS_v2/resource/

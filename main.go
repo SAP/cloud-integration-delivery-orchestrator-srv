@@ -23,7 +23,7 @@ func main() {
 	{
 		v1Group.GET("/count", handler.JobCounts)
 		v1Group.GET("/job", handler.GetJobsByType)
-		v1Group.POST("/job", handler.CreateJob)
+		v1Group.POST("/job", handler.CreateJobHandler)
 		v1Group.POST("job/copy/:id", handler.CopyJob)
 		v1Group.DELETE("/job/:id", handler.DeleteJob)
 		v1Group.PUT("/job", handler.UpSertJobWithStep) // update or insert steps within a job
@@ -39,7 +39,19 @@ func main() {
 
 		v1Group.DELETE("/step", handler.DeleteStep)
 
-		v1Group.GET("/destinations", handler.GetDestinationsHandler)
+		v1Group.GET("/destinations", handler.GetDestinationsHandler) // get cpi tenant destinations
+		// transport plan
+		v1Group.POST("/parse", handler.ParseYaml)
+		v1Group.POST("/transportplan/generate/import", handler.GenerateImportJob)
+		v1Group.POST("/transportplan/generate/deploy", handler.GenerateDeployJob)
+		v1Group.GET("/transportplan/:id", handler.GetTransportPlan)
+		v1Group.GET("/transportplan", handler.GetAllTransportPlans)
+		v1Group.POST("/transportplan", handler.SaveTransportPlan)
+		v1Group.DELETE("/transportplan/:id", handler.DeleteTransportPlan)
+
+		v1Group.GET("/transportGroup", handler.GetTransportGroups)
+		v1Group.POST("/transportGroup", handler.CreateTransportGroup)
+		v1Group.DELETE("/transportGroup", handler.DeleteTransportGroup)
 	}
 
 	if err := router.Run(":8080"); err != nil {

@@ -205,6 +205,7 @@ type IflowResp struct {
 	D IflowItem `json:"d"`
 }
 
+// Get an integration flow by Id and version.
 func (c *CpiClient) GetPackageIflow(packageID string, iflowID string, iflowVersion string) (IflowItem, error) {
 	childCtx, cancel := context.WithCancel(c.Context)
 	defer cancel()
@@ -217,7 +218,7 @@ func (c *CpiClient) GetPackageIflow(packageID string, iflowID string, iflowVersi
 	}
 	respBodyContent, errReq := c.Do(&request)
 	if errReq != nil {
-		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
+		logger.Errorf("Error when getting response content: %s", errReq)
 		return IflowItem{}, errReq
 	}
 	var iflowResp IflowResp

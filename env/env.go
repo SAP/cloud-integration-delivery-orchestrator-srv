@@ -96,6 +96,8 @@ type Destination struct {
 	ClientId            string `json:"clientId"`
 	ClientSecret        string `json:"clientSecret"`
 	TokenServiceURL     string `json:"tokenServiceURL"`
+	User                string `json:"user"`
+	Password            string `json:"password"`
 }
 
 // Get Destinations(including credentials)

@@ -1,12 +1,13 @@
 
 applications:
-- name: stage-devops-srv-iflow-deploy
+- name: stage-devops-srv-iflow-deploy-v2
   memory: 2G
   disk_quota: 2G
   services:
     - mmt-devops-pgsql
     - mmt_devops_destination
     - mmt-tms
+    - mmt_devops_connectivity
   env:
     REMOTE: true
 

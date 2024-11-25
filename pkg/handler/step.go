@@ -42,64 +42,66 @@ func ExecuteImport(ctx context.Context, step db.ImportStep) (uint, error) {
 	if err != nil {
 		return 0, fmt.Errorf("failed to create tms client: %s", err)
 	}
-	actionId, err := client.ImportTransportRequest(step.TransportNodeId, step.TransportRequests)
+	trNumbers := make([]int32, len(step.TransportRequests_V2))
+	for i, tr := range step.TransportRequests_V2 {
+		trNumbers[i] = int32(tr.ID)
+	}
+	actionId, err := client.ImportTransportRequest(step.TransportNodeId, trNumbers)
 	if err != nil {
-		return 0, fmt.Errorf("failed to trigger trs(%v) in node %s(%d): %s", step.TransportRequests, step.TransportNodeName, step.TransportNodeId, err)
+		return 0, fmt.Errorf("failed to trigger trs(%v) in node %s(%d): %s", trNumbers, step.TransportNodeName, step.TransportNodeId, err)
 	}
 	return actionId, nil
 }
 
-// returns taskIds, taskStatuses, err
 // all artifacts will be triggered.
-func ExecuteDeploy(ctx context.Context, step db.DeployStep) ([]string, []string, error) {
-	taskIds := make([]string, len(step.ArtifactIds))
-	taskStatuses := make([]string, len(step.ArtifactIds))
+// will also update Status, TaskId of these artifacts
+func ExecuteDeploy(ctx context.Context, step *db.DeployStep) error {
 	var err error
 	client, err := cpi.NewClient(ctx, step.Endpoint)
 	if err != nil {
-		return taskIds, taskStatuses, err
+		return fmt.Errorf("failed to create cpi client: %s", err)
 	}
-	for i, artifactId := range step.ArtifactIds {
-		var actionID string
+	for i := range step.Artifacts {
+		var taskID string
+		artifact := &step.Artifacts[i]
 		// currently support two types of artifacts
-		if step.ArtifactTypes[i] == "Integration Flow" {
-			actionID, err = client.DeployIflow(artifactId, "active")
-		} else if step.ArtifactTypes[i] == "Script Collection" {
-			actionID, err = client.DeployScriptCollection(artifactId, "active")
+		if artifact.Type == Artifact_Type_Iflow {
+			taskID, err = client.DeployIflow(artifact.Id, "active")
+		} else if artifact.Type == Artifact_Type_Sc {
+			taskID, err = client.DeployScriptCollection(artifact.Id, "active")
+		} else {
+			return fmt.Errorf("unsupported artifact type: %s", artifact.Type)
 		}
 		if err != nil {
-			err = fmt.Errorf("error triggering step %d of %s (%s): %s", step.Sequence, artifactId, step.ArtifactTypes[i], err)
-			taskStatuses[i] = err.Error()
-			taskIds[i] = "0"
+			err = fmt.Errorf("error triggering step %d of %s (%s): %s", step.Sequence, artifact.Id, artifact.Type, err)
 			continue
 		}
-		taskStatuses[i] = DEPLOY_STATUS_DEPLOYING
-		taskIds[i] = actionID
+		artifact.TaskId = taskID
+		artifact.Status = DEPLOY_STATUS_DEPLOYING
 	}
-	return taskIds, taskStatuses, err
+	return err
 }
 
 // return task ids, task statuses, error
-func ExecuteUndeploy(ctx context.Context, step db.DeployStep) ([]string, []string, error) {
-	taskIds := make([]string, len(step.ArtifactIds))
-	taskStatuses := make([]string, len(step.ArtifactIds))
+func ExecuteUndeploy(ctx context.Context, step *db.DeployStep) error {
 	var err error
 	client, err := cpi.NewClient(ctx, step.Endpoint)
 	if err != nil {
-		return taskIds, taskStatuses, fmt.Errorf("failed to create cpi client: %s", err)
+		return fmt.Errorf("failed to create cpi client: %s", err)
 	}
 
-	for i, artifactId := range step.ArtifactIds {
-		if err = client.UndeployRuntimeArtifacts(artifactId); err != nil {
-			err = fmt.Errorf("error while undeploying %s (%s): %s", artifactId, step.ArtifactTypes[i], err)
-			taskStatuses[i] = err.Error()
-			taskIds[i] = "0"
+	for i := range step.Artifacts {
+		artifact := &step.Artifacts[i]
+		if err = client.UndeployRuntimeArtifacts(artifact.Id); err != nil {
+			err = fmt.Errorf("error while undeploying %s (%s): %s", artifact.Id, artifact.Type, err)
+			artifact.Id = "0"
+			artifact.Status = UNDEPLOY_STATUS_FAIL
 			continue
 		}
-		taskIds[i] = "1"
-		taskStatuses[i] = UNDEPLOY_STATUS_UNDEPLOYING
+		artifact.Id = "1"
+		artifact.Status = UNDEPLOY_STATUS_UNDEPLOYING
 	}
-	return taskIds, taskStatuses, nil
+	return nil
 }
 
 // check execution status of running DEPLOY steps then return summary status of the job

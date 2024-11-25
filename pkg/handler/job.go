@@ -11,7 +11,6 @@ import (
 	// "time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/lib/pq"
 	"github.wdf.sap.corp/maco-mmt/maco-deploy/db"
 	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/cpi"
 	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/tms"
@@ -90,7 +89,7 @@ func GetJobAndStepsByID(ctx *gin.Context) {
 	})
 }
 
-func CreateJob(ctx *gin.Context) {
+func CreateJobHandler(ctx *gin.Context) {
 	var job db.Job = db.Job{}
 	if err := ctx.BindJSON(&job); err != nil {
 		logger.Errorf("invalid request, error message is %s", err)
@@ -99,19 +98,26 @@ func CreateJob(ctx *gin.Context) {
 		})
 		return
 	}
-	job.ID = 0
-	job.Status = JOB_STATUS_SAVED
-	job.CreatedBy = user(ctx)
 
-	if err := db.Conn().Save(&job).Error; err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{
-			"msg": "error while creating job",
-		})
+	if err := createJobSrv(&job, User(ctx)); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"msg": fmt.Sprintf("error while creating job: %s", err)})
 		return
 	}
+
 	ctx.JSON(http.StatusOK, gin.H{
 		"result": job,
 	})
+}
+
+func createJobSrv(job *db.Job, user string) error {
+	if user == "" {
+		return fmt.Errorf("user is empty")
+	}
+	job.ID, job.Status, job.CreatedBy = 0, JOB_STATUS_SAVED, user
+	if err := db.Conn().Save(job).Error; err != nil {
+		return err
+	}
+	return nil
 }
 
 func CopyJob(ctx *gin.Context) {
@@ -134,7 +140,7 @@ func CopyJob(ctx *gin.Context) {
 	job.ID = 0
 	job.Name = "Copy of - " + job.Name
 	job.Status = JOB_STATUS_SAVED
-	job.CreatedBy = user(ctx)
+	job.CreatedBy = User(ctx)
 	job.UpdatedBy = ""
 	job.Description = "Copied Desctiption - " + job.Description
 	// create a new job with the same steps. will write a new Job id
@@ -157,9 +163,9 @@ func CopyJob(ctx *gin.Context) {
 			steps[i].ID = 0
 			steps[i].JobId = job.ID
 			steps[i].Status = STEP_STATUS_SAVED
-			steps[i].UpdatedBy = user(ctx)
+			steps[i].UpdatedBy = User(ctx)
 			steps[i].Sequence = uint(i)
-			steps[i].TransportRequests = pq.Int32Array{}
+			steps[i].TransportRequests_V2 = []db.TransportRequest{}
 			steps[i].ActionId = 0
 		}
 		if err := db.Conn().Create(&steps).Error; err != nil {
@@ -180,13 +186,9 @@ func CopyJob(ctx *gin.Context) {
 			steps[i].ID = 0
 			steps[i].JobId = job.ID
 			steps[i].Status = STEP_STATUS_SAVED
-			steps[i].UpdatedBy = user(ctx)
+			steps[i].UpdatedBy = User(ctx)
 			steps[i].Sequence = uint(i)
-			steps[i].ArtifactIds = pq.StringArray{}
-			steps[i].ArtifactTypes = pq.StringArray{}
-			steps[i].ArtifactVersions = pq.StringArray{}
-			steps[i].TaskIds = pq.StringArray{}
-			steps[i].TaskStatuses = pq.StringArray{}
+			steps[i].Artifacts = []db.Artifact{}
 		}
 		if err := db.Conn().Create(&steps).Error; err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{
@@ -312,7 +314,7 @@ func UpSertJobWithStep(ctx *gin.Context) {
 	}
 	// save job
 	job.Status = JOB_STATUS_SAVED
-	user := user(ctx)
+	user := User(ctx)
 	job.UpdatedBy = user
 
 	if err := db.Conn().Save(&job).Error; err != nil {
@@ -320,7 +322,7 @@ func UpSertJobWithStep(ctx *gin.Context) {
 		return
 	}
 	// upsert steps of this job
-	if job.Type == "Import" {
+	if job.Type == Job_Type_Import {
 		var importJob ImportJob
 		if err := json.Unmarshal(request, &importJob); err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"msg": "failed to unmarshal request: " + err.Error()})
@@ -343,7 +345,7 @@ func UpSertJobWithStep(ctx *gin.Context) {
 			})
 			return
 		}
-	} else if job.Type == "Deploy" {
+	} else if job.Type == Job_Type_Deploy {
 		var deployJob DeployJob
 		if err := json.Unmarshal(request, &deployJob); err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"msg": "failed to unmarshal request: " + err.Error()})
@@ -378,6 +380,7 @@ func UpSertJobWithStep(ctx *gin.Context) {
 		"msg": "success",
 	})
 }
+
 func ExecuteJob(ctx *gin.Context) {
 	jobId, err := strconv.Atoi(ctx.Param("id"))
 	if err != nil {
@@ -386,7 +389,7 @@ func ExecuteJob(ctx *gin.Context) {
 		})
 		return
 	}
-	user := user(ctx)
+	user := User(ctx)
 
 	// query job
 	var job db.Job
@@ -445,36 +448,32 @@ func ExecuteJob(ctx *gin.Context) {
 func scheduleDeploy(stepCh <-chan *db.DeployStep, user string) {
 	ctx := context.Background()
 	for step := range stepCh {
-		if step.Status == STEP_STATUS_SUCCESS || step.Status == STEP_STATUS_RUNNING || len(step.ArtifactIds) == 0 { // skip Running/Success
+		if step.Status == STEP_STATUS_SUCCESS || step.Status == STEP_STATUS_RUNNING || len(step.Artifacts) == 0 { // skip Running/Success, or no artifacts
 			continue
 		}
-		// execute Saved/Error steps
-		var taskIds, taskStatuses []string
+		// execute Saved steps, or re-execute Error steps
 		var execErr error
-		if step.Type == "Deploy" {
-			taskIds, taskStatuses, execErr = ExecuteDeploy(ctx, *step)
-		} else if step.Type == "Undeploy" {
-			taskIds, taskStatuses, execErr = ExecuteUndeploy(ctx, *step)
+		if step.Type == Step_Type_Deploy {
+			execErr = ExecuteDeploy(ctx, step)
+		} else if step.Type == Step_Type_Undeploy {
+			execErr = ExecuteUndeploy(ctx, step)
 		} else {
 			db.Conn().Model(&step).Updates(db.DeployStep{Status: STEP_STATUS_ERROR})
 			db.Conn().Create(&db.ExecutionLog{JobId: step.JobId, StepId: step.ID, Sequence: step.Sequence, StepType: step.Type, Log: fmt.Sprintf("unexpected step type: %s", step.Type)})
 			return
 		}
-		// update taskIds and status of steps
+		if execErr != nil {
+			db.Conn().Model(&step).Updates(db.DeployStep{Status: STEP_STATUS_ERROR})
+			db.Conn().Create(&db.ExecutionLog{JobId: step.JobId, StepId: step.ID, Sequence: step.Sequence, StepType: step.Type, Log: fmt.Sprintf("execution deploying error: %s", execErr)})
+			return
+		}
 		if dbErr := db.Conn().Model(&step).Updates(db.DeployStep{
-			TaskIds:      pq.StringArray(taskIds),
-			Status:       If(execErr == nil, STEP_STATUS_RUNNING, STEP_STATUS_ERROR),
-			TaskStatuses: pq.StringArray(taskStatuses),
-			TriggeredBy:  user,
-			TriggeredAt:  time.Now(),
+			Status:      STEP_STATUS_RUNNING,
+			TriggeredBy: user,
+			TriggeredAt: time.Now(),
 		}).Error; dbErr != nil {
 			db.Conn().Model(&step).Updates(db.DeployStep{Status: STEP_STATUS_ERROR})
 			db.Conn().Create(&db.ExecutionLog{JobId: step.JobId, StepId: step.ID, Sequence: step.Sequence, StepType: step.Type, Log: fmt.Sprintf("DB error while updating execution status of step %d in db: %s", step.ID, dbErr)})
-			return
-		}
-		if execErr != nil { // execution error
-			db.Conn().Model(&step).Updates(db.DeployStep{Status: STEP_STATUS_ERROR})
-			db.Conn().Create(&db.ExecutionLog{JobId: step.JobId, StepId: step.ID, Sequence: step.Sequence, StepType: step.Type, Log: fmt.Sprintf("execution error: %s", execErr)})
 			return
 		}
 
@@ -546,11 +545,6 @@ func If(isTrue bool, a, b string) string {
 	return b
 }
 
-func user(ctx *gin.Context) string {
-	email, _ := ctx.Get("user")
-	return email.(string)
-}
-
 // Return job status based on steps' statusSet. Possible statuses: Error/Running/Success/Unknown or Saved
 func mapToJobStatus(statusSet map[string]int) string {
 	if statusSet[STEP_STATUS_ERROR] > 0 {
@@ -565,56 +559,34 @@ func mapToJobStatus(statusSet map[string]int) string {
 	return JOB_STATUS_UNKNOWN
 }
 
-const (
-	STEP_STATUS_ERROR   = "Error"
-	STEP_STATUS_RUNNING = "Running"
-	STEP_STATUS_SUCCESS = "Success"
-	STEP_STATUS_SAVED   = "Saved"
-	STEP_STATUS_DRAFT   = "Draft"
-
-	JOB_STATUS_ERROR   = "Error"
-	JOB_STATUS_RUNNING = "Running"
-	JOB_STATUS_SUCCESS = "Success"
-	JOB_STATUS_UNKNOWN = "Unknown"
-	JOB_STATUS_SAVED   = "Saved"
-
-	DEPLOY_STATUS_SUCCESS               = "SUCCESS"
-	DEPLOY_STATUS_FAIL                  = "FAIL"
-	DEPLOY_STATUS_DEPLOYING             = "DEPLOYING"
-	DEPLOY_STATUS_FAIL_ON_LICENSE_ERROR = "FAIL_ON_LICENSE_ERROR"
-
-	UNDEPLOY_STATUS_UNDEPLOYING = "UNDEPLOYING"
-	UNDEPLOY_STATUS_SUCCESS     = DEPLOY_STATUS_SUCCESS
-	UNDEPLOY_STATUS_FAIL        = DEPLOY_STATUS_FAIL
-)
-
 // returns deploy job status: SUCCESS, ERROR, RUNNING
 func updateDeployStepStatus(ctx context.Context, step *db.DeployStep) (string, error) {
-	if step.Status == STEP_STATUS_SUCCESS || step.Status == STEP_STATUS_SAVED || len(step.TaskIds) == 0 { // taskids is 0/nil means deploying has not been triggerd yet
+	if step.Status == STEP_STATUS_SUCCESS || step.Status == STEP_STATUS_SAVED || len(step.Artifacts) == 0 {
 		return step.Status, nil
 	}
 	statusSet := make(map[string]bool, 0)
 	// for deploy step, each artifact as a delpoy task id by using task ids.
 	// if it is a undeploy step, check status of each artifact by using artifact ids.
-	for j, taskId := range step.TaskIds {
+	for j := range step.Artifacts {
 		// possible statuses of CPI response: Success, Fail, Deploying, Fail_On_License_Error
-		if step.TaskStatuses[j] == DEPLOY_STATUS_SUCCESS { // skip already finished tasks
+		artifact := &step.Artifacts[j]
+		if artifact.Status == DEPLOY_STATUS_SUCCESS { // skip already finished tasks
 			continue
 		}
 		cpiClient, err := cpi.NewClient(ctx, step.Endpoint) // check task status via cpi endpoint
 		if err != nil {
 			return "", fmt.Errorf("failed to connect to cpi endpoint: %s: %s", step.Endpoint, err)
 		}
-		var status string // deploy/undeploy stautus of a step
-		if step.Type == "Undeploy" {
-			status, err = cpiClient.CheckUndeployStatus(step.ArtifactIds[j])
-		} else if step.Type == "Deploy" {
-			status, err = cpiClient.CheckDeployStatus(taskId)
+		var status string // deploy/undeploy status of a step
+		if step.Type == Step_Type_Undeploy {
+			status, err = cpiClient.CheckUndeployStatus(artifact.TaskId)
+		} else if step.Type == Step_Type_Deploy {
+			status, err = cpiClient.CheckDeployStatus(artifact.TaskId)
 		}
 		if err != nil {
-			return "", fmt.Errorf("error while checking status of step %d, type: %s, artifactId: %s, taskId: %s: %s", step.ID, step.Type, step.ArtifactIds[j], taskId, err)
+			return "", fmt.Errorf("error while checking status of step %d, type: %s, artifactId: %s, taskId: %s: %s", step.ID, step.Type, artifact.Id, artifact.TaskId, err)
 		}
-		step.TaskStatuses[j] = status
+		artifact.Status = status
 		statusSet[status] = true
 	}
 	// summarize step status, map step status to Error/Running/Success
