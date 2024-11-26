@@ -40,14 +40,15 @@ type YamlArtifact struct {
 // body: yaml content
 func ParseYaml(ctx *gin.Context) {
 	var request struct {
-		TransportGroupId int    `json:"transportGroupId"`
-		TransportPlanId  int    `json:"transportPlanId"`
-		YamlContent      string `json:"yamlContent"`
+		TransportGroupId   int    `json:"transportGroupId"`
+		TransportGroupName string `json:"transportGroupName"`
+		TransportPlanId    int    `json:"transportPlanId"`
+		YamlContent        string `json:"yamlContent"`
 	}
 	if err := ctx.BindJSON(&request); err != nil {
 		return
 	}
-	transportPlanId, transportGroupId := request.TransportPlanId, request.TransportGroupId
+	transportPlanId, transportGroupId, transportGroupName := request.TransportPlanId, request.TransportGroupId, request.TransportGroupName
 
 	// get transport plan
 	var transportPlan db.TransportPlan
@@ -83,6 +84,7 @@ func ParseYaml(ctx *gin.Context) {
 	transportPlan.Artifacts = artifacts
 	transportPlan.TransportRequests = trs
 	transportPlan.TransportGroupID = transportGroupId
+	transportPlan.TransportGroupName = transportGroupName
 	transportPlan.UpdatedBy = User(ctx)
 	if err := db.Conn().Updates(&transportPlan).Error; err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"msg": "Failed to save transport plan: " + err.Error()})

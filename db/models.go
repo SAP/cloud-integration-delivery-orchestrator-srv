@@ -96,7 +96,8 @@ type TransportPlan struct {
 	ImportJobStatus         string             // update from import job status
 	DeployJobStatus         string             // update from deploy job status
 
-	TransportGroupID int // transport group id in Database
+	TransportGroupID   int    // transport group id in Database
+	TransportGroupName string // transport group name
 }
 
 type TransportNode struct {
