@@ -407,9 +407,9 @@ func ExecuteJob(ctx *gin.Context) {
 			return
 		}
 		stepCh := make(chan *db.ImportStep, len(steps))
-		// execute import
-		go scheduleImport(stepCh, user)
+		// execute import parallelly
 		for i := range steps {
+			go scheduleImport(stepCh, user)
 			stepCh <- &steps[i]
 		}
 		close(stepCh)
@@ -421,10 +421,10 @@ func ExecuteJob(ctx *gin.Context) {
 		}
 		// execute steps
 		stepCh := make(chan *db.DeployStep, len(steps))
-		// execute deploy
-		go scheduleDeploy(stepCh, user)
+		// execute deploy parallelly
 		for i := range steps {
 			stepCh <- &steps[i]
+			go scheduleDeploy(stepCh, user)
 		}
 		close(stepCh)
 	} else if job.Type == "Undeploy" {
