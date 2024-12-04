@@ -73,8 +73,15 @@ func GetJobAndStepsByID(ctx *gin.Context) {
 		})
 		return
 	}
-
-	db.Conn().Model(&job).Updates(db.Job{Status: jobStatus})
+	// only update job status if it is different from the current status
+	if job.Status != jobStatus {
+		if err := db.Conn().Model(&job).Updates(db.Job{Status: jobStatus}).Error; err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{
+				"msg": fmt.Sprintf("error while updating job status: %s", err),
+			})
+			return
+		}
+	}
 
 	ctx.JSON(http.StatusOK, gin.H{
 		"result": struct {
@@ -212,6 +219,7 @@ func CopyJob(ctx *gin.Context) {
 	GetJobAndStepsByID(ctx)
 }
 
+// return job list by job type
 func GetJobsByType(ctx *gin.Context) {
 	job_type := ctx.Query("type")
 
