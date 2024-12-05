@@ -225,6 +225,10 @@ func (t *TmsClient) ImportTransportRequest(nodeID uint, transportRequestIDs []in
 		logger.Errorf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
 		return actionID, jsonUnmarshalError
 	}
+	if reqImportTransportResp.ActionID == 0 {
+		logger.Errorf("Error when getting action id, the response is %s", reqImportTransportResp)
+		return actionID, fmt.Errorf("failed to trigger import: %s", string(*respBodyContent))
+	}
 	actionID = uint(reqImportTransportResp.ActionID)
 	return actionID, nil
 }
