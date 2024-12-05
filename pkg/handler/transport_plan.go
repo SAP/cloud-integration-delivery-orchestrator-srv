@@ -239,6 +239,7 @@ func checkTrs(ctx context.Context, trs []db.TransportRequest, nodeId int) error 
 	targetTrs := make(map[int]*db.TransportRequest)
 	for i, tr := range trs {
 		targetTrs[tr.ID] = &trs[i]
+		targetTrs[tr.ID].Description = ""
 	}
 	tmsClient, err := tms.NewClient(ctx)
 	if err != nil {
@@ -256,7 +257,7 @@ func checkTrs(ctx context.Context, trs []db.TransportRequest, nodeId int) error 
 	}
 	for i, tr := range targetTrs {
 		if tr.Description == "" {
-			return fmt.Errorf("transport request id not found: %d", i)
+			return fmt.Errorf("transport request id not found: %d in TMS node #%d", i, nodeId)
 		}
 	}
 	return nil

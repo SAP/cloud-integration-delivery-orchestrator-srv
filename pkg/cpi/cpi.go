@@ -229,6 +229,10 @@ func (c *CpiClient) GetPackageIflow(packageID string, iflowID string, iflowVersi
 		return IflowItem{}, jsonUnmarshalError
 	}
 
+	if iflowResp.D.ID == "" {
+		return IflowItem{}, fmt.Errorf("design time iflow %s:%s not found: %s", iflowID, iflowVersion, string(*respBodyContent))
+	}
+
 	return iflowResp.D, nil
 }
 
@@ -406,6 +410,10 @@ func (c *CpiClient) GetScriptCollection(scriptCollectionID string, scriptCollect
 	if jsonUnmarshalError != nil {
 		logger.Errorf("Error when unmarshal from json, error message %s\n", jsonUnmarshalError)
 		return ScriptCollectionItem{}, jsonUnmarshalError
+	}
+
+	if scriptCollectionResp.D.ID == "" {
+		return ScriptCollectionItem{}, fmt.Errorf("design time script collection %s:%s not found: %s", scriptCollectionID, scriptCollectionVersion, string(*respBodyContent))
 	}
 
 	return scriptCollectionResp.D, nil
