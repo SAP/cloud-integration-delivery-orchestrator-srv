@@ -507,25 +507,29 @@ func scheduleDeploy(stepCh <-chan *db.DeployStep, user string) {
 func scheduleImport(stepCh <-chan *db.ImportStep, user string) {
 	ctx := context.Background()
 	for step := range stepCh {
-		if (step.Status == STEP_STATUS_SUCCESS || step.Status == STEP_STATUS_RUNNING) && step.ActionId != 0 { // skip Running/Success. 0 means not triggered successfully
+		if step.Status == STEP_STATUS_SUCCESS && step.ActionId != 0 { // skip Success. 0 means not triggered successfully
 			continue
 		}
-		actionId, ExecErr := ExecuteImport(ctx, *step)
-		if ExecErr != nil {
-			db.Conn().Model(&step).Updates(&db.ImportStep{Status: STEP_STATUS_ERROR})
-			db.Conn().Create(&db.ExecutionLog{JobId: step.JobId, StepId: step.ID, Sequence: step.Sequence, StepType: step.Type, Log: fmt.Sprintf("import step execution error: %s", ExecErr)})
-			return
+		// need to trigger only once. or retry err
+		if step.ActionId == 0 || step.Status == STEP_STATUS_ERROR {
+			actionId, ExecErr := ExecuteImport(ctx, *step)
+			if ExecErr != nil {
+				db.Conn().Model(&step).Updates(&db.ImportStep{Status: STEP_STATUS_ERROR})
+				db.Conn().Create(&db.ExecutionLog{JobId: step.JobId, StepId: step.ID, Sequence: step.Sequence, StepType: step.Type, Log: fmt.Sprintf("import step execution error: %s", ExecErr)})
+				return
+			}
+			// import job triggerred, update step status and trigger info, record actionId
+			if err := db.Conn().Model(&step).Updates(db.ImportStep{
+				ActionId: actionId, Status: STEP_STATUS_RUNNING,
+				TriggeredBy: user,
+				TriggeredAt: time.Now(),
+			}).Error; err != nil {
+				db.Conn().Model(&step).Updates(&db.ImportStep{Status: STEP_STATUS_ERROR})
+				db.Conn().Create(&db.ExecutionLog{JobId: step.JobId, StepId: step.ID, Sequence: step.Sequence, StepType: step.Type, Log: fmt.Sprintf("DB err during updating execution status of step %d", step.ID)})
+				return
+			}
 		}
-		// import job triggerred, update step status and trigger info, record actionId
-		if err := db.Conn().Model(&step).Updates(db.ImportStep{
-			ActionId: actionId, Status: STEP_STATUS_RUNNING,
-			TriggeredBy: user,
-			TriggeredAt: time.Now(),
-		}).Error; err != nil {
-			db.Conn().Model(&step).Updates(&db.ImportStep{Status: STEP_STATUS_ERROR})
-			db.Conn().Create(&db.ExecutionLog{JobId: step.JobId, StepId: step.ID, Sequence: step.Sequence, StepType: step.Type, Log: fmt.Sprintf("DB err during updating execution status of step %d", step.ID)})
-			return
-		}
+
 		// check import status of the step. if it is running, sleep 5 seconds and check again
 		for {
 			var status string
@@ -536,9 +540,9 @@ func scheduleImport(stepCh <-chan *db.ImportStep, user string) {
 				continue
 			}
 			// other status like ERROR, SUCCESS, inital, unknown, etc... must return
-			if err != nil || status == STEP_STATUS_ERROR {
-				db.Conn().Model(&db.ImportStep{}).Updates(&db.ImportStep{Status: STEP_STATUS_ERROR})
-				db.Conn().Model(&db.ExecutionLog{}).Create(&db.ExecutionLog{JobId: step.JobId, StepId: step.ID, Sequence: step.Sequence, StepType: step.Type, Log: err.Error()})
+			if err != nil {
+				db.Conn().Model(&step).Updates(&db.ImportStep{Status: STEP_STATUS_ERROR})
+				db.Conn().Create(&db.ExecutionLog{JobId: step.JobId, StepId: step.ID, Sequence: step.Sequence, StepType: step.Type, Log: err.Error()})
 				return
 			}
 			break
