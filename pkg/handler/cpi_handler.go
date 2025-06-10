@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.wdf.sap.corp/maco-mmt/maco-deploy/env"
-	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/cpi"
+	"mmt-delivery/env"
+	"mmt-delivery/pkg/cpi"
 )
 
 var logger = env.Logger()

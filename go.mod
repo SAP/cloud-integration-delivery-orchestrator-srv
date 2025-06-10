@@ -1,4 +1,4 @@
-module github.wdf.sap.corp/maco-mmt/maco-deploy
+module mmt-delivery
 
 go 1.21.3
 

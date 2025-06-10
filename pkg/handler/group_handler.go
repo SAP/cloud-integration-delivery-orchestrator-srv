@@ -2,10 +2,10 @@ package handler
 
 import (
 	"fmt"
+	"mmt-delivery/db"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.wdf.sap.corp/maco-mmt/maco-deploy/db"
 )
 
 func GetTransportGroups(ctx *gin.Context) {

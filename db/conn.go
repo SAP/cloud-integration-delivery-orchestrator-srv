@@ -4,7 +4,8 @@ import (
 	"database/sql"
 	"os"
 
-	"github.wdf.sap.corp/maco-mmt/maco-deploy/env"
+	"mmt-delivery/env"
+
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"moul.io/zapgorm2"

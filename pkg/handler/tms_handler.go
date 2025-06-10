@@ -6,8 +6,8 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
-	"github.wdf.sap.corp/maco-mmt/maco-deploy/db"
-	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/tms"
+	"mmt-delivery/db"
+	"mmt-delivery/pkg/tms"
 )
 
 func GetTmsNodesHandler(ctx *gin.Context) {

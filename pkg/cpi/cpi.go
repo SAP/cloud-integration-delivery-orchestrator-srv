@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.wdf.sap.corp/maco-mmt/maco-deploy/env"
+	"mmt-delivery/env"
 )
 
 var logger = env.Logger()

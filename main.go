@@ -3,10 +3,12 @@ package main
 import (
 	"time"
 
+	"mmt-delivery/env"
+
+	"mmt-delivery/pkg/handler"
+
 	ginzap "github.com/gin-contrib/zap"
 	"github.com/gin-gonic/gin"
-	"github.wdf.sap.corp/maco-mmt/maco-deploy/env"
-	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/handler"
 )
 
 var logger = env.Logger().Desugar()

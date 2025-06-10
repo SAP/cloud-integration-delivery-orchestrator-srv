@@ -10,10 +10,11 @@ import (
 
 	// "time"
 
+	"mmt-delivery/db"
+	"mmt-delivery/pkg/cpi"
+	"mmt-delivery/pkg/tms"
+
 	"github.com/gin-gonic/gin"
-	"github.wdf.sap.corp/maco-mmt/maco-deploy/db"
-	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/cpi"
-	"github.wdf.sap.corp/maco-mmt/maco-deploy/pkg/tms"
 )
 
 // Get job detail with step list, by jobid
