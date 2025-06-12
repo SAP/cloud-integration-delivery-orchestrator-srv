@@ -82,6 +82,7 @@ func NewClient(ctx context.Context, clientID string, clientSecret string, authUr
 	return client, nil
 }
 
+// returns response body as byte array
 func (c *HttpClient) Do(request *HttpRequest) (*[]byte, error) {
 	childCtx, cancel := context.WithCancel(request.Ctx)
 	defer cancel()
@@ -118,7 +119,7 @@ func (c *HttpClient) Do(request *HttpRequest) (*[]byte, error) {
 	respBody, errIOreader := io.ReadAll(resp.Body)
 
 	if errIOreader != nil {
-		logger.Errorf("Error when getting  content from response, the error message is %s", errReq)
+		logger.Errorf("Error when getting content from response, the error message is %s", errReq)
 		return nil, errIOreader
 	}
 	return &respBody, nil

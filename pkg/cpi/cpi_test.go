@@ -5,6 +5,45 @@ import (
 	"testing"
 )
 
+func TestDownloadArtifact(t *testing.T) {
+	ctx := context.Background()
+	client, err := NewClient(ctx, "DEST_CPIAPI_DEV")
+	if err != nil {
+		t.Fatalf("error when authenticating, %v\n  ", err)
+	}
+
+	// Replace with actual artifact ID and version
+	artifactID := "Send_Alert_Notification_for_Internal_Systems"
+	artifactVersion := "1.0.1"
+
+	data, err := client.downloadArtifact(artifactID, artifactVersion)
+	if err != nil {
+		t.Fatalf("error when downloading artifact: %v\n  ", err)
+	}
+
+	if len(*data) == 0 {
+		t.Fatal("downloaded data is empty")
+	}
+	t.Logf("Downloaded artifact data size: %d bytes\n", len(*data))
+}
+
+func TestUploadArtifact(t *testing.T) {
+	ctx := context.Background()
+	client, err := NewClient(ctx, "DEST_CPIAPI_DEV")
+	if err != nil {
+		t.Fatalf("error when authenticating, %v\n  ", err)
+	}
+
+	// Replace with actual artifact ID and version
+	artifactID := "Send_Alert_Notification_for_Internal_Systems"
+	artifactName := "Demo Artifact for mmt-devops CPI delivery"
+	artifactVersion := "1.0.1"
+	packageId := "SAPMaCoforUtilitiesMonitor"
+
+	client.UploadArtifact(artifactID, artifactName, artifactVersion, packageId)
+
+	t.Logf("Artifact %s version %s uploaded successfully\n", artifactID, artifactVersion)
+}
 func TestCPIPackages(t *testing.T) {
 	ctx := context.Background()
 	client, err1 := NewClient(ctx, "")

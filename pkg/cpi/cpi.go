@@ -62,7 +62,7 @@ func (c *CpiClient) GetPackages() ([]CPIPackage, error) {
 
 	respBodyContent, errReq := c.Do(&request)
 	if errReq != nil {
-		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
+		logger.Errorf("Error when getting response content, the error message is %s", errReq)
 		return []CPIPackage{}, errReq
 	}
 
