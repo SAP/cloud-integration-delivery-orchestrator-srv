@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestDownloadArtifact(t *testing.T) {
+func TestSyncArtifactToGit(t *testing.T) {
 	ctx := context.Background()
 	client, err := NewClient(ctx, "DEST_CPIAPI_DEV")
 	if err != nil {
@@ -13,18 +13,13 @@ func TestDownloadArtifact(t *testing.T) {
 	}
 
 	// Replace with actual artifact ID and version
-	artifactID := "Send_Alert_Notification_for_Internal_Systems"
+	artifactID := "Test_Iflow_Delivery"
 	artifactVersion := "1.0.1"
 
-	data, err := client.downloadArtifact(artifactID, artifactVersion)
+	err = client.SyncToGithub(artifactID, artifactVersion, "SAPMaCoforUtilitiesMonitor")
 	if err != nil {
 		t.Fatalf("error when downloading artifact: %v\n  ", err)
 	}
-
-	if len(*data) == 0 {
-		t.Fatal("downloaded data is empty")
-	}
-	t.Logf("Downloaded artifact data size: %d bytes\n", len(*data))
 }
 
 func TestUploadArtifact(t *testing.T) {
@@ -35,7 +30,7 @@ func TestUploadArtifact(t *testing.T) {
 	}
 
 	// Replace with actual artifact ID and version
-	artifactID := "Send_Alert_Notification_for_Internal_Systems"
+	artifactID := "Test_Iflow_Delivery"
 	artifactName := "Demo Artifact for mmt-devops CPI delivery"
 	artifactVersion := "1.0.1"
 	packageId := "SAPMaCoforUtilitiesMonitor"
