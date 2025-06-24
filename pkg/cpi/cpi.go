@@ -155,6 +155,10 @@ type IflowItem struct {
 	PackageID       string      `json:"PackageId"`
 	Name            string      `json:"Name"`
 	Description     string      `json:"Description"`
+	CreatedBy       string      `json:"CreatedBy"`
+	CreatedAt       string      `json:"CreatedAt"`
+	ModifiedBy      string      `json:"ModifiedBy"`
+	ModifiedAt      string      `json:"ModifiedAt"`
 	ArtifactContent interface{} `json:"ArtifactContent"`
 	Configurations  struct {
 		Deferred struct {
@@ -166,6 +170,14 @@ type IflowItem struct {
 			URI string `json:"uri"`
 		} `json:"__deferred"`
 	} `json:"Resources"`
+	Metadata struct {
+		ID          string `json:"id"`
+		URI         string `json:"uri"`
+		Type        string `json:"type"`
+		ContentType string `json:"content_type"`
+		MediaSrc    string `json:"media_src"`
+		EditMedia   string `json:"edit_media"`
+	} `json:"__metadata"`
 }
 
 type PackageIflowsResp struct {
@@ -348,8 +360,20 @@ type ScriptCollectionItem struct {
 	Version         string `json:"Version"`
 	PackageID       string `json:"PackageId"`
 	Name            string `json:"Name"`
+	CreatedBy       string `json:"CreatedBy"`
+	CreatedAt       string `json:"CreatedAt"`
+	ModifiedBy      string `json:"ModifiedBy"`
+	ModifiedAt      string `json:"ModifiedAt"`
 	Description     string `json:"Description"`
 	ArtifactContent string `json:"ArtifactContent"`
+	Metadata        struct {
+		ID          string `json:"id"`
+		URI         string `json:"uri"`
+		Type        string `json:"type"`
+		ContentType string `json:"content_type"`
+		MediaSrc    string `json:"media_src"`
+		EditMedia   string `json:"edit_media"`
+	} `json:"__metadata"`
 }
 type ScriptCollectionsResp struct {
 	D struct {

@@ -56,6 +56,11 @@ func main() {
 		v1Group.DELETE("/transportGroup", handler.DeleteTransportGroup)
 	}
 
+	v2Group := router.Group("/api/v2")
+	{
+		v2Group.POST("/deliver", handler.NativeDeliver)
+	}
+
 	if err := router.Run(":8080"); err != nil {
 		panic(err)
 	}

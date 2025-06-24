@@ -10,6 +10,7 @@ import (
 	"io"
 	"mmt-delivery/env"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
@@ -18,20 +19,21 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	gitobj "github.com/go-git/go-git/v5/plumbing/object"
 	auth "github.com/go-git/go-git/v5/plumbing/transport/http"
+
+	"github.com/google/go-github/v72/github"
 )
 
-var githubRepo *git.Repository
-var githubAuth = &auth.BasicAuth{
+var githubClient *github.Client
+
+var gitRepo *git.Repository
+var gitAuth = &auth.BasicAuth{
 	Username: env.Destinations()["API_GIT_MMT_SCC"].User,
 	Password: env.Destinations()["API_GIT_MMT_SCC"].Password,
 }
-var CPI_BASE_REPO = "mmt-cpi-packages"
+var Cpi_Base_Repo = "mmt-cpi-packages"
+var Artifact_Base_Dir = "./artifacts"
 
-func (c *CpiClient) SyncToGithub(artifactId, artifactVersion, packageID string) error {
-	// download artifact
-	if err := c.downloadArtifact(artifactId, artifactVersion, packageID); err != nil {
-		return err
-	}
+func (c *CpiClient) SyncToGithub(artifactId, artifactVersion, artifactType, packageID, branch, modifiedBy, modifiedAt, comment string) error {
 
 	// Unzip the artifact content, put it to git repo
 	if err := unzipSource(artifactId, artifactVersion, packageID); err != nil {
@@ -39,26 +41,33 @@ func (c *CpiClient) SyncToGithub(artifactId, artifactVersion, packageID string) 
 	}
 
 	// commit changes of artifact, push to github with tag
-	branch := "cpi-mmt-dev" // use btp subdomain as branch name
 	tag := fmt.Sprintf("%s-v%s", artifactId, artifactVersion)
-	artifactType := "IntegrationFlow"
 	commitMessage := fmt.Sprintf(`
+	%s
+	------------------------------
 	Sync Artifact to github.
 	Artifact Type: %s
 	Artifact: %s v%s
 	Package: %s
 	Modified By: %s   Modified At: %s
-	`, artifactType, artifactId, artifactVersion, packageID, "Doug Liu", "???")
+	`, comment, artifactType, artifactId, artifactVersion, packageID, modifiedBy, modifiedAt)
 
-	if err := CommitAndPushChanges(fmt.Sprintf("%s/%s/", packageID, artifactId), tag, branch, commitMessage); err != nil {
+	// https://github.com/go-git/go-git/blob/main/_examples/tag-create-push/main.go
+	// sync to github
+	if err := CommitAndPushChanges(fmt.Sprintf("%s/%s/", packageID, artifactId), tag, branch, modifiedBy, modifiedAt, commitMessage); err != nil {
 		return fmt.Errorf("failed to commit and push changes for artifact %s:%s: %w", artifactId, artifactVersion, err)
 	}
 
-	// TODO: also upload original zip file to github repo
+	// Also upload original zip file to github repo
+	if err := c.PublishToGithubRelease(artifactId, artifactVersion, branch); err != nil {
+		return fmt.Errorf("failed to publish artifact %s:%s to github release: %w", artifactId, artifactVersion, err)
+	}
 	return nil
 
 }
-func (c *CpiClient) downloadArtifact(artifactId, artifactVersion, packageID string) error {
+
+// download artifact zip file, write it to the base directory
+func (c *CpiClient) DownloadArtifact(artifactId, artifactVersion, packageID, artifactType string) error {
 	childCtx, cancel := context.WithCancel(c.Context)
 	defer cancel()
 	// Download the artifact from CPI
@@ -67,13 +76,17 @@ func (c *CpiClient) downloadArtifact(artifactId, artifactVersion, packageID stri
 		Method: http.MethodGet,
 		ApiURL: fmt.Sprintf("%s/IntegrationDesigntimeArtifacts(Id='%s',Version='%s')/$value", c.ApiURL, artifactId, artifactVersion),
 	}
-	artifactContent, err := c.Do(&request)
+	artifactContent, err := c.Do(&request) // zip content
 	if err != nil {
 		return fmt.Errorf("failed to download artifact: %w", err)
 	}
 
 	// Write the artifact content to a file in the base directory
-	artifactFilePath := fmt.Sprintf("%s:%s.zip", artifactId, artifactVersion)
+	if err := os.MkdirAll(Artifact_Base_Dir, os.ModePerm); err != nil {
+		return fmt.Errorf("failed to create artifact directory %s: %w", Artifact_Base_Dir, err)
+	}
+
+	artifactFilePath := fmt.Sprintf("%s/%s:%s.zip", Artifact_Base_Dir, artifactId, artifactVersion)
 	artifactFile, err := os.Create(artifactFilePath)
 	if err != nil {
 		return fmt.Errorf("failed to create artifact file %s: %w", artifactFilePath, err)
@@ -86,20 +99,59 @@ func (c *CpiClient) downloadArtifact(artifactId, artifactVersion, packageID stri
 
 	return nil
 }
-func (c *CpiClient) UploadArtifact(artifactId string, artifactName string, artifactVersion string, packageId string) {
 
-	// Read zip file from disk
-	zipFilePath := fmt.Sprintf("%s:%s.zip", artifactId, artifactVersion)
+// publish artifact to git repository release
+func (c *CpiClient) PublishToGithubRelease(artifactId, artifactVersion, branch string) error {
+	zipFilePath := fmt.Sprintf("%s/%s:%s.zip", Artifact_Base_Dir, artifactId, artifactVersion)
 	zipFile, err := os.Open(zipFilePath)
 	if err != nil {
-		panic(fmt.Errorf("failed to open zip file %s: %w", zipFilePath, err))
+		return fmt.Errorf("failed to open zip file %s: %w", zipFilePath, err)
+	}
+	defer zipFile.Close()
+
+	fileInfo, err := zipFile.Stat()
+	if err != nil {
+		return fmt.Errorf("failed to get file info for %s: %w", zipFilePath, err)
+	}
+
+	release, _, err := githubClient.Repositories.CreateRelease(c.Context, "MaCo-MMT", Cpi_Base_Repo, &github.RepositoryRelease{
+		TagName:         github.String(fmt.Sprintf("%s-v%s", artifactId, artifactVersion)),
+		Name:            github.String(fmt.Sprintf("%s v%s", artifactId, artifactVersion)),
+		Body:            github.String(fmt.Sprintf("Artifact %s:%s\nUploaded by MMT DevOps", artifactId, artifactVersion)),
+		Draft:           github.Bool(false),
+		Prerelease:      github.Bool(false),
+		TargetCommitish: github.String(branch), // or the branch you want to target
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create release: %w", err)
+	}
+
+	_, _, err = githubClient.Repositories.UploadReleaseAsset(c.Context, "MaCo-MMT", Cpi_Base_Repo, release.GetID(), &github.UploadOptions{
+		Name:  fileInfo.Name(),
+		Label: fmt.Sprintf("Artifact %s:%s", artifactId, artifactVersion),
+	}, zipFile)
+	if err != nil {
+		return fmt.Errorf("failed to upload release asset: %w", err)
+	}
+
+	return nil
+}
+
+// upload artifact zip file to respective tenant
+func (c *CpiClient) UploadArtifact(artifactId string, artifactName string, artifactVersion string, packageId string) error {
+
+	// Read zip file from disk
+	zipFilePath := fmt.Sprintf("%s/%s:%s.zip", Artifact_Base_Dir, artifactId, artifactVersion)
+	zipFile, err := os.Open(zipFilePath)
+	if err != nil {
+		return fmt.Errorf("failed to open zip file %s: %w", zipFilePath, err)
 	}
 	defer zipFile.Close()
 
 	// Read the file content into a buffer
 	zipBuffer := new(bytes.Buffer)
 	if _, err := io.Copy(zipBuffer, zipFile); err != nil {
-		panic(fmt.Errorf("failed to read zip file %s: %w", zipFilePath, err))
+		return fmt.Errorf("failed to read zip file %s: %w", zipFilePath, err)
 	}
 	// Encode zipBuffer with base64
 	encodedZipBuffer := base64.StdEncoding.EncodeToString(zipBuffer.Bytes())
@@ -115,7 +167,7 @@ func (c *CpiClient) UploadArtifact(artifactId string, artifactName string, artif
 	// Encode payload to JSON
 	requestBody, err := json.Marshal(payload)
 	if err != nil {
-		panic(fmt.Errorf("failed to marshal payload: %w", err))
+		return fmt.Errorf("failed to marshal payload: %w", err)
 	}
 	request := env.HttpRequest{
 		Ctx:         c.Context,
@@ -125,9 +177,10 @@ func (c *CpiClient) UploadArtifact(artifactId string, artifactName string, artif
 	}
 	response, err := c.Do(&request)
 	if err != nil {
-		logger.Errorf("error while uploading artifact: %s", err)
+		return fmt.Errorf("error while uploading artifact: %s", err)
 	}
 	logger.Infof("Artifact %s:%s uploaded successfully, response: %s", artifactId, artifactVersion, string(*response))
+	return nil
 }
 
 func zipSource(source, target string) (*bytes.Buffer, error) {
@@ -181,8 +234,9 @@ func zipSource(source, target string) (*bytes.Buffer, error) {
 	})
 }
 
+// unzip Artifact zip file, write it to respective package directory
 func unzipSource(artifactId, artifactVersion, packageId string) error {
-	source := fmt.Sprintf("%s:%s.zip", artifactId, artifactVersion) // zip artifact file path
+	source := fmt.Sprintf("%s/%s:%s.zip", Artifact_Base_Dir, artifactId, artifactVersion) // zip artifact file path
 	zipReader, err := zip.OpenReader(source)
 	if err != nil {
 		return fmt.Errorf("failed to open zip file %s: %w", source, err)
@@ -190,7 +244,7 @@ func unzipSource(artifactId, artifactVersion, packageId string) error {
 
 	// Write files to the current directory
 	for _, zippedFile := range zipReader.File {
-		artifactBaseDir := fmt.Sprintf("%s/%s/%s", CPI_BASE_REPO, packageId, artifactId)
+		artifactBaseDir := fmt.Sprintf("%s/%s/%s", Cpi_Base_Repo, packageId, artifactId)
 		targetPath := filepath.Join(artifactBaseDir, zippedFile.Name)
 
 		// Create directories if necessary
@@ -229,34 +283,44 @@ func unzipSource(artifactId, artifactVersion, packageId string) error {
 
 func init() {
 	if _, err := os.Stat("./mmt-cpi-packages/"); os.IsNotExist(err) {
-		githubRepo, err = git.PlainClone("./mmt-cpi-packages/", false, &git.CloneOptions{
+		gitRepo, err = git.PlainClone("./mmt-cpi-packages/", false, &git.CloneOptions{
 			URL:      "https://github.wdf.sap.corp/MaCo-MMT/mmt-cpi-packages",
 			Progress: os.Stdout,
-			Auth:     githubAuth,
+			Auth:     gitAuth,
 		})
 		if err != nil {
-			logger.Errorf("error when cloning git repo: %v", err)
-			return
+			panic(fmt.Errorf("error when cloning git repo: %w", err))
 		}
 	} else {
-		githubRepo, err = git.PlainOpen("./mmt-cpi-packages/")
+		gitRepo, err = git.PlainOpen("./mmt-cpi-packages/") // open existing git repo
 		if err != nil {
-			logger.Errorf("error when opening git repo: %v", err)
-			return
+			panic(fmt.Errorf("error when opening git repo: %w", err))
 		}
 	}
+
+	tp := github.BasicAuthTransport{
+		Username: env.Destinations()["API_GIT_MMT_SCC"].User,
+		Password: env.Destinations()["API_GIT_MMT_SCC"].Password,
+	}
+	// https://github.wdf.sap.corp/api/v3
+	githubClient = github.NewClient(tp.Client())
+	baseURL, err := url.Parse("https://github.wdf.sap.corp" + "/api/v3/")
+	if err != nil {
+		panic(fmt.Errorf("invalid URL in API_GIT_MMT_SCC destination: %w", err))
+	}
+	githubClient.BaseURL = baseURL
 }
 
-func CommitAndPushChanges(path string, tag string, branch, commitMessage string) error {
-
-	worktree, err := githubRepo.Worktree()
+// path: relative path of artifact from package directory
+func CommitAndPushChanges(path string, tag string, branch, modifiedBy, modifiedAt, commitMessage string) error {
+	worktree, err := gitRepo.Worktree()
 	if err != nil {
 		return fmt.Errorf("failed to get worktree: %w", err)
 	}
 
 	// checkout to cpi instance corresponding branch
 	branchRef := plumbing.NewBranchReferenceName(branch)
-	_, err = githubRepo.Reference(branchRef, true)
+	_, err = gitRepo.Reference(branchRef, true)
 	if err == plumbing.ErrReferenceNotFound {
 		if err := worktree.Checkout(&git.CheckoutOptions{
 			Branch: branchRef,
@@ -269,16 +333,14 @@ func CommitAndPushChanges(path string, tag string, branch, commitMessage string)
 		return fmt.Errorf("failed to check branch existence: %w", err)
 	}
 	// If the branch exists, checkout to it
-	if err == nil {
-		if err := worktree.Checkout(&git.CheckoutOptions{
-			Branch: branchRef,
-			Keep:   true,
-		}); err != nil {
-			return fmt.Errorf("failed to checkout branch %s: %w", branch, err)
-		}
+	if err := worktree.Checkout(&git.CheckoutOptions{
+		Branch: branchRef,
+		Keep:   true,
+	}); err != nil {
+		return fmt.Errorf("failed to checkout branch %s: %w", branch, err)
 	}
 
-	// Add all changes
+	//
 	if err := worktree.AddWithOptions(&git.AddOptions{
 		// All:  true,
 		Path: path,
@@ -290,24 +352,25 @@ func CommitAndPushChanges(path string, tag string, branch, commitMessage string)
 	var commitId plumbing.Hash
 	if commitId, err = worktree.Commit(commitMessage, &git.CommitOptions{
 		Author: &gitobj.Signature{
-			Name:  "Doug Liu",
-			Email: "doug.liu@sap.com",
+			Name:  modifiedBy,
+			Email: modifiedBy,
 			When:  time.Now(),
 		},
 	}); err != nil {
 		return fmt.Errorf("failed to commit changes: %w", err)
 	}
 
-	if _, err = githubRepo.CreateTag(tag, commitId, &git.CreateTagOptions{
+	if _, err = gitRepo.CreateTag(tag, commitId, &git.CreateTagOptions{
 		Message: "tag is :" + tag,
 	}); err != nil {
 		return fmt.Errorf("failed to create tag %s: %w", tag, err)
 	}
 
 	// Push the changes
-	if err := githubRepo.Push(&git.PushOptions{
-		Auth:       githubAuth,
+	if err := gitRepo.Push(&git.PushOptions{
+		Auth:       gitAuth,
 		FollowTags: true,
+		Force:      true,
 	}); err != nil {
 		return fmt.Errorf("failed to push changes: %w", err)
 	}
