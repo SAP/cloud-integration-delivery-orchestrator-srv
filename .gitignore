@@ -4,3 +4,4 @@ coverage.txt
 .env
 *.json
 __debug_bin4272947576
+artifacts/
