@@ -96,3 +96,16 @@ GET http://127.0.0.1:8080/api/v1/job/Deploy
 ###
 GET http://127.0.0.1:8080/api/v1/parse
 X-User-Email: doug.liu@sap.com
+
+
+###
+POST http://127.0.0.1:8080/api/v2/deliver
+X-User-Email: doug.liu@sap.com
+
+{
+    "artifact_id": "Test_Iflow_Delivery",
+    "artifacrt_version": "1.0.6",
+    "artifact_type": "IntegrationFlow",
+    "cpi_tenant": "DEST_CPIAPI_DEV",
+    "deliver_comment": "JIRA-123: Initial delivery of artifact"
+}

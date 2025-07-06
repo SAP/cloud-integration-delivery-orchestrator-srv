@@ -33,6 +33,36 @@ var gitAuth = &auth.BasicAuth{
 var Cpi_Base_Repo = "mmt-cpi-packages"
 var Artifact_Base_Dir = "./artifacts"
 
+func init() {
+	if _, err := os.Stat("./mmt-cpi-packages/"); os.IsNotExist(err) {
+		gitRepo, err = git.PlainClone("./mmt-cpi-packages/", false, &git.CloneOptions{
+			URL:      "https://github.wdf.sap.corp/MaCo-MMT/mmt-cpi-packages",
+			Progress: os.Stdout,
+			Auth:     gitAuth,
+		})
+		if err != nil {
+			panic(fmt.Errorf("error when cloning git repo: %w", err))
+		}
+	} else {
+		gitRepo, err = git.PlainOpen("./mmt-cpi-packages/") // open existing git repo
+		if err != nil {
+			panic(fmt.Errorf("error when opening git repo: %w", err))
+		}
+	}
+
+	tp := github.BasicAuthTransport{
+		Username: env.Destinations()["API_GIT_MMT_SCC"].User,
+		Password: env.Destinations()["API_GIT_MMT_SCC"].Password,
+	}
+	// https://github.wdf.sap.corp/api/v3
+	githubClient = github.NewClient(tp.Client())
+	baseURL, err := url.Parse("https://github.wdf.sap.corp" + "/api/v3/")
+	if err != nil {
+		panic(fmt.Errorf("invalid URL in API_GIT_MMT_SCC destination: %w", err))
+	}
+	githubClient.BaseURL = baseURL
+}
+
 func (c *CpiClient) SyncToGithub(artifactId, artifactVersion, artifactType, packageID, branch, modifiedBy, modifiedAt, comment string) error {
 
 	// Unzip the artifact content, put it to git repo
@@ -58,10 +88,6 @@ func (c *CpiClient) SyncToGithub(artifactId, artifactVersion, artifactType, pack
 		return fmt.Errorf("failed to commit and push changes for artifact %s:%s: %w", artifactId, artifactVersion, err)
 	}
 
-	// Also upload original zip file to github repo
-	if err := c.PublishToGithubRelease(artifactId, artifactVersion, branch); err != nil {
-		return fmt.Errorf("failed to publish artifact %s:%s to github release: %w", artifactId, artifactVersion, err)
-	}
 	return nil
 
 }
@@ -100,6 +126,7 @@ func (c *CpiClient) DownloadArtifact(artifactId, artifactVersion, packageID, art
 	return nil
 }
 
+// ABORT this feature, use sap JFrog instead. Currently cannot publish to github release, seems premission issue, also release asset is not applicable in this scenario.
 // publish artifact to git repository release
 func (c *CpiClient) PublishToGithubRelease(artifactId, artifactVersion, branch string) error {
 	zipFilePath := fmt.Sprintf("%s/%s:%s.zip", Artifact_Base_Dir, artifactId, artifactVersion)
@@ -279,36 +306,6 @@ func unzipSource(artifactId, artifactVersion, packageId string) error {
 		}
 	}
 	return nil
-}
-
-func init() {
-	if _, err := os.Stat("./mmt-cpi-packages/"); os.IsNotExist(err) {
-		gitRepo, err = git.PlainClone("./mmt-cpi-packages/", false, &git.CloneOptions{
-			URL:      "https://github.wdf.sap.corp/MaCo-MMT/mmt-cpi-packages",
-			Progress: os.Stdout,
-			Auth:     gitAuth,
-		})
-		if err != nil {
-			panic(fmt.Errorf("error when cloning git repo: %w", err))
-		}
-	} else {
-		gitRepo, err = git.PlainOpen("./mmt-cpi-packages/") // open existing git repo
-		if err != nil {
-			panic(fmt.Errorf("error when opening git repo: %w", err))
-		}
-	}
-
-	tp := github.BasicAuthTransport{
-		Username: env.Destinations()["API_GIT_MMT_SCC"].User,
-		Password: env.Destinations()["API_GIT_MMT_SCC"].Password,
-	}
-	// https://github.wdf.sap.corp/api/v3
-	githubClient = github.NewClient(tp.Client())
-	baseURL, err := url.Parse("https://github.wdf.sap.corp" + "/api/v3/")
-	if err != nil {
-		panic(fmt.Errorf("invalid URL in API_GIT_MMT_SCC destination: %w", err))
-	}
-	githubClient.BaseURL = baseURL
 }
 
 // path: relative path of artifact from package directory

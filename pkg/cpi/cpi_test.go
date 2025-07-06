@@ -16,7 +16,7 @@ func TestSyncArtifactToGit(t *testing.T) {
 	artifactID := "Test_Iflow_Delivery"
 	artifactVersion := "1.0.1"
 
-	err = client.SyncToGithub(artifactID, artifactVersion, "SAPMaCoforUtilitiesMonitor")
+	err = client.SyncToGithub(artifactID, artifactVersion, "IntegrationFlow", "SAPMaCoforUtilitiesMonitor", "cpi-mmt-dev", "testuser", "2023-10-01T12:00:00Z", "commnet")
 	if err != nil {
 		t.Fatalf("error when downloading artifact: %v\n  ", err)
 	}
