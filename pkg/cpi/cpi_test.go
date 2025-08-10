@@ -79,7 +79,7 @@ func TestCPIPackages(t *testing.T) {
 		}
 
 		for _, scriptCollection := range scriptCollections {
-			scriptCollectionInfo, err7 := client.GetScriptCollection(scriptCollection.ID, scriptCollection.PackageID)
+			scriptCollectionInfo, err7 := client.GetDesignTimeScriptCollection(scriptCollection.ID, scriptCollection.PackageID)
 			if err7 != nil {
 				t.Fatalf("error when getting script collections %s info, %v\n  ", scriptCollectionInfo.ID, err7)
 			}

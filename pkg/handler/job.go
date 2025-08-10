@@ -594,7 +594,7 @@ func updateDeployStepStatus(ctx context.Context, step *db.DeployStep) (string, e
 		if step.Type == Step_Type_Undeploy {
 			status, err = cpiClient.CheckUndeployStatus(artifact.TaskId)
 		} else if step.Type == Step_Type_Deploy {
-			status, err = cpiClient.CheckDeployStatus(artifact.TaskId)
+			status, err = cpiClient.CheckDeployStatusByTaskID(artifact.TaskId)
 		}
 		if err != nil {
 			return "", fmt.Errorf("error while checking status of step %d, type: %s, artifactId: %s, taskId: %s: %s", step.ID, step.Type, artifact.Id, artifact.TaskId, err)

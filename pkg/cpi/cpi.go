@@ -248,7 +248,8 @@ func (c *CpiClient) GetPackageIflow(packageID string, iflowID string, iflowVersi
 	return iflowResp.D, nil
 }
 
-func (c *CpiClient) GetIflow(iflowID string, iflowVersion string) (IflowItem, error) {
+// Get a design time integration flow by Id and version.
+func (c *CpiClient) GetDesignTimeIflow(iflowID string, iflowVersion string) (IflowItem, error) {
 	childCtx, cancel := context.WithCancel(c.Context)
 	defer cancel()
 
@@ -310,7 +311,8 @@ type DeployStatus struct {
 }
 
 // Success, Fail, Deploying, Fail_On_License_Error
-func (c *CpiClient) CheckDeployStatus(taskID string) (string, error) {
+// Note: this API is not stable, since occasionally it returns DEPLOYING though the artifact has been deployed successfully.
+func (c *CpiClient) CheckDeployStatusByTaskID(taskID string) (string, error) {
 	childCtx, cancel := context.WithCancel(c.Context)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/BuildAndDeployStatus(TaskId='%s')", c.ApiURL, taskID)
@@ -413,7 +415,7 @@ type ScriptCollectionResp struct {
 }
 
 // get a design time script collection
-func (c *CpiClient) GetScriptCollection(scriptCollectionID string, scriptCollectionVersion string) (ScriptCollectionItem, error) {
+func (c *CpiClient) GetDesignTimeScriptCollection(scriptCollectionID string, scriptCollectionVersion string) (ScriptCollectionItem, error) {
 	childCtx, cancel := context.WithCancel(c.Context)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/ScriptCollectionDesigntimeArtifacts(Id='%s',Version='%s')", c.ApiURL, scriptCollectionID, scriptCollectionVersion)
@@ -566,4 +568,23 @@ func (c *CpiClient) CheckUndeployStatus(artifactId string) (string, error) {
 	}
 	logger.Warnf("artifact %s is still in runtime", artifactId)
 	return "UNDEPLOYING", nil
+}
+
+func (c *CpiClient) GetRuntimeArtifactById(artifactId string) (RuntimeArtifact, error) {
+	fullUrl := fmt.Sprintf("%s/IntegrationRuntimeArtifacts('%s')", c.ApiURL, artifactId)
+	logger.Infof("Starting to get runtime artifact %s on tenant %s\n", artifactId, fullUrl)
+	request := env.HttpRequest{
+		Ctx:    c.Context,
+		Method: http.MethodGet,
+		ApiURL: fullUrl,
+	}
+	response, err := c.Do(&request)
+	if err != nil {
+		return RuntimeArtifact{}, fmt.Errorf("failed to get runtime artifact from %s: %s", fullUrl, err)
+	}
+	var runtimeArtifact RuntimeArtifact
+	if err := json.Unmarshal(*response, &runtimeArtifact); err != nil {
+		return RuntimeArtifact{}, fmt.Errorf("failed to unmarshal response: %s", err)
+	}
+	return runtimeArtifact, nil
 }

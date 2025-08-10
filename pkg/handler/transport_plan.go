@@ -227,7 +227,7 @@ func checkArtifacts(ctx context.Context, tenant string, artifacts []db.Artifact)
 				return fmt.Errorf("integration iflow %s not found in tenant %s: %s", artifact.Id, tenant, err)
 			}
 		} else if artifact.Type == Artifact_Type_Sc {
-			if _, err := cpiClient.GetScriptCollection(artifact.Id, artifact.Version); err != nil {
+			if _, err := cpiClient.GetDesignTimeScriptCollection(artifact.Id, artifact.Version); err != nil {
 				return fmt.Errorf("script collection artifact %s not found in tenant %s: %s", artifact.Id, tenant, err)
 			}
 		}
