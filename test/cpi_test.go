@@ -1,13 +1,14 @@
-package cpi
+package test
 
 import (
 	"context"
+	"mmt-delivery/pkg/cpi"
 	"testing"
 )
 
 func TestSyncArtifactToGit(t *testing.T) {
 	ctx := context.Background()
-	client, err := NewClient(ctx, "DEST_CPIAPI_DEV")
+	client, err := cpi.NewClient(ctx, "DEST_CPIAPI_DEV")
 	if err != nil {
 		t.Fatalf("error when authenticating, %v\n  ", err)
 	}
@@ -24,7 +25,7 @@ func TestSyncArtifactToGit(t *testing.T) {
 
 func TestUploadArtifact(t *testing.T) {
 	ctx := context.Background()
-	client, err := NewClient(ctx, "DEST_CPIAPI_DEV")
+	client, err := cpi.NewClient(ctx, "DEST_CPIAPI_DEV")
 	if err != nil {
 		t.Fatalf("error when authenticating, %v\n  ", err)
 	}
@@ -41,7 +42,7 @@ func TestUploadArtifact(t *testing.T) {
 }
 func TestCPIPackages(t *testing.T) {
 	ctx := context.Background()
-	client, err1 := NewClient(ctx, "")
+	client, err1 := cpi.NewClient(ctx, "")
 	if err1 != nil {
 		t.Fatalf("error when authenticating, %v\n  ", err1)
 	}

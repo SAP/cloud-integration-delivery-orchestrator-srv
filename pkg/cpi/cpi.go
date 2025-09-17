@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"mmt-delivery/env"
+	"mmt-delivery/pkg/env"
 )
 
 var logger = env.Logger()

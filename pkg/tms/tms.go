@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"mmt-delivery/env"
+	"mmt-delivery/pkg/env"
 )
 
 var logger = env.Logger()

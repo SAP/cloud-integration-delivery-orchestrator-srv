@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"mmt-delivery/env"
+	"mmt-delivery/pkg/env"
 	"mmt-delivery/pkg/cpi"
 )
 

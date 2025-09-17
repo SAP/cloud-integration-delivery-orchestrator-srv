@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"os"
 
-	"mmt-delivery/env"
+	"mmt-delivery/pkg/env"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"

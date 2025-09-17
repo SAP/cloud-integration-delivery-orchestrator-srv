@@ -1,13 +1,14 @@
-package tms
+package test
 
 import (
 	"context"
 	"testing"
+	"mmt-delivery/pkg/tms"
 )
 
 func TestTms(t *testing.T) {
 	ctx := context.Background()
-	tmsClient, err1 := NewClient(ctx)
+	tmsClient, err1 := tms.NewClient(ctx)
 	if err1 != nil {
 		t.Fatalf("Error when creating tms client, error message %s", err1)
 	}

@@ -3,9 +3,9 @@ package main
 import (
 	"time"
 
-	"mmt-delivery/env"
+	"mmt-delivery/pkg/env"
 
-	"mmt-delivery/pkg/handler"
+	"mmt-delivery/handler"
 
 	ginzap "github.com/gin-contrib/zap"
 	"github.com/gin-gonic/gin"
