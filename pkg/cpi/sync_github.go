@@ -33,7 +33,8 @@ var gitAuth = &auth.BasicAuth{
 var Cpi_Base_Repo = "mmt-cpi-packages"
 var Artifact_Base_Dir = "./artifacts"
 
-func init() {
+// temporarily disable github sync
+func init_disable() {
 	if _, err := os.Stat("./mmt-cpi-packages/"); os.IsNotExist(err) {
 		gitRepo, err = git.PlainClone("./mmt-cpi-packages/", false, &git.CloneOptions{
 			URL:      "https://github.wdf.sap.corp/MaCo-MMT/mmt-cpi-packages",
@@ -126,7 +127,8 @@ func (c *CpiClient) DownloadArtifact(artifactId, artifactVersion, packageID, art
 	return nil
 }
 
-// ABORT this feature, use sap JFrog instead. Currently cannot publish to github release, seems premission issue, also release asset is not applicable in this scenario.
+// ABORT this feature
+//  use sap JFrog instead. Currently cannot publish to github release, seems premission issue, also release asset is not applicable in this scenario.
 // publish artifact to git repository release
 func (c *CpiClient) PublishToGithubRelease(artifactId, artifactVersion, branch string) error {
 	zipFilePath := fmt.Sprintf("%s/%s:%s.zip", Artifact_Base_Dir, artifactId, artifactVersion)

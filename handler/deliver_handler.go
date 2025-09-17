@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -91,17 +92,18 @@ func NativeDeliver(ctx *gin.Context) {
 			// TODO: deploy the artifact by artifact type
 
 			// TODO: loop for aroud 5 times to check deploy status
-			for {
+			for i := 0; i < 5; i++ {
 				runtimeArtifact, err := destClient.GetRuntimeArtifactById(artifact.ArtifactID)
 				if err != nil {
 					ctx.JSON(500, gin.H{"error": "Failed to check deploy status on destination tenant: " + err.Error()})
 					return
 				}
-				if runtimeArtifact.ID == "" {
-					continue // not deployed yet, wait for a while
-				}
-				if runtimeArtifact.Status == "STARTED" {
+				if runtimeArtifact.ID != "" && runtimeArtifact.Status == "STARTED" {
 					break // deployed successfully
+				}
+				if i < 4 {
+					// sleep 10 seconds before next check
+					time.Sleep(10 * time.Second)
 				}
 			}
 
