@@ -117,3 +117,29 @@ type TransportGroup struct {
 	TransportNodes  []TransportNode `gorm:"serializer:json"` // tms node ids
 	DeployEndpoints pq.StringArray  `gorm:"type:varchar[]"`  // CPI deploy endpoints
 }
+
+// bind cpi tenant with tms node
+type CpiTenant struct {
+	gorm.Model
+	Name          string `gorm:"uniqueIndex"` // cpi-mmt-dev, cpi-ci, may use cpi tenant domain
+	CreatedBy     string
+	UpdatedBy     string
+	TmsNode       string // tms node name
+	TmsNodeNunber int    // tms node id
+	TmsEndpoint   string
+	CpiEndpoint   string
+}
+
+type DeliveryRule struct {
+	gorm.Model
+	Name            string
+	VersionPattern  string
+
+	// Associations to CpiTenant
+	IncludedTenants []CpiTenant `gorm:"serializer:json;"` // included CPI tenants
+	ExcludedTenants []CpiTenant `gorm:"serializer:json;"` // excluded CPI tenants
+
+	Active    bool
+	CreatedBy string
+	UpdatedBy string
+}
