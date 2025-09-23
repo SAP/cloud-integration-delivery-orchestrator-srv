@@ -42,15 +42,14 @@ type TmsClient struct {
 
 func NewClient(ctx context.Context) (*TmsClient, error) {
 	v := env.TmsCredential()
-	apiUrl := fmt.Sprintf("%s/v2", v.ApiUrl)
-	client, err := env.NewClient(ctx, v.Clientid, v.Clientsecret, v.AuthUrl, apiUrl)
+	client, err := env.NewClient(ctx, v.Clientid, v.Clientsecret, v.AuthUrl, v.ApiUrl)
 	return &TmsClient{*client}, err
 }
 
 func (t *TmsClient) GetNodes() ([]TMSNode, error) {
 	childCtx, cancel := context.WithCancel(t.Context)
 	defer cancel()
-	fullURL := fmt.Sprintf("%s/nodes", t.ApiURL)
+	fullURL := fmt.Sprintf("%s/v2/nodes", t.ApiURL)
 	logger.Infof("Starting to get all tms nodes from %s\n", fullURL)
 	request := env.HttpRequest{
 		Ctx:    childCtx,
@@ -95,7 +94,7 @@ func (t *TmsClient) GetNode(nodeID int) (TMSNode, error) {
 	childCtx, cancel := context.WithCancel(t.Context)
 	defer cancel()
 
-	fullURL := fmt.Sprintf("%s/nodes/%d", t.ApiURL, nodeID)
+	fullURL := fmt.Sprintf("%s/v2/nodes/%d", t.ApiURL, nodeID)
 	logger.Infof("Starting to get tms node from  %s\n", fullURL)
 	request := env.HttpRequest{
 		Ctx:    childCtx,
@@ -130,6 +129,42 @@ func (t *TmsClient) GetNodeName(nodeID int) string {
 
 	return nodeName
 }
+type TMSRoute struct {
+	ID           int    `json:"id"`
+	Description  string `json:"description"`
+	Name         string `json:"name"`
+	SourceNodeID int    `json:"sourceNodeId"`
+	TargetNodeID int    `json:"targetNodeId"`
+}
+
+type TMSRoutesResp struct {
+	Routes []TMSRoute `json:"routes"`
+}
+
+func (t *TmsClient) GetRoutes() ([]TMSRoute, error) {
+	childCtx, cancel := context.WithCancel(t.Context)
+	defer cancel()
+	fullURL := fmt.Sprintf("%s/v2/routes", t.ApiURL)
+	logger.Infof("Starting to get all tms routes from %s\n", fullURL)
+	request := env.HttpRequest{
+		Ctx:    childCtx,
+		ApiURL: fullURL,
+		Method: http.MethodGet,
+	}
+	respBodyContent, errReq := t.Do(&request)
+	if errReq != nil {
+		logger.Errorf("Error when getting response content, the error message is %s", errReq)
+		return []TMSRoute{}, errReq
+	}
+
+	var tmsRoutesResp TMSRoutesResp
+	if err := json.Unmarshal(*respBodyContent, &tmsRoutesResp); err != nil {
+		logger.Errorf("Error when unmarshal from json, error message %s", err)
+		return []TMSRoute{}, err
+	}
+	return tmsRoutesResp.Routes, nil
+}
+
 
 type NodeTransportRequest struct {
 	ID                 int       `json:"id"`
@@ -158,7 +193,7 @@ func (t *TmsClient) GetNodeTransportRequests(nodeID int) ([]NodeTransportRequest
 	childCtx, cancel := context.WithCancel(t.Context)
 	defer cancel()
 
-	fullURL := fmt.Sprintf("%s/nodes/%d/transportRequests?status=in,re,er,fa", t.ApiURL, nodeID)
+	fullURL := fmt.Sprintf("%s/v2/nodes/%d/transportRequests?status=in,re,er,fa", t.ApiURL, nodeID)
 	logger.Infof("Starting to get tranport requests for node %s from  %s\n", nodeID, fullURL)
 
 	request := env.HttpRequest{
@@ -196,7 +231,7 @@ func (t *TmsClient) ImportTransportRequest(nodeID uint, transportRequestIDs []in
 	childCtx, cancel := context.WithCancel(t.Context)
 	defer cancel()
 
-	fullURL := fmt.Sprintf("%s/nodes/%d/transportRequests/import", t.ApiURL, nodeID)
+	fullURL := fmt.Sprintf("%s/v2/nodes/%d/transportRequests/import", t.ApiURL, nodeID)
 	var actionID uint
 	requestBodyContent := ReqImportTransportRequests{
 		TransportRequests: transportRequestIDs,
@@ -259,7 +294,7 @@ type ActionResultResp struct {
 func (t *TmsClient) GetActionResult(actionID uint) (string, string, error) {
 	childCtx, cancel := context.WithCancel(t.Context)
 	defer cancel()
-	fullURL := fmt.Sprintf("%s/actions/%d", t.ApiURL, actionID)
+	fullURL := fmt.Sprintf("%s/v2/actions/%d", t.ApiURL, actionID)
 	request := env.HttpRequest{
 		Ctx:    childCtx,
 		ApiURL: fullURL,
@@ -311,7 +346,7 @@ func (t *TmsClient) GetActionResultLog(actionID uint) (ActionLogResp, error) {
 
 	childCtx, cancel := context.WithCancel(t.Context)
 	defer cancel()
-	fullURL := fmt.Sprintf("%s/actions/%d/logs", t.ApiURL, actionID)
+	fullURL := fmt.Sprintf("%s/v2/actions/%d/logs", t.ApiURL, actionID)
 	request := env.HttpRequest{
 		Ctx:    childCtx,
 		ApiURL: fullURL,
