@@ -153,7 +153,7 @@ func (t *TmsClient) GetRoutes() ([]TMSRoute, error) {
 	}
 	respBodyContent, errReq := t.Do(&request)
 	if errReq != nil {
-		logger.Errorf("Error when getting response content, the error message is %s", errReq)
+		logger.Errorf("Error when getting response content of tms routes, the error message is %s", errReq)
 		return []TMSRoute{}, errReq
 	}
 
