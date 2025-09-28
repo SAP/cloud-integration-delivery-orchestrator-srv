@@ -61,6 +61,7 @@ type ArtifactResp struct {
 }
 
 // include type: script collection, iflow artifacts
+// TODO: may call cpi-cookie-service to get all artifacts in one call
 func GetPackageArtifactsHandler(ctx *gin.Context) {
 	cpi_tenant := ctx.Query("tenant")
 	packageID := ctx.Query("package")

@@ -54,7 +54,7 @@ func GetTranportRequestsHandler(ctx *gin.Context) {
 		logger.Error(error)
 		return
 	}
-	trs, error := tmsClient.GetNodeTransportRequests(nodeId)
+	trs, error := tmsClient.GetNodeTransportRequests(uint(nodeId))
 	trResp := make([]db.TransportRequest, len(trs))
 	for i := range trs {
 		trResp[i] = db.TransportRequest{

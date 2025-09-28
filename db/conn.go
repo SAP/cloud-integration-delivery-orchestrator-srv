@@ -38,7 +38,7 @@ func init() {
 	if err != nil {
 		panic("failed to connect database" + err.Error())
 	}
-	db.AutoMigrate(&Job{}, &ImportStep{}, &DeployStep{}, &ExecutionLog{}, &TransportPlan{}, &TransportGroup{}, &CpiTenant{}, &DeliveryRule{})
+	db.AutoMigrate(&Job{}, &ImportStep{}, &DeployStep{}, &ExecutionLog{}, &TransportPlan{}, &TransportGroup{}, &CpiTenant{}, &DeliveryRule{}, &DeliveryRequest{})
 }
 
 var db *gorm.DB

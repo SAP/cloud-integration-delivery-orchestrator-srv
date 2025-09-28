@@ -35,9 +35,10 @@ func main() {
 		v1Group.GET("/tanant/packages", handler.GetPackagesHandler)                   //get all packages under a tenant
 		v1Group.GET("/tenant/packages/artifacts", handler.GetPackageArtifactsHandler) // get all iflows under a package
 		v1Group.GET("/tenant/runtime", handler.GetRuntimeArtifacts)                   // get all runtime artifacts under a tenant
-
+		// tms
 		v1Group.GET("/tms/nodes", handler.GetTmsNodesHandler)
 		v1Group.GET("/tms/trs", handler.GetTranportRequestsHandler)
+		v1Group.GET("/tms/routes", handler.GetRoutesHandler)
 
 		v1Group.DELETE("/step", handler.DeleteStep)
 
@@ -50,10 +51,26 @@ func main() {
 		v1Group.GET("/transportplan", handler.GetAllTransportPlans)
 		v1Group.POST("/transportplan", handler.SaveTransportPlan)
 		v1Group.DELETE("/transportplan/:id", handler.DeleteTransportPlan)
-
+		// transport group
 		v1Group.GET("/transportGroup", handler.GetTransportGroups)
 		v1Group.POST("/transportGroup", handler.CreateTransportGroup)
 		v1Group.DELETE("/transportGroup", handler.DeleteTransportGroup)
+		// cpi tenant bind
+		v1Group.GET("/cpiTenant", handler.GetCpiTenants)
+		v1Group.GET("/cpiTenant/:id", handler.GetCpiTenant)
+		v1Group.POST("/cpiTenant", handler.UpsertCpiTenant)
+		v1Group.DELETE("/cpiTenant/:id", handler.DeleteCpiTenant)
+		// delivery rule
+		v1Group.GET("/deliveryRule", handler.GetDeliveryRules)
+		v1Group.GET("/deliveryRule/:id", handler.GetDeliveryRule)
+		v1Group.POST("/deliveryRule", handler.UpsertDeliveryRule)
+		v1Group.DELETE("/deliveryRule/:id", handler.DeleteDeliveryRule)
+		// delivery request
+		v1Group.GET("/deliveryRequest", handler.GetDeliveryRequests)
+		v1Group.GET("/deliveryRequest/:id", handler.GetDeliveryRequest)
+		v1Group.POST("/deliveryRequest", handler.UpsertDeliveryRequest)
+		v1Group.DELETE("/deliveryRequest/:id", handler.DeleteDeliveryRequest)
+
 	}
 
 	v2Group := router.Group("/api/v2")

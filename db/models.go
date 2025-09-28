@@ -64,12 +64,18 @@ type ExecutionLog struct {
 
 // Artifact needed to be deployed
 type Artifact struct {
-	Id      string // artifact id
-	Version string
-	Package string
-	Type    string // iflow, scriptCollection
-	Status  string // deploy stask status
-	TaskId  string // task id
+	Id          string // artifact id
+	Version     string
+	PackageId   string
+	Name        string
+	Type        string // iflow, scriptCollection
+	Description string
+	CreatedBy   string
+	CreatedAt   string
+	ModifiedBy  string
+	ModifiedAt  string
+	Status      string // deploy stask status
+	TaskId      string // task id
 }
 
 type TransportRequest struct {
@@ -101,9 +107,31 @@ type TransportPlan struct {
 }
 
 type TransportNode struct {
-	ID          int    `json:"id"`
-	Description string `json:"description"`
-	Name        string `json:"name"`
+	ID                   uint    `json:"id"`
+	Description          string `json:"description"`
+	Name                 string `json:"name"`
+	UploadAllowed        bool   `json:"uploadAllowed"`
+	NotificationEnabled  bool   `json:"notificationEnabled"`
+	ForwardMode          string `json:"forwardMode"`
+	ImportDisabled       bool   `json:"importDisabled"`
+	ImportDisabledReason string `json:"importDisabledReason"`
+	Targets              []struct {
+		ID              int    `json:"id"`
+		ContentType     string `json:"contentType"`
+		DestinationName string `json:"destinationName"`
+		ImportOptions   struct {
+			Strategy string `json:"strategy"`
+		} `json:"importOptions"`
+	} `json:"targets"`
+	Virtual bool `json:"virtual"`
+}
+
+type TransportRoute struct {
+	ID           uint   `json:"id"`
+	Description  string `json:"description"`
+	Name         string `json:"name"`
+	SourceNodeID uint   `json:"sourceNodeId"`
+	TargetNodeID uint   `json:"targetNodeId"`
 }
 
 // import and deploy group
@@ -118,28 +146,56 @@ type TransportGroup struct {
 	DeployEndpoints pq.StringArray  `gorm:"type:varchar[]"`  // CPI deploy endpoints
 }
 
+// ApiEndpoint mirrors the TS interface ApiEndpoint
+type ApiEndpoint struct {
+	gorm.Model
+	Name string `json:"name"`
+	Type string `json:"type"`
+	URL  string `json:"url"`
+}
+
 // bind cpi tenant with tms node
 type CpiTenant struct {
 	gorm.Model
-	Name          string `gorm:"uniqueIndex"` // cpi-mmt-dev, cpi-ci, may use cpi tenant domain
+	Name          string `gorm:"uniqueIndex,where:deleted_at IS NULL"` // grom tag for soft delete issue. cpi-mmt-dev, cpi-ci, may use cpi tenant domain
 	CreatedBy     string
 	UpdatedBy     string
-	TmsNode       string // tms node name
-	TmsNodeNunber int    // tms node id
-	TmsEndpoint   string
-	CpiEndpoint   string
+	TransportNode TransportNode `gorm:"serializer:json"`
+	CpiEndpoint   ApiEndpoint   `gorm:"serializer:json"`
 }
 
 type DeliveryRule struct {
 	gorm.Model
-	Name            string
-	VersionPattern  string
+	Name           string
+	VersionPattern string
 
 	// Associations to CpiTenant
 	IncludedTenants []CpiTenant `gorm:"serializer:json;"` // included CPI tenants
 	ExcludedTenants []CpiTenant `gorm:"serializer:json;"` // excluded CPI tenants
 
 	Active    bool
+	CreatedBy string
+	UpdatedBy string
+}
+
+type DeliveryRequest struct {
+	gorm.Model
+	Name string
+
+	JiraLink string // related Jira ticket URL
+	Status   string // pending, in-progress, completed, failed
+
+	Artifacts []Artifact `gorm:"serializer:json"` // artifacts to deliver
+
+	SourceTenantID *uint      // source cpi tenant id
+	SourceTenant   *CpiTenant `gorm:"foreignKey:SourceTenantID"` // source CPI tenant
+
+	DeliveryRuleID *uint
+	DeliveryRule   *DeliveryRule `gorm:"foreignKey:DeliveryRuleID"` // FK association to delivery_rules table
+
+	TargetNodes  []TransportNode  `gorm:"serializer:json"` // target transport nodes, derived from DeliveryRule
+	TargetRoutes []TransportRoute `gorm:"serializer:json"` // derived transport routes, based on targetNodes and sourceNode
+
 	CreatedBy string
 	UpdatedBy string
 }
