@@ -44,7 +44,7 @@ func UpsertDeliveryRequest(c *gin.Context) {
 			return
 		}
 
-		dr.TargetRoutes, dr.TargetNodes = nodesAndRoutesFromSourceTenant(dr.SourceTenant.TransportNode.ID, transportNodes, transportRoutes)
+		dr.TargetRoutes, dr.TargetNodes = DownstreamfromSource(dr.SourceTenant.TransportNode.ID, transportNodes, transportRoutes)
 		if err := db.Conn().Save(&dr).Error; err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 			return
@@ -55,15 +55,28 @@ func UpsertDeliveryRequest(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": dr})
 }
 
-func nodesAndRoutesFromSourceTenant(sourceNodeID uint, transportNodes []db.TransportNode, transportRoutes []db.TransportRoute) (targetRoutes []db.TransportRoute, targetNodes []db.TransportNode) {
-	sourceNodeIDs := make(map[uint]bool)
-	sourceNodeIDs[sourceNodeID] = true
+// downstream nodes and routes from a source node
+func DownstreamfromSource(sourceNodeID uint, transportNodes []db.TransportNode, transportRoutes []db.TransportRoute) (targetRoutes []db.TransportRoute, targetNodes []db.TransportNode) {
+	routesMap, nodesMap := make(map[uint]db.TransportRoute), make(map[uint]db.TransportNode)
+	for _, route := range transportRoutes {
+		routesMap[route.ID] = route
+	}
+	for _, node := range transportNodes {
+		nodesMap[node.ID] = node
+	}
+	queue := make([]uint, 0)
+	queue = append(queue, sourceNodeID)
+	for len(queue) > 0 {
+		length := len(queue)
+		for range length {
+			currentNodeID := queue[0] // pop
+			queue = queue[1:]
+			if route, exists := routesMap[currentNodeID]; exists {
+				targetRoutes = append(targetRoutes, route)
+				targetNodes = append(targetNodes, nodesMap[route.TargetNodeID])
+				queue = append(queue, route.TargetNodeID)
+			}
 
-	for _, r := range transportRoutes {
-		if sourceNodeIDs[r.SourceNodeID] {
-			targetRoutes = append(targetRoutes, r)
-			targetNodes = append(targetNodes, transportNodes[r.TargetNodeID])
-			sourceNodeIDs[r.TargetNodeID] = true
 		}
 	}
 	return
