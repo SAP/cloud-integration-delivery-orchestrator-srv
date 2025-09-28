@@ -107,7 +107,7 @@ type TransportPlan struct {
 }
 
 type TransportNode struct {
-	ID                   uint    `json:"id"`
+	ID                   uint   `json:"id"`
 	Description          string `json:"description"`
 	Name                 string `json:"name"`
 	UploadAllowed        bool   `json:"uploadAllowed"`

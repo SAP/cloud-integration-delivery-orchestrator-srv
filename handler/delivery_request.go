@@ -38,30 +38,13 @@ func UpsertDeliveryRequest(c *gin.Context) {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": error.Error()})
 			return
 		}
-		nodes, error := tmsClient.GetNodes()
+		transportNodes, error := tmsClient.GetNodes()
 		if error != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": error.Error()})
 			return
 		}
-		
-		transportNodes := make(map[uint]db.TransportNode)
-		for _, n := range nodes {
-			transportNodes[n.ID] = n
-		}
 
-		//
-		targetRoutes := []db.TransportRoute{}
-		targetNodes := []db.TransportNode{}
-		sourceNodeIDs := make(map[uint]bool)
-		sourceNodeIDs[dr.SourceTenant.TransportNode.ID] = true
-		for _, r := range transportRoutes {
-			if sourceNodeIDs[r.SourceNodeID] {
-				targetRoutes = append(targetRoutes, r)
-				targetNodes = append(targetNodes, transportNodes[r.ID])
-				sourceNodeIDs[r.SourceNodeID] = true
-			}
-		}
-		dr.TargetRoutes, dr.TargetNodes = targetRoutes, targetNodes
+		dr.TargetRoutes, dr.TargetNodes = nodesAndRoutesFromSourceTenant(dr.SourceTenant.TransportNode.ID, transportNodes, transportRoutes)
 		if err := db.Conn().Save(&dr).Error; err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 			return
@@ -70,6 +53,20 @@ func UpsertDeliveryRequest(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": dr})
+}
+
+func nodesAndRoutesFromSourceTenant(sourceNodeID uint, transportNodes []db.TransportNode, transportRoutes []db.TransportRoute) (targetRoutes []db.TransportRoute, targetNodes []db.TransportNode) {
+	sourceNodeIDs := make(map[uint]bool)
+	sourceNodeIDs[sourceNodeID] = true
+
+	for _, r := range transportRoutes {
+		if sourceNodeIDs[r.SourceNodeID] {
+			targetRoutes = append(targetRoutes, r)
+			targetNodes = append(targetNodes, transportNodes[r.TargetNodeID])
+			sourceNodeIDs[r.TargetNodeID] = true
+		}
+	}
+	return
 }
 
 // List all DeliveryRequests
