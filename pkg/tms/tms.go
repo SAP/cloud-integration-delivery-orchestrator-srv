@@ -115,6 +115,7 @@ type TMSRoutesResp struct {
 	Routes []db.TransportRoute `json:"routes"`
 }
 
+// TODO: this is not a official API from TMS api hub.
 func (t *TmsClient) GetRoutes() ([]db.TransportRoute, error) {
 	childCtx, cancel := context.WithCancel(t.Context)
 	defer cancel()

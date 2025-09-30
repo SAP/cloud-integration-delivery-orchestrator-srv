@@ -63,19 +63,29 @@ type ExecutionLog struct {
 }
 
 // Artifact needed to be deployed
+type TransportNodeStatus struct {
+	ID                uint      `json:"id"` // state id
+	TransportNodeID   uint      `json:"transportNodeId"`
+	TransportNodeName string    `json:"TransportNodeName"`
+	Status            string    `json:"status"` // SUCCEEDED, INITIAL, FATAL
+	UpdatedAt         time.Time `json:"updatedAt"`
+}
+
 type Artifact struct {
-	Id          string // artifact id
-	Version     string
-	PackageId   string
-	Name        string
-	Type        string // iflow, scriptCollection
-	Description string
-	CreatedBy   string
-	CreatedAt   string
-	ModifiedBy  string
-	ModifiedAt  string
-	Status      string // deploy stask status
-	TaskId      string // task id
+	Id                     string // artifact id
+	Version                string
+	PackageId              string
+	Name                   string
+	Type                   string // iflow, scriptCollection
+	Description            string
+	CreatedBy              string
+	CreatedAt              string
+	ModifiedBy             string
+	ModifiedAt             string
+	Status                 string                         // deploy task status
+	TaskId                 string                         // task id
+	TransportRequestNumber string                         // associated transport request number
+	NodeStatus             map[string]TransportNodeStatus `gorm:"serializer:json" json:"nodeStatuses"` // key = Transport Node ID
 }
 
 type TransportRequest struct {
@@ -192,9 +202,11 @@ type DeliveryRequest struct {
 
 	DeliveryRuleID *uint
 	DeliveryRule   *DeliveryRule `gorm:"foreignKey:DeliveryRuleID"` // FK association to delivery_rules table
-
+	// fetch from TMS based on SourceTenant, will include all downstream nodes and source node
 	TargetNodes  []TransportNode  `gorm:"serializer:json"` // target transport nodes, derived from DeliveryRule
 	TargetRoutes []TransportRoute `gorm:"serializer:json"` // derived transport routes, based on targetNodes and sourceNode
+
+	DeliveredTo []CpiTenant `gorm:"serializer:json"` // CPI tenants where artifacts have been delivered
 
 	CreatedBy string
 	UpdatedBy string

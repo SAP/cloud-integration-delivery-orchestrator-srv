@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -22,12 +23,15 @@ func UpsertDeliveryRequest(c *gin.Context) {
 	if dr.ID == 0 {
 		dr.CreatedBy = user
 	}
+	// TODO: not okay to save herer, should check first
 	if err := db.Conn().Save(&dr).Error; err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
 	}
+
+	// TODO: do routes generate, check tr in parallel
 	// generate Transport routes
-	if dr.SourceTenant.ID != 0 {
+	if dr.SourceTenantID != nil {
 		tmsClient, error := tms.NewClient(c)
 		if error != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": error.Error()})
@@ -44,41 +48,97 @@ func UpsertDeliveryRequest(c *gin.Context) {
 			return
 		}
 
-		dr.TargetRoutes, dr.TargetNodes = DownstreamfromSource(dr.SourceTenant.TransportNode.ID, transportNodes, transportRoutes)
+		dr.TargetRoutes, dr.TargetNodes = downstreamfromSource(dr.SourceTenant.TransportNode.ID, transportNodes, transportRoutes)
 		if err := db.Conn().Save(&dr).Error; err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 			return
 		}
-
+	}
+	// check TransportRequestNumbers
+	// TODO: wrap a function in v1 to validate
+	for _, a := range dr.Artifacts {
+		trNumber := a.TransportRequestNumber
+		if trNumber == "" {
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": fmt.Sprintf("artifact %s has empty transport request number", a.Name)})
+			return
+		}
+		tmsClient, err := tms.NewClient(c)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
+			return
+		}
+		trV1, err := tmsClient.GetTransportRequest(a.TransportRequestNumber) // v1 to check state
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": fmt.Sprintf("error when getting transport request %s, the tr number may not exist, error message: %s", trNumber, err)})
+			return
+		}
+		if trV1 == nil || trV1.ID == 0 || trV1.State != "RELEASED" {
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": fmt.Sprintf("artifact %s has invalid transport request number %s", a.Name, trNumber)})
+			return
+		}
+		if trV1.Origin != dr.SourceTenant.TransportNode.Name { // check origin node
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": fmt.Sprintf("artifact %s has transport request number %s not from source tenant node %s", a.Name, trNumber, dr.SourceTenant.TransportNode.Name)})
+			return
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": dr})
 }
 
-// downstream nodes and routes from a source node
-func DownstreamfromSource(sourceNodeID uint, transportNodes []db.TransportNode, transportRoutes []db.TransportRoute) (targetRoutes []db.TransportRoute, targetNodes []db.TransportNode) {
-	routesMap, nodesMap := make(map[uint]db.TransportRoute), make(map[uint]db.TransportNode)
-	for _, route := range transportRoutes {
-		routesMap[route.ID] = route
+// downstreamfromSource returns all downstream routes and nodes reachable from a source node (BFS).
+// It avoids cycles and duplicate routes/nodes.
+// NOTE: the source node itself is NOT included in the returned targetNodes.
+func downstreamfromSource(sourceNodeID uint, transportNodes []db.TransportNode, transportRoutes []db.TransportRoute) (targetRoutes []db.TransportRoute, targetNodes []db.TransportNode) {
+	if sourceNodeID == 0 || len(transportRoutes) == 0 {
+		return
 	}
-	for _, node := range transportNodes {
-		nodesMap[node.ID] = node
-	}
-	queue := make([]uint, 0)
-	queue = append(queue, sourceNodeID)
-	for len(queue) > 0 {
-		length := len(queue)
-		for range length {
-			currentNodeID := queue[0] // pop
-			queue = queue[1:]
-			if route, exists := routesMap[currentNodeID]; exists {
-				targetRoutes = append(targetRoutes, route)
-				targetNodes = append(targetNodes, nodesMap[route.TargetNodeID])
-				queue = append(queue, route.TargetNodeID)
-			}
 
+	// Build node lookup
+	nodeMap := make(map[uint]db.TransportNode, len(transportNodes))
+	for _, n := range transportNodes {
+		nodeMap[n.ID] = n
+	}
+
+	// Adjacency: sourceNodeID -> routes originating there
+	adj := make(map[uint][]db.TransportRoute)
+	for _, r := range transportRoutes {
+		adj[r.SourceNodeID] = append(adj[r.SourceNodeID], r)
+	}
+
+	if _, ok := nodeMap[sourceNodeID]; !ok {
+		return
+	}
+
+	visitedNodes := make(map[uint]bool)
+	visitedNodes[sourceNodeID] = true
+	visitedRoutes := make(map[uint]bool)
+
+	queue := []uint{sourceNodeID}
+
+	for len(queue) > 0 {
+		curr := queue[0]
+		queue = queue[1:]
+
+		for _, r := range adj[curr] {
+			// Skip duplicate route
+			if visitedRoutes[r.ID] {
+				continue
+			}
+			visitedRoutes[r.ID] = true
+			targetRoutes = append(targetRoutes, r)
+
+			// Enqueue target node if not seen
+			if visitedNodes[r.TargetNodeID] {
+				continue
+			}
+			if trNode, ok := nodeMap[r.TargetNodeID]; ok {
+				targetNodes = append(targetNodes, trNode)
+				visitedNodes[r.TargetNodeID] = true
+				queue = append(queue, r.TargetNodeID)
+			}
 		}
 	}
+
 	return
 }
 

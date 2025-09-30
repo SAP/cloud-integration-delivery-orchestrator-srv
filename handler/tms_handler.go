@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"sync"
 
-	"github.com/gin-gonic/gin"
 	"mmt-delivery/db"
 	"mmt-delivery/pkg/tms"
+
+	"github.com/gin-gonic/gin"
 )
 
 func GetTmsNodesHandler(ctx *gin.Context) {
@@ -25,6 +27,51 @@ func GetTmsNodesHandler(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"status": 200, "result": tmsNodes})
 }
 
+func CheckArtifactStatus(ctx *gin.Context) {
+	var artifacts []db.Artifact
+
+	if err := ctx.ShouldBindJSON(&artifacts); err != nil || len(artifacts) == 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"status": 400, "error": "invalid payload; expected {\"artifacts\":[\"id1\",\"id2\",...]}"})
+		return
+	}
+
+	tmsClient, err := tms.NewClient(ctx)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"status": 500, "error": fmt.Sprintf("error creating tms client: %s", err)})
+		return
+	}
+
+	type artifactsCheckResult struct {
+		Artifact db.Artifact `json:"artifact"`
+		Status   string      `json:"status,omitempty"`
+		Error    string      `json:"error,omitempty"`
+	}
+
+	results := make([]artifactsCheckResult, len(artifacts))
+
+	var wg sync.WaitGroup
+	wg.Add(len(artifacts))
+
+	sem := make(chan struct{}, 8) // limit parallelism
+	for i, a := range artifacts {
+		i, a := i, a
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			err := tmsClient.UpdateArtifactStatus(&a)
+			if err != nil {
+				results[i] = artifactsCheckResult{Artifact: a, Error: err.Error(), Status: "FAIL"}
+				return
+			}
+			results[i] = artifactsCheckResult{Artifact: a, Status: "UPDATED"}
+		}()
+	}
+	wg.Wait()
+
+	ctx.JSON(http.StatusOK, gin.H{"status": 200, "result": results})
+}
 func GetRoutesHandler(ctx *gin.Context) {
 	tmsClient, error := tms.NewClient(ctx)
 	if error != nil {

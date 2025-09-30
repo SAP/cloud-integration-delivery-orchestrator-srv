@@ -39,6 +39,7 @@ func main() {
 		v1Group.GET("/tms/nodes", handler.GetTmsNodesHandler)
 		v1Group.GET("/tms/trs", handler.GetTranportRequestsHandler)
 		v1Group.GET("/tms/routes", handler.GetRoutesHandler)
+		v1Group.POST("/tms/artifactStatus", handler.CheckArtifactStatus)
 
 		v1Group.DELETE("/step", handler.DeleteStep)
 
