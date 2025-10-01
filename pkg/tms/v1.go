@@ -79,7 +79,7 @@ type File struct {
 	MD5      string `json:"md5"`
 }
 
-// /v1/transportRequests/{TrNumber}
+// check status of a single TR. /v1/transportRequests/{TrNumber}
 // NOTE: this api is not from api hub
 func (t *TmsClient) GetTransportRequest(TrNumber string) (*TransportRequestV1, error) {
 	childCtx, cancel := context.WithCancel(t.Context)
@@ -106,7 +106,7 @@ func (t *TmsClient) GetTransportRequest(TrNumber string) (*TransportRequestV1, e
 
 // update Import status of an artifact in each transport node.
 // status can be(from TMS): SUCCEEDED, INITIAL, FATAL, etc...
-func (t *TmsClient) UpdateArtifactStatus(artifact *db.Artifact) error {
+func (t *TmsClient) UpdateArtifactNodeStatus(artifact *db.Artifact) error {
 	tr, err := t.GetTransportRequest(artifact.TransportRequestNumber)
 	if err != nil {
 		return fmt.Errorf("failed to get transport request %s: %s", artifact.TransportRequestNumber, err)

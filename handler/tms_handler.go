@@ -52,7 +52,7 @@ func CheckArtifactStatus(ctx *gin.Context) {
 	var wg sync.WaitGroup
 	wg.Add(len(artifacts))
 
-	sem := make(chan struct{}, 8) // limit parallelism
+	sem := make(chan struct{}, 4) // TODO: limit parallelism, may add limit for tms api rate limit
 	for i, a := range artifacts {
 		i, a := i, a
 		go func() {
@@ -60,7 +60,7 @@ func CheckArtifactStatus(ctx *gin.Context) {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			err := tmsClient.UpdateArtifactStatus(&a)
+			err := tmsClient.UpdateArtifactNodeStatus(&a)
 			if err != nil {
 				results[i] = artifactsCheckResult{Artifact: a, Error: err.Error(), Status: "FAIL"}
 				return
@@ -72,6 +72,7 @@ func CheckArtifactStatus(ctx *gin.Context) {
 
 	ctx.JSON(http.StatusOK, gin.H{"status": 200, "result": results})
 }
+
 func GetRoutesHandler(ctx *gin.Context) {
 	tmsClient, error := tms.NewClient(ctx)
 	if error != nil {
