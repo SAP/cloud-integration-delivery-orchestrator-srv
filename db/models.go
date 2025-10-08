@@ -71,21 +71,24 @@ type TransportNodeStatus struct {
 	UpdatedAt         time.Time `json:"updatedAt"`
 }
 
+// on artifact_tech_id:version can be deployed to *multiple* tenants, so it is better to seperate it into a new table!
+// search by artifact_tech_id:version, no need to use ID.
 type Artifact struct {
-	Id                     string // artifact id
-	Version                string
-	PackageId              string
-	Name                   string
-	Type                   string // iflow, scriptCollection
-	Description            string
-	CreatedBy              string
-	CreatedAt              string
-	ModifiedBy             string
-	ModifiedAt             string
-	Status                 string                         // deploy task status
-	TaskId                 string                         // task id
-	TransportRequestNumber string                         // associated transport request number
-	NodeStatus             map[string]TransportNodeStatus `gorm:"serializer:json" json:"nodeStatuses"` // key = Transport Node ID
+	gorm.Model
+	ArtifactTenantOperationID uint // foreign key to ArtifactTenantOperation.ID
+	
+	TechID      string // artifact techical id
+	Version     string
+	Name        string
+	PackageId   string //package techical id
+	Type        string // iflow, scriptCollection
+	Description string
+	CreatedBy   string //TODO: may not need it. same above
+	CreatedAt   string
+	ModifiedBy  string
+	ModifiedAt  string
+	Status      string // deploy task status. TODO: may not need it. status will be controlled by ArtifactTenantOperation
+	TaskId      string // task id. TODO: may not need it. same as above
 }
 
 type TransportRequest struct {
@@ -184,30 +187,6 @@ type DeliveryRule struct {
 	ExcludedTenants []CpiTenant `gorm:"serializer:json;"` // excluded CPI tenants
 
 	Active    bool
-	CreatedBy string
-	UpdatedBy string
-}
-
-type DeliveryRequest struct {
-	gorm.Model
-	Name string
-
-	JiraLink string // related Jira ticket URL
-	Status   string // pending, in-progress, completed, failed
-
-	Artifacts []Artifact `gorm:"serializer:json"` // artifacts to deliver
-
-	SourceTenantID *uint      // source cpi tenant id
-	SourceTenant   *CpiTenant `gorm:"foreignKey:SourceTenantID"` // source CPI tenant
-
-	DeliveryRuleID *uint
-	DeliveryRule   *DeliveryRule `gorm:"foreignKey:DeliveryRuleID"` // FK association to delivery_rules table
-	// fetch from TMS based on SourceTenant, will include all downstream nodes and source node
-	TargetNodes  []TransportNode  `gorm:"serializer:json"` // target transport nodes, derived from DeliveryRule
-	TargetRoutes []TransportRoute `gorm:"serializer:json"` // derived transport routes, based on targetNodes and sourceNode
-
-	DeliveredTo []CpiTenant `gorm:"serializer:json"` // CPI tenants where artifacts have been delivered
-
 	CreatedBy string
 	UpdatedBy string
 }

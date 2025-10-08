@@ -597,7 +597,7 @@ func updateDeployStepStatus(ctx context.Context, step *db.DeployStep) (string, e
 			status, err = cpiClient.CheckDeployStatusByTaskID(artifact.TaskId)
 		}
 		if err != nil {
-			return "", fmt.Errorf("error while checking status of step %d, type: %s, artifactId: %s, taskId: %s: %s", step.ID, step.Type, artifact.Id, artifact.TaskId, err)
+			return "", fmt.Errorf("error while checking status of step %d, type: %s, artifactId: %s, taskId: %s: %s", step.ID, step.Type, artifact.TechID, artifact.TaskId, err)
 		}
 		artifact.Status = status
 		statusSet[status] = true

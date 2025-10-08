@@ -6,10 +6,11 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/gin-gonic/gin"
 	"mmt-delivery/db"
 	"mmt-delivery/pkg/cpi"
 	"mmt-delivery/pkg/tms"
+
+	"github.com/gin-gonic/gin"
 )
 
 func DeleteStep(ctx *gin.Context) {
@@ -66,14 +67,14 @@ func ExecuteDeploy(ctx context.Context, step *db.DeployStep) error {
 		artifact := &step.Artifacts[i]
 		// currently support two types of artifacts
 		if artifact.Type == Artifact_Type_Iflow {
-			taskID, err = client.DeployIflow(artifact.Id, "active")
+			taskID, err = client.DeployIflow(artifact.TechID, "active")
 		} else if artifact.Type == Artifact_Type_Sc {
-			taskID, err = client.DeployScriptCollection(artifact.Id, "active")
+			taskID, err = client.DeployScriptCollection(artifact.TechID, "active")
 		} else {
 			return fmt.Errorf("unsupported artifact type: %s", artifact.Type)
 		}
 		if err != nil {
-			err = fmt.Errorf("error triggering step %d of %s (%s): %s", step.Sequence, artifact.Id, artifact.Type, err)
+			err = fmt.Errorf("error triggering step %d of %s (%s): %s", step.Sequence, artifact.TechID, artifact.Type, err)
 			continue
 		}
 		artifact.TaskId = taskID
@@ -92,13 +93,13 @@ func ExecuteUndeploy(ctx context.Context, step *db.DeployStep) error {
 
 	for i := range step.Artifacts {
 		artifact := &step.Artifacts[i]
-		if err = client.UndeployRuntimeArtifacts(artifact.Id); err != nil {
-			err = fmt.Errorf("error while undeploying %s (%s): %s", artifact.Id, artifact.Type, err)
-			artifact.Id = "0"
+		if err = client.UndeployRuntimeArtifacts(artifact.TechID); err != nil {
+			err = fmt.Errorf("error while undeploying %s (%s): %s", artifact.TechID, artifact.Type, err)
+			artifact.TechID = "0"
 			artifact.Status = UNDEPLOY_STATUS_FAIL
 			continue
 		}
-		artifact.Id = "1"
+		artifact.TechID = "1"
 		artifact.Status = UNDEPLOY_STATUS_UNDEPLOYING
 	}
 	return nil

@@ -74,11 +74,11 @@ func ParseYaml(ctx *gin.Context) {
 	var artifacts = make([]db.Artifact, 0)
 	for _, iflow := range yamlArtifacts["iflows"] {
 		trs = append(trs, db.TransportRequest{ID: iflow.TrNumber})
-		artifacts = append(artifacts, db.Artifact{Id: iflow.Id, Version: iflow.Version, PackageId: iflow.Package, Type: Artifact_Type_Iflow})
+		artifacts = append(artifacts, db.Artifact{TechID: iflow.Id, Version: iflow.Version, PackageId: iflow.Package, Type: Artifact_Type_Iflow})
 	}
 	for _, sc := range yamlArtifacts["scriptCollections"] {
 		trs = append(trs, db.TransportRequest{ID: sc.TrNumber})
-		artifacts = append(artifacts, db.Artifact{Id: sc.Id, Version: sc.Version, PackageId: sc.Package, Type: Artifact_Type_Sc})
+		artifacts = append(artifacts, db.Artifact{TechID: sc.Id, Version: sc.Version, PackageId: sc.Package, Type: Artifact_Type_Sc})
 	}
 
 	// save into transport plan
@@ -223,12 +223,12 @@ func checkArtifacts(ctx context.Context, tenant string, artifacts []db.Artifact)
 	// check if artifact exists in the tenant
 	for _, artifact := range artifacts {
 		if artifact.Type == Artifact_Type_Iflow {
-			if _, err := cpiClient.GetPackageIflow(artifact.PackageId, artifact.Id, artifact.Version); err != nil {
-				return fmt.Errorf("integration iflow %s not found in tenant %s: %s", artifact.Id, tenant, err)
+			if _, err := cpiClient.GetPackageIflow(artifact.PackageId, artifact.TechID, artifact.Version); err != nil {
+				return fmt.Errorf("integration iflow %s not found in tenant %s: %s", artifact.TechID, tenant, err)
 			}
 		} else if artifact.Type == Artifact_Type_Sc {
-			if _, err := cpiClient.GetDesignTimeScriptCollection(artifact.Id, artifact.Version); err != nil {
-				return fmt.Errorf("script collection artifact %s not found in tenant %s: %s", artifact.Id, tenant, err)
+			if _, err := cpiClient.GetDesignTimeScriptCollection(artifact.TechID, artifact.Version); err != nil {
+				return fmt.Errorf("script collection artifact %s not found in tenant %s: %s", artifact.TechID, tenant, err)
 			}
 		}
 	}
