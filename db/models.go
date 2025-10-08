@@ -62,13 +62,14 @@ type ExecutionLog struct {
 	Log      string
 }
 
-// Artifact needed to be deployed
+// status of an artifact in each transport node, should check by tr number
 type TransportNodeStatus struct {
-	ID                uint      `json:"id"` // state id
-	TransportNodeID   uint      `json:"transportNodeId"`
-	TransportNodeName string    `json:"TransportNodeName"`
-	Status            string    `json:"status"` // SUCCEEDED, INITIAL, FATAL
-	UpdatedAt         time.Time `json:"updatedAt"`
+	TransportRequestNumber string    `json:"transportRequestNumber"`
+	StateID                uint      `json:"id"` // state id
+	TransportNodeID        uint      `json:"transportNodeId"`
+	TransportNodeName      string    `json:"TransportNodeName"`
+	Status                 string    `json:"status"` // SUCCEEDED, INITIAL, FATAL, RUNNING
+	UpdatedAt              time.Time `json:"updatedAt"`
 }
 
 // on artifact_tech_id:version can be deployed to *multiple* tenants, so it is better to seperate it into a new table!
@@ -76,7 +77,7 @@ type TransportNodeStatus struct {
 type Artifact struct {
 	gorm.Model
 	ArtifactTenantOperationID uint // foreign key to ArtifactTenantOperation.ID
-	
+
 	TechID      string // artifact techical id
 	Version     string
 	Name        string

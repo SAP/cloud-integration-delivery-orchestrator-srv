@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"sync"
 
 	"mmt-delivery/db"
+	"mmt-delivery/pkg/lifecycle"
 	"mmt-delivery/pkg/tms"
 
 	"github.com/gin-gonic/gin"
@@ -27,50 +27,69 @@ func GetTmsNodesHandler(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"status": 200, "result": tmsNodes})
 }
 
-func CheckArtifactStatus(ctx *gin.Context) {
-	var artifacts []db.Artifact
-
-	if err := ctx.ShouldBindJSON(&artifacts); err != nil || len(artifacts) == 0 {
-		ctx.JSON(http.StatusBadRequest, gin.H{"status": 400, "error": "invalid payload; expected {\"artifacts\":[\"id1\",\"id2\",...]}"})
+func CheckImportStatus(ctx *gin.Context) {
+	var artifactOps []db.ArtifactTenantOperation
+	// Search ArtifactTenantOperation by DeliveryRequestID
+	deliveryRequestIDStr := ctx.Query("deliveryRequestId")
+	if deliveryRequestIDStr == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"status": 400, "error": "missing query param: deliveryRequestId"})
 		return
 	}
+
+	deliveryRequestID, err := strconv.Atoi(deliveryRequestIDStr)
+	if err != nil || deliveryRequestID <= 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"status": 400, "error": "invalid deliveryRequestId"})
+		return
+	}
+
+	// Adjust the DB accessor (db.DB / db.GetDB()) to match your project setup
+	if err := db.Conn().Where("delivery_request_id = ?", deliveryRequestID).Find(&artifactOps).Error; err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"status": 500, "error": fmt.Sprintf("db query failed: %s", err)})
+		return
+	}
+	if len(artifactOps) == 0 {
+		ctx.JSON(http.StatusNotFound, gin.H{"status": 404, "result": []db.ArtifactTenantOperation{}})
+		return
+	}
+	trStatus := make(map[string]map[uint]db.TransportNodeStatus) // tr number status in all nodes. key: artifactID, value: map[nodeID]status
 
 	tmsClient, err := tms.NewClient(ctx)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"status": 500, "error": fmt.Sprintf("error creating tms client: %s", err)})
 		return
 	}
-
-	type artifactsCheckResult struct {
-		Artifact db.Artifact `json:"artifact"`
-		Status   string      `json:"status,omitempty"`
-		Error    string      `json:"error,omitempty"`
+	for _, a := range artifactOps {
+		trNumber := a.TransportRequestNumber
+		if trNumber == "" {
+			continue
+		}
+		if _, ok := trStatus[trNumber]; ok {
+			continue
+		}
+		// UpdateArtifactNodeStatus will call GetTransportRequest internally
+		ns, err := tmsClient.SyncTrNodeStatus(trNumber)
+		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"status": 500, "error": fmt.Sprintf("error when getting transport request %s, the tr number may not exist, error message: %s", trNumber, err)})
+			return
+		}
+		trStatus[trNumber] = ns
+	}
+	// update import state of each artifact tenant operation
+	for i, a := range artifactOps {
+		trNumber := a.TransportRequestNumber
+		if trNumber == "" {
+			continue
+		}
+		artifactNodeState := trStatus[trNumber][a.Tenant.TransportNode.ID].Status
+		artifactOps[i].ImportState = lifecycle.DeriveImport(artifactNodeState)
+		if db.Conn().Model(&artifactOps[i]).Updates(&db.ArtifactTenantOperation{ImportState: artifactOps[i].ImportState}).Error != nil {
+			// TODO: use condition to track import status
+			ctx.JSON(http.StatusInternalServerError, gin.H{"status": 500, "error": fmt.Sprintf("error when updating artifact %s import state to %s", a.ArtifactTechID, artifactOps[i].ImportState)})
+			return
+		}
 	}
 
-	results := make([]artifactsCheckResult, len(artifacts))
-
-	var wg sync.WaitGroup
-	wg.Add(len(artifacts))
-
-	sem := make(chan struct{}, 4) // TODO: limit parallelism, may add limit for tms api rate limit
-	for i, a := range artifacts {
-		i, a := i, a
-		go func() {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			err := tmsClient.UpdateArtifactNodeStatus(&a)
-			if err != nil {
-				results[i] = artifactsCheckResult{Artifact: a, Error: err.Error(), Status: "FAIL"}
-				return
-			}
-			results[i] = artifactsCheckResult{Artifact: a, Status: "UPDATED"}
-		}()
-	}
-	wg.Wait()
-
-	ctx.JSON(http.StatusOK, gin.H{"status": 200, "result": results})
+	ctx.JSON(http.StatusOK, gin.H{"status": 200, "result": artifactOps})
 }
 
 func GetRoutesHandler(ctx *gin.Context) {

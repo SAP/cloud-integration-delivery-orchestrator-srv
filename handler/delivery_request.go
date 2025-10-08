@@ -8,58 +8,77 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"mmt-delivery/db"
+	"mmt-delivery/pkg/lifecycle"
 	"mmt-delivery/pkg/tms"
 )
 
-// Create or update a DeliveryRequest
-func UpsertDeliveryRequest(c *gin.Context) {
+func CreateDr(c *gin.Context) {
 	var dr db.DeliveryRequest
 	if err := c.ShouldBindJSON(&dr); err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
 		return
 	}
 	user := User(c)
-	dr.UpdatedBy = user
-	if dr.ID == 0 {
-		dr.CreatedBy = user
+	dr.CreatedBy, dr.UpdatedBy = user, user
+
+	if !checkJIRA(dr.JiraLink) {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "invalid jira link"})
 	}
-	// TODO: not okay to save herer, should check first
-	if err := db.Conn().Save(&dr).Error; err != nil {
+
+	if dr.DeliveryRule.ID == 0 {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "missing delivery rule"})
+	}
+
+	dr.AggregateStatus = lifecycle.AggPending
+
+	if err := db.Conn().Create(&dr).Error; err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
 	}
+	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": dr})
+}
 
-	// TODO: do routes generate, check tr in parallel
+// update DeliveryRequest
+func UpdateDr(c *gin.Context) {
+	var dr db.DeliveryRequest
+	if err := c.ShouldBindJSON(&dr); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
+		return
+	}
+	// check existence
+	var count int64
+	db.Conn().Model(&db.DeliveryRequest{}).Where("id = ?", dr.ID).Count(&count)
+	if count == 0 {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": fmt.Sprintf("delivery request id %d not found", dr.ID)})
+		return
+	}
+
 	// generate Transport routes
 	if dr.SourceTenantID != nil {
-		tmsClient, error := tms.NewClient(c)
+		tmsCli, error := tms.NewClient(c)
 		if error != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": error.Error()})
 			return
 		}
-		transportRoutes, error := tmsClient.GetRoutes()
+		transportRoutes, error := tmsCli.GetRoutes()
 		if error != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": error.Error()})
 			return
 		}
-		transportNodes, error := tmsClient.GetNodes()
+		transportNodes, error := tmsCli.GetNodes()
 		if error != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": error.Error()})
 			return
 		}
 
 		dr.TargetRoutes, dr.TargetNodes = downstreamfromSource(dr.SourceTenant.TransportNode.ID, transportNodes, transportRoutes)
-		if err := db.Conn().Save(&dr).Error; err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
-			return
-		}
 	}
-	// check TransportRequestNumbers
-	// TODO: wrap a function in v1 to validate
-	for _, a := range dr.Artifacts {
+	// check tr existence and origin
+	// TODO: wrap a function in v1 to validate, check in parallel
+	for _, a := range dr.ArtifactTenantOperations {
 		trNumber := a.TransportRequestNumber
 		if trNumber == "" {
-			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": fmt.Sprintf("artifact %s has empty transport request number", a.Name)})
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": fmt.Sprintf("artifact %s has empty transport request number", a.ArtifactTechID)})
 			return
 		}
 		tmsClient, err := tms.NewClient(c)
@@ -73,13 +92,19 @@ func UpsertDeliveryRequest(c *gin.Context) {
 			return
 		}
 		if trV1 == nil || trV1.ID == 0 || trV1.State != "RELEASED" {
-			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": fmt.Sprintf("artifact %s has invalid transport request number %s", a.Name, trNumber)})
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": fmt.Sprintf("artifact %s has invalid transport request number %s", a.ArtifactTechID, trNumber)})
 			return
 		}
-		if trV1.Origin != dr.SourceTenant.TransportNode.Name { // check origin node
-			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": fmt.Sprintf("artifact %s has transport request number %s not from source tenant node %s", a.Name, trNumber, dr.SourceTenant.TransportNode.Name)})
+		if trV1.Origin != dr.SourceTenant.TransportNode.Name { // can only be checked by origin node name, not id.
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": fmt.Sprintf("artifact %s has transport request number %s not from source tenant node %s", a.ArtifactTechID, trNumber, dr.SourceTenant.TransportNode.Name)})
 			return
 		}
+	}
+
+	dr.UpdatedBy = User(c)
+	if err := db.Conn().Model(&DeliverRequest{}).Updates(&dr).Error; err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
+		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": dr})
@@ -143,16 +168,16 @@ func downstreamfromSource(sourceNodeID uint, transportNodes []db.TransportNode, 
 }
 
 // List all DeliveryRequests
-func GetDeliveryRequests(c *gin.Context) {
-	var list []db.DeliveryRequest
+func GetAllDr(c *gin.Context) {
+	var drList []db.DeliveryRequest
 	if err := db.Conn().
 		Preload("SourceTenant").
 		Preload("DeliveryRule").
-		Find(&list).Error; err != nil {
+		Find(&drList).Error; err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": list})
+	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": drList})
 }
 
 // Get a single DeliveryRequest by id
@@ -174,8 +199,8 @@ func GetDeliveryRequest(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": dr})
 }
 
-// Delete DeliveryRequest by id
-func DeleteDeliveryRequest(c *gin.Context) {
+// DeleteDr DeliveryRequest by id
+func DeleteDr(c *gin.Context) {
 	raw := c.Param("id")
 	id, err := strconv.Atoi(raw)
 	if err != nil || id <= 0 {
@@ -187,4 +212,11 @@ func DeleteDeliveryRequest(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": id})
+}
+
+func checkJIRA(jira string) bool {
+	if jira == "" {
+		return true
+	}
+	return true
 }

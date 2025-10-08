@@ -7,7 +7,7 @@ import "time"
 //
 //	Rollbacking, RolledBack, Canceled, DeployFailed, Deploying, Deployed,
 //	ImportFailed, Importing, Imported, AwaitingImport, Pending, Unknown.
-func DeriveAggregate(t TransportState, i ImportState, d DeployState, conds []Condition) AggregateStatus {
+func DeriveAggregate(t RequestState, i ImportState, d DeployState, conds []Condition) AggregateStatus {
 	ci := indexConds(conds)
 
 	if isTrue(ci, CondRollbackInProgess) || d == DeployRollbacking {
@@ -43,11 +43,11 @@ func DeriveAggregate(t TransportState, i ImportState, d DeployState, conds []Con
 	}
 
 	// Transport ready but import not started
-	if t == TransportReady {
+	if t == RequestReady {
 		return AggAwaitingImport
 	}
 
-	if t == TransportNotRequested || t == TransportRequesting {
+	if t == RequestPending || t == RequestStarting {
 		return AggPending
 	}
 

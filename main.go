@@ -39,7 +39,7 @@ func main() {
 		v1Group.GET("/tms/nodes", handler.GetTmsNodesHandler)
 		v1Group.GET("/tms/trs", handler.GetTranportRequestsHandler)
 		v1Group.GET("/tms/routes", handler.GetRoutesHandler)
-		v1Group.POST("/tms/artifactStatus", handler.CheckArtifactStatus)
+		v1Group.POST("/tms/artifactStatus", handler.CheckImportStatus)
 
 		v1Group.DELETE("/step", handler.DeleteStep)
 
@@ -67,10 +67,11 @@ func main() {
 		v1Group.POST("/deliveryRule", handler.UpsertDeliveryRule)
 		v1Group.DELETE("/deliveryRule/:id", handler.DeleteDeliveryRule)
 		// delivery request
-		v1Group.GET("/deliveryRequest", handler.GetDeliveryRequests)
+		v1Group.GET("/deliveryRequest", handler.GetAllDr)
 		v1Group.GET("/deliveryRequest/:id", handler.GetDeliveryRequest)
-		v1Group.POST("/deliveryRequest", handler.UpsertDeliveryRequest)
-		v1Group.DELETE("/deliveryRequest/:id", handler.DeleteDeliveryRequest)
+		v1Group.POST("/deliveryRequest", handler.CreateDr)
+		v1Group.PUT("/deliveryRequest", handler.UpdateDr)
+		v1Group.DELETE("/deliveryRequest/:id", handler.DeleteDr)
 
 	}
 

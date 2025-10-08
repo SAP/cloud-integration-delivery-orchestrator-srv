@@ -28,7 +28,7 @@ type ArtifactTenantOperation struct {
 	TransportRequestNumber string // associated transport request number
 
 	// All 3 Phases
-	TransportState lifecycle.TransportState
+	TransportState lifecycle.RequestState
 	ImportState    lifecycle.ImportState
 	DeployState    lifecycle.DeployState
 

@@ -105,27 +105,32 @@ func (t *TmsClient) GetTransportRequest(TrNumber string) (*TransportRequestV1, e
 }
 
 // update Import status of an artifact in each transport node.
-// status can be(from TMS): SUCCEEDED, INITIAL, FATAL, etc...
-func (t *TmsClient) UpdateArtifactNodeStatus(artifact *db.Artifact) error {
-	tr, err := t.GetTransportRequest(artifact.TransportRequestNumber)
+// status can be(from TMS): SUCCEEDED, INITIAL(when imported into next node. eg: dev -> ci, then state in ci should be inital),
+// FATAL, RUNNING, etc...
+func (t *TmsClient) SyncTrNodeStatus(trNumber string) (map[uint]db.TransportNodeStatus, error) {
+	tr, err := t.GetTransportRequest(trNumber)
 	if err != nil {
-		return fmt.Errorf("failed to get transport request %s: %s", artifact.TransportRequestNumber, err)
+		return nil, fmt.Errorf("failed to get transport request %s: %s", trNumber, err)
 	}
-	status := "UNKNOWN"
+	// if a transport request number exists, there should be at least one node, the next node will be INITIAL
+	nodeStatus := make(map[uint]db.TransportNodeStatus) // key: transportNodeId
 	for _, node := range tr.Landscape.Nodes {
 		if node.State == nil {
 			continue
 		}
-		status = node.State.Status
+		status, stateID := node.State.Status, node.State.ID
 		transportNodeId, transportNodeName := node.ID, node.Name
-		artifact.NodeStatus[fmt.Sprint(transportNodeId)] = db.TransportNodeStatus{
-			TransportNodeName: transportNodeName,
-			Status:            status,
-			UpdatedAt:         node.State.Time,
+		nodeStatus[transportNodeId] = db.TransportNodeStatus{
+			TransportRequestNumber: trNumber,
+			StateID:                stateID,
+			TransportNodeID:        transportNodeId,
+			TransportNodeName:      transportNodeName,
+			Status:                 status,
+			UpdatedAt:              node.State.Time,
 		}
 	}
-
-	// TODO: update overall status based on individual node status
-
-	return nil
+	if len(nodeStatus) == 0 {
+		return nil, fmt.Errorf("no node status found for transport request %s", trNumber)
+	}
+	return nodeStatus, nil
 }

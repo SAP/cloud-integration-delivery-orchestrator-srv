@@ -14,7 +14,7 @@ type DeliveryRequest struct {
 	AggregateStatus lifecycle.AggregateStatus // pending, in-progress, completed, failed
 
 	// One-to-many: a delivery request has many artifacts
-	ArtifactTenantOperation []ArtifactTenantOperation `gorm:"foreignKey:DeliveryRequestID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;"`
+	ArtifactTenantOperations []ArtifactTenantOperation `gorm:"foreignKey:DeliveryRequestID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;"`
 
 	SourceTenantID *uint
 	SourceTenant   *CpiTenant `gorm:"foreignKey:SourceTenantID"`

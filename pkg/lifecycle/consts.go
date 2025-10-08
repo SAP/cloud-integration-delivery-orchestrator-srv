@@ -4,8 +4,8 @@ import (
 	"time"
 )
 
-// TransportState represents the state of the transport (TMS) phase for an artifact per tenant.
-type TransportState string
+// RequestState represents the state of the transport (TMS) phase for an artifact per tenant.
+type RequestState string
 
 // ImportState represents the state of the design-time import phase.
 type ImportState string
@@ -25,15 +25,16 @@ type Condition struct {
 	LastTransitionTime time.Time `json:"lastTransitionTime"`
 }
 
-// Canonical transport states.
+// Canonical Delivery Request states.
 const (
-	TransportNotRequested TransportState = "NOT_REQUESTED"
-	TransportRequesting   TransportState = "REQUESTING"
-	TransportReady        TransportState = "READY"
-	TransportFailed       TransportState = "FAILED"
+	RequestPending  RequestState = "NOT_REQUESTED"
+	RequestStarting RequestState = "REQUESTING"
+	RequestReady    RequestState = "READY"
+	RequestFailed   RequestState = "FAILED"
 )
 
 // Canonical import states.
+// status from TMS API: INITIAL, RUNNING, SUCCEEDED, FATAL, etc...
 const (
 	ImportNotStarted ImportState = "NOT_STARTED"
 	ImportQueued     ImportState = "QUEUED"
@@ -48,7 +49,7 @@ const (
 	DeployNotStarted  DeployState = "NOT_STARTED"
 	DeployQueued      DeployState = "QUEUED"
 	DeployInProgress  DeployState = "IN_PROGRESS"
-	DeployPartial     DeployState = "PARTIAL"  // TODO: not a right situation, remove later
+	DeployPartial     DeployState = "PARTIAL" // TODO: not a right situation, remove later
 	DeployFailed      DeployState = "FAILED"
 	DeployComplete    DeployState = "COMPLETE"
 	DeployRollbacking DeployState = "ROLLBACKING"
