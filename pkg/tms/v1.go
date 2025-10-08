@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"mmt-delivery/db"
 	"mmt-delivery/pkg/env"
 	"net/http"
 	"time"
@@ -79,6 +78,16 @@ type File struct {
 	MD5      string `json:"md5"`
 }
 
+// status of an artifact in each transport node, should check by tr number
+type TrNodeStatus struct {
+	TransportRequestNumber string    `json:"transportRequestNumber"`
+	StateID                uint      `json:"id"` // state id
+	TransportNodeID        uint      `json:"transportNodeId"`
+	TransportNodeName      string    `json:"TransportNodeName"`
+	Status                 string    `json:"status"` // SUCCEEDED, INITIAL, FATAL, RUNNING
+	UpdatedAt              time.Time `json:"updatedAt"`
+}
+
 // check status of a single TR. /v1/transportRequests/{TrNumber}
 // NOTE: this api is not from api hub
 func (t *TmsClient) GetTransportRequest(TrNumber string) (*TransportRequestV1, error) {
@@ -107,20 +116,20 @@ func (t *TmsClient) GetTransportRequest(TrNumber string) (*TransportRequestV1, e
 // update Import status of an artifact in each transport node.
 // status can be(from TMS): SUCCEEDED, INITIAL(when imported into next node. eg: dev -> ci, then state in ci should be inital),
 // FATAL, RUNNING, etc...
-func (t *TmsClient) SyncTrNodeStatus(trNumber string) (map[uint]db.TransportNodeStatus, error) {
+func (t *TmsClient) SyncTrNodeStatus(trNumber string) (map[uint]TrNodeStatus, error) {
 	tr, err := t.GetTransportRequest(trNumber)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get transport request %s: %s", trNumber, err)
 	}
 	// if a transport request number exists, there should be at least one node, the next node will be INITIAL
-	nodeStatus := make(map[uint]db.TransportNodeStatus) // key: transportNodeId
+	nodeStatus := make(map[uint]TrNodeStatus) // key: transportNodeId
 	for _, node := range tr.Landscape.Nodes {
 		if node.State == nil {
 			continue
 		}
 		status, stateID := node.State.Status, node.State.ID
 		transportNodeId, transportNodeName := node.ID, node.Name
-		nodeStatus[transportNodeId] = db.TransportNodeStatus{
+		nodeStatus[transportNodeId] = TrNodeStatus{
 			TransportRequestNumber: trNumber,
 			StateID:                stateID,
 			TransportNodeID:        transportNodeId,

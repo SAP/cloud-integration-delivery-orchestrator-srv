@@ -27,7 +27,8 @@ func GetTmsNodesHandler(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"status": 200, "result": tmsNodes})
 }
 
-func CheckImportStatus(ctx *gin.Context) {
+// sync import status of all artifacts under a delivery request in TMS node
+func SyncImportState(ctx *gin.Context) {
 	var artifactOps []db.ArtifactTenantOperation
 	// Search ArtifactTenantOperation by DeliveryRequestID
 	deliveryRequestIDStr := ctx.Query("deliveryRequestId")
@@ -51,7 +52,7 @@ func CheckImportStatus(ctx *gin.Context) {
 		ctx.JSON(http.StatusNotFound, gin.H{"status": 404, "result": []db.ArtifactTenantOperation{}})
 		return
 	}
-	trStatus := make(map[string]map[uint]db.TransportNodeStatus) // tr number status in all nodes. key: artifactID, value: map[nodeID]status
+	trStatus := make(map[string]map[uint]tms.TrNodeStatus) // tr number status in all nodes. key: artifactID, value: map[nodeID]status
 
 	tmsClient, err := tms.NewClient(ctx)
 	if err != nil {

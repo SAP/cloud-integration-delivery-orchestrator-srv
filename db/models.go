@@ -62,16 +62,6 @@ type ExecutionLog struct {
 	Log      string
 }
 
-// status of an artifact in each transport node, should check by tr number
-type TransportNodeStatus struct {
-	TransportRequestNumber string    `json:"transportRequestNumber"`
-	StateID                uint      `json:"id"` // state id
-	TransportNodeID        uint      `json:"transportNodeId"`
-	TransportNodeName      string    `json:"TransportNodeName"`
-	Status                 string    `json:"status"` // SUCCEEDED, INITIAL, FATAL, RUNNING
-	UpdatedAt              time.Time `json:"updatedAt"`
-}
-
 // on artifact_tech_id:version can be deployed to *multiple* tenants, so it is better to seperate it into a new table!
 // search by artifact_tech_id:version, no need to use ID.
 type Artifact struct {

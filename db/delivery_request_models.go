@@ -2,6 +2,7 @@ package db
 
 import (
 	"mmt-delivery/pkg/lifecycle"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -12,6 +13,9 @@ type DeliveryRequest struct {
 
 	JiraLink        string                    // related Jira ticket URL
 	AggregateStatus lifecycle.AggregateStatus // pending, in-progress, completed, failed
+
+	ApprovedBy string // user who approved the import
+	ApprovedAt *time.Time
 
 	// One-to-many: a delivery request has many artifacts
 	ArtifactTenantOperations []ArtifactTenantOperation `gorm:"foreignKey:DeliveryRequestID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;"`

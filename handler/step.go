@@ -66,11 +66,12 @@ func ExecuteDeploy(ctx context.Context, step *db.DeployStep) error {
 		var taskID string
 		artifact := &step.Artifacts[i]
 		// currently support two types of artifacts
-		if artifact.Type == Artifact_Type_Iflow {
+		switch artifact.Type {
+		case Artifact_Type_Iflow:
 			taskID, err = client.DeployIflow(artifact.TechID, "active")
-		} else if artifact.Type == Artifact_Type_Sc {
+		case Artifact_Type_Sc:
 			taskID, err = client.DeployScriptCollection(artifact.TechID, "active")
-		} else {
+		default:
 			return fmt.Errorf("unsupported artifact type: %s", artifact.Type)
 		}
 		if err != nil {

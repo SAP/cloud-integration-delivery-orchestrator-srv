@@ -59,8 +59,9 @@ const (
 // Aggregate statuses (public surface).
 const (
 	AggUnknown        AggregateStatus = "UNKNOWN"
-	AggPending        AggregateStatus = "PENDING"         // waiting for TR or queued work
-	AggAwaitingImport AggregateStatus = "AWAITING_IMPORT" // TR ready, import not started
+	AggPending        AggregateStatus = "PENDING"          // waiting for TR or queued work
+	AggWaitingApprove AggregateStatus = "WAITING_APPROVAL" // waiting for manual approval to import
+	AggAwaitingImport AggregateStatus = "AWAITING_IMPORT"  // TR ready, import not started
 	AggImporting      AggregateStatus = "IMPORTING"
 	AggImportFailed   AggregateStatus = "IMPORT_FAILED"
 	AggImported       AggregateStatus = "IMPORTED"
