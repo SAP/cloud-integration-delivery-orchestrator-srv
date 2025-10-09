@@ -28,9 +28,9 @@ type ArtifactTenantOperation struct {
 	TransportRequestNumber string // associated transport request number
 
 	// All 3 Phases
-	TransportState lifecycle.RequestState
-	ImportState    lifecycle.ImportState
-	DeployState    lifecycle.DeployState
+	RequestState lifecycle.RequestState
+	ImportState  lifecycle.ImportState
+	DeployState  lifecycle.DeployState
 
 	LastError        string
 	RetryCountImport int

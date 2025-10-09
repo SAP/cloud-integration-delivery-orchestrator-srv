@@ -66,12 +66,11 @@ type ExecutionLog struct {
 // search by artifact_tech_id:version, no need to use ID.
 type Artifact struct {
 	gorm.Model
-	ArtifactTenantOperationID uint // foreign key to ArtifactTenantOperation.ID
 
-	TechID      string // artifact techical id
-	Version     string
+	TechID      string `gorm:"index:ux_artifact_tech_version,unique"` // artifact technical id
+	Version     string `gorm:"index:ux_artifact_tech_version,unique"`
 	Name        string
-	PackageId   string //package techical id
+	PackageID   string //package techical id
 	Type        string // iflow, scriptCollection
 	Description string
 	CreatedBy   string //TODO: may not need it. same above

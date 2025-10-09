@@ -74,11 +74,11 @@ func ParseYaml(ctx *gin.Context) {
 	var artifacts = make([]db.Artifact, 0)
 	for _, iflow := range yamlArtifacts["iflows"] {
 		trs = append(trs, db.TransportRequest{ID: iflow.TrNumber})
-		artifacts = append(artifacts, db.Artifact{TechID: iflow.Id, Version: iflow.Version, PackageId: iflow.Package, Type: Artifact_Type_Iflow})
+		artifacts = append(artifacts, db.Artifact{TechID: iflow.Id, Version: iflow.Version, PackageID: iflow.Package, Type: Artifact_Type_Iflow})
 	}
 	for _, sc := range yamlArtifacts["scriptCollections"] {
 		trs = append(trs, db.TransportRequest{ID: sc.TrNumber})
-		artifacts = append(artifacts, db.Artifact{TechID: sc.Id, Version: sc.Version, PackageId: sc.Package, Type: Artifact_Type_Sc})
+		artifacts = append(artifacts, db.Artifact{TechID: sc.Id, Version: sc.Version, PackageID: sc.Package, Type: Artifact_Type_Sc})
 	}
 
 	// save into transport plan
@@ -223,7 +223,7 @@ func checkArtifacts(ctx context.Context, tenant string, artifacts []db.Artifact)
 	// check if artifact exists in the tenant
 	for _, artifact := range artifacts {
 		if artifact.Type == Artifact_Type_Iflow {
-			if _, err := cpiClient.GetPackageIflow(artifact.PackageId, artifact.TechID, artifact.Version); err != nil {
+			if _, err := cpiClient.GetPackageIflow(artifact.PackageID, artifact.TechID, artifact.Version); err != nil {
 				return fmt.Errorf("integration iflow %s not found in tenant %s: %s", artifact.TechID, tenant, err)
 			}
 		} else if artifact.Type == Artifact_Type_Sc {

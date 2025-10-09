@@ -148,8 +148,7 @@ func (c *CpiClient) ImportPackage(cpiPackage importPackageRequest) (CPIPackage, 
 	}
 	return packcageResp.D, nil
 }
-
-type IflowItem struct {
+type ArtifactCommonItem struct {
 	ID              string      `json:"Id"`
 	Version         string      `json:"Version"`
 	PackageID       string      `json:"PackageId"`
@@ -160,6 +159,9 @@ type IflowItem struct {
 	ModifiedBy      string      `json:"ModifiedBy"`
 	ModifiedAt      string      `json:"ModifiedAt"`
 	ArtifactContent interface{} `json:"ArtifactContent"`
+}
+type IflowItem struct {
+	ArtifactCommonItem
 	Configurations  struct {
 		Deferred struct {
 			URI string `json:"uri"`
@@ -358,16 +360,7 @@ func (c *CpiClient) DeleteIflow(iflowID string, iflowVersion string) error {
 }
 
 type ScriptCollectionItem struct {
-	ID              string `json:"Id"`
-	Version         string `json:"Version"`
-	PackageID       string `json:"PackageId"`
-	Name            string `json:"Name"`
-	CreatedBy       string `json:"CreatedBy"`
-	CreatedAt       string `json:"CreatedAt"`
-	ModifiedBy      string `json:"ModifiedBy"`
-	ModifiedAt      string `json:"ModifiedAt"`
-	Description     string `json:"Description"`
-	ArtifactContent string `json:"ArtifactContent"`
+	ArtifactCommonItem
 	Metadata        struct {
 		ID          string `json:"id"`
 		URI         string `json:"uri"`

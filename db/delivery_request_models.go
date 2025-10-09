@@ -18,7 +18,7 @@ type DeliveryRequest struct {
 	ApprovedAt *time.Time
 
 	// One-to-many: a delivery request has many artifacts
-	ArtifactTenantOperations []ArtifactTenantOperation `gorm:"foreignKey:DeliveryRequestID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;"`
+	ArtifactTenantOperations []ArtifactTenantOperation `gorm:"foreignKey:DeliveryRequestID"`
 
 	SourceTenantID *uint
 	SourceTenant   *CpiTenant `gorm:"foreignKey:SourceTenantID"`

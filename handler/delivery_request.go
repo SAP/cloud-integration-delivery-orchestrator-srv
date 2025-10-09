@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	"mmt-delivery/db"
 	"mmt-delivery/pkg/lifecycle"
@@ -55,7 +56,7 @@ func UpdateDr(c *gin.Context) {
 	}
 
 	// generate Transport routes
-	if dr.SourceTenantID != nil {
+	if dr.SourceTenant.ID != 0 {
 		tmsCli, error := tms.NewClient(c)
 		if error != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": error.Error()})
@@ -74,12 +75,13 @@ func UpdateDr(c *gin.Context) {
 
 		dr.TargetRoutes, dr.TargetNodes = downstreamfromSource(dr.SourceTenant.TransportNode.ID, transportNodes, transportRoutes)
 	}
-	// check tr existence and origin
-	// TODO: wrap a function in v1 to validate, check in parallel
-	for _, a := range dr.ArtifactTenantOperations {
-		trNumber := a.TransportRequestNumber
+	// check tr existence and origin. TODO: wrap a function in v1 to validate, check in parallel
+	for i := range dr.ArtifactTenantOperations {
+		// check tr Number existence and origin
+		op := &dr.ArtifactTenantOperations[i]
+		trNumber := op.TransportRequestNumber
 		if trNumber == "" {
-			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": fmt.Sprintf("artifact %s has empty transport request number", a.ArtifactTechID)})
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": fmt.Sprintf("artifact %s has empty transport request number", op.ArtifactTechID)})
 			return
 		}
 		tmsClient, err := tms.NewClient(c)
@@ -87,23 +89,32 @@ func UpdateDr(c *gin.Context) {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 			return
 		}
-		trV1, err := tmsClient.GetTransportRequest(a.TransportRequestNumber) // v1 to check state
+		trV1, err := tmsClient.GetTransportRequest(trNumber) // v1 to check state
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": fmt.Sprintf("error when getting transport request %s, the tr number may not exist, error message: %s", trNumber, err)})
 			return
 		}
 		if trV1 == nil || trV1.ID == 0 || trV1.State != "RELEASED" {
-			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": fmt.Sprintf("artifact %s has invalid transport request number %s", a.ArtifactTechID, trNumber)})
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": fmt.Sprintf("artifact %s has invalid transport request number %s", op.ArtifactTechID, trNumber)})
 			return
 		}
 		if trV1.Origin != dr.SourceTenant.TransportNode.Name { // can only be checked by origin node name, not id.
-			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": fmt.Sprintf("artifact %s has transport request number %s not from source tenant node %s", a.ArtifactTechID, trNumber, dr.SourceTenant.TransportNode.Name)})
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": fmt.Sprintf("artifact %s has transport request number %s not from source tenant node %s", op.ArtifactTechID, trNumber, dr.SourceTenant.TransportNode.Name)})
 			return
 		}
-	}
+		// check and save artifact, match techid and version.
+		arti := &op.Artifact
+		if db.Conn().FirstOrCreate(arti, &db.Artifact{TechID: arti.TechID, Version: arti.Version}).Error != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": fmt.Sprintf("error when saving artifact %s:%s", arti.TechID, arti.Version)})
+			return
+		}
+		op.ArtifactID = arti.ID
 
+		// update status of artifact tenant operation
+
+	}
 	dr.UpdatedBy = User(c)
-	if err := db.Conn().Model(&db.DeliveryRequest{}).Updates(&dr).Error; err != nil {
+	if err := db.Conn().Session(&gorm.Session{FullSaveAssociations: true}).Updates(&dr).Error; err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
 	}
@@ -111,6 +122,7 @@ func UpdateDr(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": dr})
 }
 
+// Ask for approval of a pending delivery request
 func ApplyApprove(c *gin.Context) {
 	idRaw := c.Param("id")
 	id, err := strconv.Atoi(idRaw)
@@ -271,6 +283,7 @@ func GetDeliveryRequest(c *gin.Context) {
 	if err := db.Conn().
 		Preload("SourceTenant").
 		Preload("DeliveryRule").
+		Preload("ArtifactTenantOperations.Artifact").
 		First(&dr, id).Error; err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
