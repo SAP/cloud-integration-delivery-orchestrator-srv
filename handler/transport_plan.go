@@ -6,9 +6,11 @@ import (
 	"net/http"
 	"strconv"
 
+	. "mmt-delivery/consts"
 	"mmt-delivery/db"
 	"mmt-delivery/pkg/cpi"
 	"mmt-delivery/pkg/tms"
+	"mmt-delivery/service"
 
 	"github.com/gin-gonic/gin"
 	"gopkg.in/yaml.v3"
@@ -86,7 +88,7 @@ func ParseYaml(ctx *gin.Context) {
 	transportPlan.TransportRequests = trs
 	transportPlan.TransportGroupID = transportGroupId
 	transportPlan.TransportGroupName = transportGroupName
-	transportPlan.UpdatedBy = User(ctx)
+	transportPlan.UpdatedBy = service.User(ctx)
 	if err := db.Conn().Updates(&transportPlan).Error; err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"msg": "Failed to save transport plan: " + err.Error()})
 		return
@@ -123,10 +125,10 @@ func GenerateImportJob(ctx *gin.Context) {
 		Description: transportPlan.Description,
 		Status:      JOB_STATUS_SAVED,
 		Type:        Job_Type_Import,
-		CreatedBy:   User(ctx),
-		UpdatedBy:   User(ctx),
+		CreatedBy:   service.User(ctx),
+		UpdatedBy:   service.User(ctx),
 	}
-	if err := createJobSrv(&importJob, User(ctx)); err != nil {
+	if err := createJobSrv(&importJob, service.User(ctx)); err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"msg": "Failed to create import job: " + err.Error()})
 		return
 	}
@@ -145,7 +147,7 @@ func GenerateImportJob(ctx *gin.Context) {
 			TransportNodeId:      uint(transportNode.ID),
 			TransportNodeName:    transportNode.Name,
 			TransportRequests_V2: transportPlan.TransportRequests,
-			UpdatedBy:            User(ctx),
+			UpdatedBy:            service.User(ctx),
 			Type:                 Step_Type_Import,
 		}
 		if err := db.Conn().Create(&importStep).Error; err != nil {
@@ -183,8 +185,8 @@ func GenerateDeployJob(ctx *gin.Context) {
 		Description: transportPlan.Description,
 		Status:      JOB_STATUS_SAVED,
 		Type:        Job_Type_Deploy,
-		CreatedBy:   User(ctx),
-		UpdatedBy:   User(ctx),
+		CreatedBy:   service.User(ctx),
+		UpdatedBy:   service.User(ctx),
 	}
 	if err := db.Conn().Create(&deployJob).Error; err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"msg": "Failed to create deploy job: " + err.Error()})
@@ -203,7 +205,7 @@ func GenerateDeployJob(ctx *gin.Context) {
 			Status:    STEP_STATUS_SAVED,
 			Endpoint:  endpoint,
 			Artifacts: transportPlan.Artifacts,
-			UpdatedBy: User(ctx),
+			UpdatedBy: service.User(ctx),
 			Type:      Step_Type_Deploy,
 		}
 		if err := db.Conn().Create(&deployStep).Error; err != nil {
@@ -282,7 +284,7 @@ func SaveTransportPlan(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"msg": "Invalid request: " + err.Error()})
 		return
 	}
-	user := User(ctx)
+	user := service.User(ctx)
 	plan.UpdatedBy = user
 	// create/update use the same handler, so plan id of 0 means creating a new transport plan
 	if plan.ID == 0 {

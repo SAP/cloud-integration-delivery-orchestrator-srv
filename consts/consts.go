@@ -1,6 +1,6 @@
-package handler
+package consts
 
-import "github.com/gin-gonic/gin"
+type ArtifactType string
 
 const (
 	STEP_STATUS_ERROR   = "Error"
@@ -26,8 +26,8 @@ const (
 )
 
 const (
-	Artifact_Type_Iflow = "Integration Flow"
-	Artifact_Type_Sc    = "Script Collection"
+	Artifact_Type_Iflow ArtifactType = "Integration Flow"
+	Artifact_Type_Sc    ArtifactType = "Script Collection"
 )
 
 const (
@@ -39,8 +39,3 @@ const (
 	Step_Type_Deploy   = "Deploy"
 	Step_Type_Undeploy = "Undeploy"
 )
-
-func User(ctx *gin.Context) string {
-	email, _ := ctx.Get("user")
-	return email.(string)
-}

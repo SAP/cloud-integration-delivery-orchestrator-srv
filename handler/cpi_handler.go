@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	. "mmt-delivery/consts"
 	"mmt-delivery/db"
 	"mmt-delivery/pkg/cpi"
 	"mmt-delivery/pkg/env"
@@ -75,7 +76,7 @@ func GetPackageArtifactsHandler(ctx *gin.Context) {
 		return
 	}
 	for _, v := range scriptColls {
-		artifactResp = append(artifactResp, wrapArtifact("Script Collection", v))
+		artifactResp = append(artifactResp, wrapArtifact(Artifact_Type_Sc, v))
 	}
 	for _, v := range iflows {
 		artifactResp = append(artifactResp, wrapArtifact("Integration Flow", v))
@@ -88,7 +89,7 @@ func GetPackageArtifactsHandler(ctx *gin.Context) {
 
 // wrapArtifact normalizes CPI items (script collection or iflow) into a db.Artifact DTO (not persisted here).
 // Both ScriptCollectionItem and IflowItem embed ArtifactCommonItem so we only need those fields.
-func wrapArtifact(artifactType string, artifact any) db.Artifact {
+func wrapArtifact(artifactType ArtifactType, artifact any) db.Artifact {
 	switch v := artifact.(type) {
 	case cpi.ScriptCollectionItem:
 		return db.Artifact{

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	. "mmt-delivery/consts"
 	"mmt-delivery/pkg/env"
 	"net/http"
 	"time"
@@ -64,10 +65,10 @@ type Content struct {
 type Metadata struct {
 	ID         int64         `json:"id"`
 	EntityID   string        `json:"entityId"`
-	Type       string        `json:"type"`
-	Name       *string       `json:"name"`
-	Version    *string       `json:"version"`
-	ParentID   *int64        `json:"parentId"`
+	Type       ArtifactType  `json:"type"`
+	Name       string        `json:"name"`
+	Version    string        `json:"version"`
+	ParentID   int64         `json:"parentId"`
 	Attributes []interface{} `json:"attributes"`
 }
 
@@ -116,7 +117,7 @@ func (t *TmsClient) GetTransportRequest(TrNumber string) (*TransportRequestV1, e
 // update Import status of an artifact in each transport node.
 // status can be(from TMS): SUCCEEDED, INITIAL(when imported into next node. eg: dev -> ci, then state in ci should be inital),
 // FATAL, RUNNING, etc...
-func (t *TmsClient) SyncTrNodeStatus(trNumber string) (map[uint]TrNodeStatus, error) {
+func (t *TmsClient) TrNodeStatuses(trNumber string) (map[uint]TrNodeStatus, error) {
 	tr, err := t.GetTransportRequest(trNumber)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get transport request %s: %s", trNumber, err)

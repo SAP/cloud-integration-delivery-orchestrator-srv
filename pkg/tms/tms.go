@@ -193,7 +193,7 @@ func (t *TmsClient) GetNodeTransportRequests(nodeID uint) ([]NodeTransportReques
 }
 
 type ReqImportTransportRequests struct {
-	TransportRequests []int32 `json:"transportRequests"`
+	TransportRequests []uint `json:"transportRequests"`
 }
 
 type ReqImportTransportResp struct {
@@ -201,7 +201,7 @@ type ReqImportTransportResp struct {
 	MonitoringURL string `json:"monitoringURL"`
 }
 
-func (t *TmsClient) ImportTransportRequest(nodeID uint, transportRequestIDs []int32) (uint, error) {
+func (t *TmsClient) ImportTransportRequest(nodeID uint, transportRequestIDs []uint) (uint, error) {
 	childCtx, cancel := context.WithCancel(t.Context)
 	defer cancel()
 

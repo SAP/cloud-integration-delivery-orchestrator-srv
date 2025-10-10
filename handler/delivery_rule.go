@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"mmt-delivery/db"
+	"mmt-delivery/service"
 )
 
 // Create or update (upsert)
@@ -16,7 +17,7 @@ func UpsertDeliveryRule(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
 		return
 	}
-	user := User(ctx)
+	user := service.User(ctx)
 	rule.UpdatedBy = user
 	if rule.ID == 0 {
 		rule.CreatedBy = user

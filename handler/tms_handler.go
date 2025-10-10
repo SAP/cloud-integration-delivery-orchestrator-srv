@@ -6,8 +6,8 @@ import (
 	"strconv"
 
 	"mmt-delivery/db"
-	"mmt-delivery/pkg/lifecycle"
 	"mmt-delivery/pkg/tms"
+	"mmt-delivery/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -28,8 +28,8 @@ func GetTmsNodesHandler(ctx *gin.Context) {
 }
 
 // sync import status of all artifacts under a delivery request in TMS node
-func SyncImportState(ctx *gin.Context) {
-	var artifactOps []db.ArtifactTenantOperation
+func HandleSyncImportState(ctx *gin.Context) {
+
 	// Search ArtifactTenantOperation by DeliveryRequestID
 	deliveryRequestIDStr := ctx.Query("deliveryRequestId")
 	if deliveryRequestIDStr == "" {
@@ -37,57 +37,15 @@ func SyncImportState(ctx *gin.Context) {
 		return
 	}
 
-	deliveryRequestID, err := strconv.Atoi(deliveryRequestIDStr)
-	if err != nil || deliveryRequestID <= 0 {
+	drID, err := strconv.Atoi(deliveryRequestIDStr)
+	if err != nil || drID <= 0 {
 		ctx.JSON(http.StatusBadRequest, gin.H{"status": 400, "error": "invalid deliveryRequestId"})
 		return
 	}
-
-	// Adjust the DB accessor (db.DB / db.GetDB()) to match your project setup
-	if err := db.Conn().Where("delivery_request_id = ?", deliveryRequestID).Find(&artifactOps).Error; err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"status": 500, "error": fmt.Sprintf("db query failed: %s", err)})
-		return
-	}
-	if len(artifactOps) == 0 {
-		ctx.JSON(http.StatusNotFound, gin.H{"status": 404, "result": []db.ArtifactTenantOperation{}})
-		return
-	}
-	trStatus := make(map[string]map[uint]tms.TrNodeStatus) // tr number status in all nodes. key: artifactID, value: map[nodeID]status
-
-	tmsClient, err := tms.NewClient(ctx)
+	artifactOps, err := service.SyncImportState(uint(drID))
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"status": 500, "error": fmt.Sprintf("error creating tms client: %s", err)})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"status": 500, "error": err.Error()})
 		return
-	}
-	for _, a := range artifactOps {
-		trNumber := a.TransportRequestNumber
-		if trNumber == "" {
-			continue
-		}
-		if _, ok := trStatus[trNumber]; ok {
-			continue
-		}
-		// UpdateArtifactNodeStatus will call GetTransportRequest internally
-		ns, err := tmsClient.SyncTrNodeStatus(trNumber)
-		if err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"status": 500, "error": fmt.Sprintf("error when getting transport request %s, the tr number may not exist, error message: %s", trNumber, err)})
-			return
-		}
-		trStatus[trNumber] = ns
-	}
-	// update import state of each artifact tenant operation
-	for i, a := range artifactOps {
-		trNumber := a.TransportRequestNumber
-		if trNumber == "" {
-			continue
-		}
-		artifactNodeState := trStatus[trNumber][a.Tenant.TransportNode.ID].Status
-		artifactOps[i].ImportState = lifecycle.DeriveImport(artifactNodeState)
-		if db.Conn().Model(&artifactOps[i]).Updates(&db.ArtifactTenantOperation{ImportState: artifactOps[i].ImportState}).Error != nil {
-			// TODO: use condition to track import status
-			ctx.JSON(http.StatusInternalServerError, gin.H{"status": 500, "error": fmt.Sprintf("error when updating artifact %s import state to %s", a.ArtifactTechID, artifactOps[i].ImportState)})
-			return
-		}
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{"status": 200, "result": artifactOps})

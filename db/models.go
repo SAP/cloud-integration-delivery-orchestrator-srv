@@ -2,7 +2,7 @@ package db
 
 import (
 	"time"
-
+	. "mmt-delivery/consts"
 	"github.com/lib/pq"
 	"gorm.io/gorm"
 )
@@ -71,7 +71,7 @@ type Artifact struct {
 	Version     string `gorm:"index:ux_artifact_tech_version,unique"`
 	Name        string
 	PackageID   string //package techical id
-	Type        string // iflow, scriptCollection
+	Type        ArtifactType // iflow, scriptCollection
 	Description string
 	CreatedBy   string //TODO: may not need it. same above
 	CreatedAt   string
@@ -163,7 +163,7 @@ type CpiTenant struct {
 	Name          string `gorm:"uniqueIndex,where:deleted_at IS NULL"` // grom tag for soft delete issue. cpi-mmt-dev, cpi-ci, may use cpi tenant domain
 	CreatedBy     string
 	UpdatedBy     string
-	TransportNode TransportNode `gorm:"serializer:json"`
+	TransportNode TransportNode `gorm:"serializer:json"` //TMS Node
 	CpiEndpoint   ApiEndpoint   `gorm:"serializer:json"`
 }
 

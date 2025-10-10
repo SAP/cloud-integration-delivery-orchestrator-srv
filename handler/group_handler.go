@@ -3,6 +3,7 @@ package handler
 import (
 	"fmt"
 	"mmt-delivery/db"
+	"mmt-delivery/service"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -25,7 +26,7 @@ func CreateTransportGroup(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"msg": "Failed to bind transport group: " + err.Error()})
 		return
 	}
-	user := User(ctx)
+	user := service.User(ctx)
 	transportGroup.CreatedBy, transportGroup.UpdatedBy = user, user
 	if err := db.Conn().Save(&transportGroup).Error; err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"msg": "Failed to create transport group: " + err.Error()})

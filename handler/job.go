@@ -13,6 +13,9 @@ import (
 	"mmt-delivery/db"
 	"mmt-delivery/pkg/cpi"
 	"mmt-delivery/pkg/tms"
+	"mmt-delivery/service"
+
+	. "mmt-delivery/consts"
 
 	"github.com/gin-gonic/gin"
 )
@@ -107,7 +110,7 @@ func CreateJobHandler(ctx *gin.Context) {
 		return
 	}
 
-	if err := createJobSrv(&job, User(ctx)); err != nil {
+	if err := createJobSrv(&job, service.User(ctx)); err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"msg": fmt.Sprintf("error while creating job: %s", err)})
 		return
 	}
@@ -148,7 +151,7 @@ func CopyJob(ctx *gin.Context) {
 	job.ID = 0
 	job.Name = "Copy of - " + job.Name
 	job.Status = JOB_STATUS_SAVED
-	job.CreatedBy = User(ctx)
+	job.CreatedBy = service.User(ctx)
 	job.UpdatedBy = ""
 	job.Description = "Copied Desctiption - " + job.Description
 	// create a new job with the same steps. will write a new Job id
@@ -171,7 +174,7 @@ func CopyJob(ctx *gin.Context) {
 			steps[i].ID = 0
 			steps[i].JobId = job.ID
 			steps[i].Status = STEP_STATUS_SAVED
-			steps[i].UpdatedBy = User(ctx)
+			steps[i].UpdatedBy = service.User(ctx)
 			steps[i].Sequence = uint(i)
 			steps[i].TransportRequests_V2 = []db.TransportRequest{}
 			steps[i].ActionId = 0
@@ -194,7 +197,7 @@ func CopyJob(ctx *gin.Context) {
 			steps[i].ID = 0
 			steps[i].JobId = job.ID
 			steps[i].Status = STEP_STATUS_SAVED
-			steps[i].UpdatedBy = User(ctx)
+			steps[i].UpdatedBy = service.User(ctx)
 			steps[i].Sequence = uint(i)
 			steps[i].Artifacts = []db.Artifact{}
 		}
@@ -323,7 +326,7 @@ func UpSertJobWithStep(ctx *gin.Context) {
 	}
 	// save job
 	job.Status = JOB_STATUS_SAVED
-	user := User(ctx)
+	user := service.User(ctx)
 	job.UpdatedBy = user
 
 	if err := db.Conn().Save(&job).Error; err != nil {
@@ -398,7 +401,7 @@ func ExecuteJob(ctx *gin.Context) {
 		})
 		return
 	}
-	user := User(ctx)
+	user := service.User(ctx)
 
 	// query job
 	var job db.Job

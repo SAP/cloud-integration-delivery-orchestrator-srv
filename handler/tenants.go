@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"mmt-delivery/db"
+	"mmt-delivery/service"
 )
 
 // Create or update (upsert) directly using db model
@@ -16,7 +17,7 @@ func UpsertCpiTenant(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
 		return
 	}
-	user := User(ctx)
+	user := service.User(ctx)
 	tenant.UpdatedBy = user
 	if tenant.ID == 0 {
 		tenant.CreatedBy = user

@@ -9,6 +9,7 @@ import (
 	"mmt-delivery/db"
 	"mmt-delivery/pkg/cpi"
 	"mmt-delivery/pkg/tms"
+	. "mmt-delivery/consts"
 
 	"github.com/gin-gonic/gin"
 )
@@ -43,9 +44,9 @@ func ExecuteImport(ctx context.Context, step db.ImportStep) (uint, error) {
 	if err != nil {
 		return 0, fmt.Errorf("failed to create tms client: %s", err)
 	}
-	trNumbers := make([]int32, len(step.TransportRequests_V2))
+	trNumbers := make([]uint, len(step.TransportRequests_V2))
 	for i, tr := range step.TransportRequests_V2 {
-		trNumbers[i] = int32(tr.ID)
+		trNumbers[i] = uint(tr.ID)
 	}
 	actionId, err := client.ImportTransportRequest(step.TransportNodeId, trNumbers)
 	if err != nil {
