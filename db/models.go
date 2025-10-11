@@ -1,8 +1,9 @@
 package db
 
 import (
-	"time"
 	. "mmt-delivery/consts"
+	"time"
+
 	"github.com/lib/pq"
 	"gorm.io/gorm"
 )
@@ -70,7 +71,7 @@ type Artifact struct {
 	TechID      string `gorm:"index:ux_artifact_tech_version,unique"` // artifact technical id
 	Version     string `gorm:"index:ux_artifact_tech_version,unique"`
 	Name        string
-	PackageID   string //package techical id
+	PackageID   string       //package techical id
 	Type        ArtifactType // iflow, scriptCollection
 	Description string
 	CreatedBy   string //TODO: may not need it. same above
@@ -155,28 +156,4 @@ type ApiEndpoint struct {
 	Name string `json:"name"`
 	Type string `json:"type"`
 	URL  string `json:"url"`
-}
-
-// bind cpi tenant with tms node
-type CpiTenant struct {
-	gorm.Model
-	Name          string `gorm:"uniqueIndex,where:deleted_at IS NULL"` // grom tag for soft delete issue. cpi-mmt-dev, cpi-ci, may use cpi tenant domain
-	CreatedBy     string
-	UpdatedBy     string
-	TransportNode TransportNode `gorm:"serializer:json"` //TMS Node
-	CpiEndpoint   ApiEndpoint   `gorm:"serializer:json"`
-}
-
-type DeliveryRule struct {
-	gorm.Model
-	Name           string
-	VersionPattern string
-
-	// Associations to CpiTenant
-	IncludedTenants []CpiTenant `gorm:"serializer:json;"` // included CPI tenants
-	ExcludedTenants []CpiTenant `gorm:"serializer:json;"` // excluded CPI tenants
-
-	Active    bool
-	CreatedBy string
-	UpdatedBy string
 }

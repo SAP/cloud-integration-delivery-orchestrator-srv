@@ -29,20 +29,20 @@ func TrExist(ops []db.ArtifactTenantOperation, sourceTenant *db.CpiTenant) (bool
 		if trV1 == nil || trV1.ID == 0 || trV1.State != "RELEASED" { // only released tr can be imported
 			return false, fmt.Errorf("artifact %s has invalid transport request number %s", op.ArtifactTechID, trNumber)
 		}
-		if trV1.Origin != sourceTenant.TransportNode.Name { // check if match source tenant. can only be checked by origin node name, not id.
-			return false, fmt.Errorf("artifact %s has transport request number %s not from source tenant node %s", op.ArtifactTechID, trNumber, sourceTenant.TransportNode.Name)
+		if trV1.Origin != sourceTenant.TransportNodeName { // check if match source tenant. can only be checked by origin node name, not id.
+			return false, fmt.Errorf("artifact %s has transport request number %s not from source tenant node %s", op.ArtifactTechID, trNumber, sourceTenant.TransportNodeName)
 		}
 		// check Content Field, should match techID, Version, Type
-		index := -1
-		for i, md := range trV1.Content[0].Metadata {
-			if md.Name == op.ArtifactTechID || md.Type == op.Artifact.Type || md.Version == op.ArtifactVersion {
-				index = i
-				break
-			}
-		}
-		if index == -1 {
-			return false, fmt.Errorf("artifact %s, trNumber %s: not match. May use a wrong trNumber for this artifact", op.ArtifactTechID, trNumber)
-		}
+		// index := -1
+		// for i, md := range trV1.Content[0].Metadata {
+		// 	if md.Name == op.ArtifactTechID || md.Type == op.Artifact.Type || md.Version == op.ArtifactVersion {
+		// 		index = i
+		// 		break
+		// 	}
+		// }
+		// if index == -1 {
+		// 	return false, fmt.Errorf("artifact %s, trNumber %s: not match. May use a wrong trNumber for this artifact", op.ArtifactTechID, trNumber)
+		// }
 
 		// update status of artifact tenant operation
 
@@ -51,22 +51,21 @@ func TrExist(ops []db.ArtifactTenantOperation, sourceTenant *db.CpiTenant) (bool
 }
 
 // check and load artifact info into db, set ArtifactID in ops
-func LoadArtifact(ops []db.ArtifactTenantOperation) error {
-	for i := range ops {
-		op := &ops[i]
-		a := &op.Artifact
-		if db.Conn().FirstOrCreate(a, &db.Artifact{TechID: a.TechID, Version: a.Version}).Error != nil {
-			return fmt.Errorf("error when saving artifact %s:%s", a.TechID, a.Version)
-		}
-		op.ArtifactID = a.ID // for foreign key, refer to table Artifact.ID
+func LoadArtifact(op db.ArtifactTenantOperation) (artifactID uint, err error) {
+	a := &op.Artifact
+	if db.Conn().FirstOrCreate(a, &db.Artifact{TechID: a.TechID, Version: a.Version}).Error != nil {
+		err = fmt.Errorf("error when saving artifact %s:%s", a.TechID, a.Version)
+		return
 	}
-	return nil
+	artifactID = a.ID
+	return
 }
 
+// when call this function, make sure all ops have valid tr number
 func SyncImportState(deliveryRequestID uint) ([]db.ArtifactTenantOperation, error) {
 	var artifactOps []db.ArtifactTenantOperation
 	// Adjust the DB accessor (db.DB / db.GetDB()) to match your project setup
-	if err := db.Conn().Where(&db.ArtifactTenantOperation{DeliveryRequestID: deliveryRequestID}).Find(&artifactOps).Error; err != nil {
+	if err := db.Conn().Where(&db.ArtifactTenantOperation{DeliveryRequestID: deliveryRequestID}).Preload("Tenant").Find(&artifactOps).Error; err != nil {
 		return nil, fmt.Errorf("db query failed: %w", err)
 	}
 	if len(artifactOps) == 0 {
@@ -76,14 +75,11 @@ func SyncImportState(deliveryRequestID uint) ([]db.ArtifactTenantOperation, erro
 	if err != nil {
 		return nil, fmt.Errorf("error creating tms client: %w", err)
 	}
-	trStatus := make(map[string]map[uint]tms.TrNodeStatus)          // tr number status in all nodes. trNumber - map[nodeID]status
-	nodeOps := make(map[uint]map[string]db.ArtifactTenantOperation) // arTenantOp record in each node. tms nodeID - map[trNumber]ArtifactTenantOperation
+	trStatus := make(map[string]map[uint]tms.TrNodeStatus)              // tr number status in all nodes. trNumber - map[nodeID]status
+	tenantToOps := make(map[uint]map[string]db.ArtifactTenantOperation) // arTenantOp record in each node. cpi tenant ID - map[trNumber]ArtifactTenantOperation
 	//
 	for _, op := range artifactOps {
 		trNumber := op.TransportRequestNumber
-		if trNumber == "" {
-			continue
-		}
 		if _, ok := trStatus[trNumber]; ok { // already fetched
 			continue
 		}
@@ -93,34 +89,42 @@ func SyncImportState(deliveryRequestID uint) ([]db.ArtifactTenantOperation, erro
 			return nil, fmt.Errorf("error when getting transport request %s: %w", trNumber, err)
 		}
 		trStatus[trNumber] = ns
-		nodeID := op.Tenant.TransportNode.ID
-		if _, ok := nodeOps[nodeID]; !ok {
-			nodeOps[nodeID] = make(map[string]db.ArtifactTenantOperation)
-		}
-		nodeOps[nodeID][trNumber] = op
 	}
 
-	for _, op := range artifactOps { // check to create new record if new tr status happens in tms
-		trNumber := op.TransportRequestNumber
-		if trNumber == "" {
+	for _, op := range artifactOps {
+		tenantID, trNumber := op.Tenant.ID, op.TransportRequestNumber
+		if _, ok := tenantToOps[tenantID]; !ok {
+			tenantToOps[tenantID] = make(map[string]db.ArtifactTenantOperation)
+		}
+		if _, ok := tenantToOps[tenantID][trNumber]; ok { // already mapped
 			continue
 		}
+		tenantToOps[tenantID][trNumber] = op
+	}
+
+	nodetoTenantID := nodeToTenant() // tms node ID - cpi tenant ID
+	for _, op := range artifactOps { // check to create new record if new tr status happens in tms
+		trNumber := op.TransportRequestNumber
 		// same artifactOp == same trNumber, but in diffrent tms nods
 		for nID, nState := range trStatus[trNumber] {
-			if _, ok := nodeOps[nID][trNumber]; !ok { // means this a new status happens in tms, should create a new record
+			tenantID := nodetoTenantID[nID]
+			if _, ok := tenantToOps[tenantID]; !ok {
+				tenantToOps[tenantID] = make(map[string]db.ArtifactTenantOperation)
+			}
+			if _, ok := tenantToOps[tenantID][trNumber]; !ok { // means this a new status happens in tms, should create a new record
 				newOp := db.ArtifactTenantOperation{
 					DeliveryRequestID:      op.DeliveryRequestID,
 					ArtifactID:             op.ArtifactID,
 					ArtifactTechID:         op.ArtifactTechID,
 					ArtifactVersion:        op.ArtifactVersion,
-					TenantID:               op.TenantID,
+					TenantID:               tenantID, // TODO: map nID to tenantID
 					TransportRequestNumber: trNumber,
 					ImportState:            lifecycle.DeriveImport(nState.Status),
 					DeployState:            lifecycle.DeployNotStarted,
 				}
-				nodeOps[nID][trNumber] = newOp
+				tenantToOps[tenantID][trNumber] = newOp
 			}
-			curOp := nodeOps[nID][trNumber]
+			curOp := tenantToOps[tenantID][trNumber]
 			curOp.ImportState = lifecycle.DeriveImport(nState.Status)
 			if err := db.Conn().Save(&curOp).Error; err != nil {
 				return nil, fmt.Errorf("error when creating new artifact tenant operation for artifact %s in node %d: %w", curOp.ArtifactTechID, nID, err)
@@ -150,7 +154,7 @@ func GenRoute(sourceTenant db.CpiTenant) (targetRoutes []db.TransportRoute, targ
 		return
 	}
 
-	targetRoutes, targetNodes = downstreamfromSource(sourceTenant.TransportNode.ID, transportNodes, transportRoutes)
+	targetRoutes, targetNodes = downstreamfromSource(sourceTenant.TransportNodeID, transportNodes, transportRoutes)
 	return
 }
 
@@ -173,7 +177,7 @@ func ScheduleImport(drID uint, targetNode uint) (bool, error) {
 	trs := make([]uint, 0)
 	for i := range ops {
 		op := &ops[i]
-		if op.ImportState != lifecycle.ImportQueued || op.Tenant.TransportNode.ID != targetNode { // only queued(INITIAL) state can be triggered for import
+		if op.ImportState != lifecycle.ImportQueued || op.Tenant.TransportNodeID != targetNode { // only queued(INITIAL) state can be triggered for import
 			continue
 		}
 		op.ImportState = lifecycle.ImportInProgress
@@ -257,4 +261,17 @@ func downstreamfromSource(sourceNodeID uint, transportNodes []db.TransportNode, 
 	}
 
 	return
+}
+
+// TODO: cache this mapping, or load when service starts
+func nodeToTenant() map[uint]uint {
+	var tenants []db.CpiTenant
+	if err := db.Conn().Find(&tenants).Error; err != nil {
+		return nil
+	}
+	mapping := make(map[uint]uint)
+	for _, t := range tenants {
+		mapping[t.TransportNodeID] = t.ID
+	}
+	return mapping
 }

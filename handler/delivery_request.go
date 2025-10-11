@@ -70,10 +70,16 @@ func UpdateDr(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
 	}
-
-	if err := service.LoadArtifact(dr.ArtifactTenantOperations); err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
-		return
+	// load artifact info, set ArtifactID in ops
+	for i := range dr.ArtifactTenantOperations {
+		op := &dr.ArtifactTenantOperations[i]
+		aID, err := service.LoadArtifact(*op)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": fmt.Errorf("failed to load artifact for operation %d: %s", op.ID, err)})
+			return
+		}
+		op.ArtifactID = aID
+		op.Artifact.ID = aID  // to avoid unique constraint, since FullSaveAssociations in main table
 	}
 
 	dr.UpdatedBy = service.User(c)
