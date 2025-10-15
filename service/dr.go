@@ -75,12 +75,12 @@ func SyncImportState(deliveryRequestID uint) ([]db.ArtifactTenantOperation, erro
 	if err != nil {
 		return nil, fmt.Errorf("error creating tms client: %w", err)
 	}
-	trStatus := make(map[string]map[uint]tms.TrNodeStatus)              // tr number status in all nodes. trNumber - map[nodeID]status
+	trNodeStatus := make(map[string]map[uint]tms.TrNodeStatus)              // tr number status in all nodes. trNumber - map[nodeID]status
 	tenantToOps := make(map[uint]map[string]db.ArtifactTenantOperation) // arTenantOp record in each node. cpi tenant ID - map[trNumber]ArtifactTenantOperation
 	//
 	for _, op := range artifactOps {
 		trNumber := op.TransportRequestNumber
-		if _, ok := trStatus[trNumber]; ok { // already fetched
+		if _, ok := trNodeStatus[trNumber]; ok { // already fetched
 			continue
 		}
 		// UpdateArtifactNodeStatus will call GetTransportRequest internally
@@ -88,7 +88,7 @@ func SyncImportState(deliveryRequestID uint) ([]db.ArtifactTenantOperation, erro
 		if err != nil {
 			return nil, fmt.Errorf("error when getting transport request %s: %w", trNumber, err)
 		}
-		trStatus[trNumber] = ns
+		trNodeStatus[trNumber] = ns
 	}
 
 	for _, op := range artifactOps {
@@ -102,12 +102,16 @@ func SyncImportState(deliveryRequestID uint) ([]db.ArtifactTenantOperation, erro
 		tenantToOps[tenantID][trNumber] = op
 	}
 
-	nodetoTenantID := nodeToTenant() // tms node ID - cpi tenant ID
-	for _, op := range artifactOps { // check to create new record if new tr status happens in tms
+	nodetoTenantID := nodeTenantCache // tms node ID - cpi tenant ID
+	for _, op := range artifactOps {  // check to create new record if new tr status happens in tms
 		trNumber := op.TransportRequestNumber
 		// same artifactOp == same trNumber, but in diffrent tms nods
-		for nID, nState := range trStatus[trNumber] {
-			tenantID := nodetoTenantID[nID]
+		for nID, nState := range trNodeStatus[trNumber] {
+			var tenantID uint
+			var ok bool
+			if tenantID, ok = nodetoTenantID[nID]; !ok {
+				return nil, fmt.Errorf("no cpi tenant found for tms node %d, please configure Cpi Tenant first", nID)
+			}
 			if _, ok := tenantToOps[tenantID]; !ok {
 				tenantToOps[tenantID] = make(map[string]db.ArtifactTenantOperation)
 			}
@@ -117,7 +121,7 @@ func SyncImportState(deliveryRequestID uint) ([]db.ArtifactTenantOperation, erro
 					ArtifactID:             op.ArtifactID,
 					ArtifactTechID:         op.ArtifactTechID,
 					ArtifactVersion:        op.ArtifactVersion,
-					TenantID:               tenantID, // TODO: map nID to tenantID
+					TenantID:               tenantID,
 					TransportRequestNumber: trNumber,
 					ImportState:            lifecycle.DeriveImport(nState.Status),
 					DeployState:            lifecycle.DeployNotStarted,
@@ -263,15 +267,17 @@ func downstreamfromSource(sourceNodeID uint, transportNodes []db.TransportNode, 
 	return
 }
 
-// TODO: cache this mapping, or load when service starts
-func nodeToTenant() map[uint]uint {
+var nodeTenantCache map[uint]uint
+
+// map tms node ID to cpi tenant ID
+func init() {
+	nodeTenantCache = make(map[uint]uint)
+	// load all tenants
 	var tenants []db.CpiTenant
 	if err := db.Conn().Find(&tenants).Error; err != nil {
-		return nil
+		panic("failed to load cpi tenants: " + err.Error())
 	}
-	mapping := make(map[uint]uint)
 	for _, t := range tenants {
-		mapping[t.TransportNodeID] = t.ID
+		nodeTenantCache[t.TransportNodeID] = t.ID
 	}
-	return mapping
 }

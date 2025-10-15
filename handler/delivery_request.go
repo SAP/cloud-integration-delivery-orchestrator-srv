@@ -198,6 +198,7 @@ func GetDeliveryRequest(c *gin.Context) {
 		Preload("SourceTenant").
 		Preload("DeliveryRule").
 		Preload("ArtifactTenantOperations.Artifact").
+		Preload("ArtifactTenantOperations.Tenant").
 		First(&dr, id).Error; err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return

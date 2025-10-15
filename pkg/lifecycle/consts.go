@@ -65,6 +65,7 @@ const (
 	AggImporting      AggregateStatus = "IMPORTING"
 	AggImportFailed   AggregateStatus = "IMPORT_FAILED"
 	AggImported       AggregateStatus = "IMPORTED"
+	AggWaitingDeploy  AggregateStatus = "AWAITING_DEPLOY" // import done, deploy not started
 	AggDeploying      AggregateStatus = "DEPLOYING"
 	AggDeployFailed   AggregateStatus = "DEPLOY_FAILED"
 	AggDeployed       AggregateStatus = "DEPLOYED"
