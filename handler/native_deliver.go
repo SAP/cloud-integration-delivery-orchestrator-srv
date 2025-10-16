@@ -93,7 +93,7 @@ func NativeDeliver(ctx *gin.Context) {
 
 			// TODO: loop for aroud 5 times to check deploy status
 			for i := 0; i < 5; i++ {
-				runtimeArtifact, err := destClient.GetRuntimeArtifactById(artifact.ArtifactID)
+				runtimeArtifact, err := destClient.RuntimeArtifact(artifact.ArtifactID)
 				if err != nil {
 					ctx.JSON(500, gin.H{"error": "Failed to check deploy status on destination tenant: " + err.Error()})
 					return

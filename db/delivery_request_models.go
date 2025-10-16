@@ -63,6 +63,9 @@ type ArtifactTenantOperation struct {
 	RetryCountDeploy int
 	NextRetryAt      *time.Time
 	Conditions       []byte // TODO: may asscociate with lifecycle.Condition. 'Actions' may be better name(ask AI to confirm)
+
+	CreatedBy string
+	UpdatedBy string
 }
 
 // BatchJob orchestrates a bulk set of operations (IMPORT or DEPLOY) across a collection

@@ -7,7 +7,6 @@ import (
 
 	"mmt-delivery/db"
 	"mmt-delivery/pkg/tms"
-	"mmt-delivery/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -25,30 +24,6 @@ func GetTmsNodesHandler(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"status": 200, "result": tmsNodes})
-}
-
-// sync import status of all artifacts under a delivery request in TMS node
-func HandleSyncImportState(ctx *gin.Context) {
-
-	// Search ArtifactTenantOperation by DeliveryRequestID
-	deliveryRequestIDStr := ctx.Query("deliveryRequestId")
-	if deliveryRequestIDStr == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"status": 400, "error": "missing query param: deliveryRequestId"})
-		return
-	}
-
-	drID, err := strconv.Atoi(deliveryRequestIDStr)
-	if err != nil || drID <= 0 {
-		ctx.JSON(http.StatusBadRequest, gin.H{"status": 400, "error": "invalid deliveryRequestId"})
-		return
-	}
-	artifactOps, err := service.SyncImportState(uint(drID))
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"status": 500, "error": err.Error()})
-		return
-	}
-
-	ctx.JSON(http.StatusOK, gin.H{"status": 200, "result": artifactOps})
 }
 
 func GetRoutesHandler(ctx *gin.Context) {

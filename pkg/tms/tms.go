@@ -223,7 +223,7 @@ func (t *TmsClient) ImportTransportRequest(nodeID uint, transportRequestIDs []ui
 	respBodyContent, errReq := t.Do(&request)
 
 	if errReq != nil {
-		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
+		logger.Errorf("Error when getting response content, the error message is %s", errReq)
 		return actionID, errReq
 	}
 

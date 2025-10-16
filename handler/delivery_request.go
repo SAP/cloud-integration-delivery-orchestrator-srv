@@ -79,17 +79,14 @@ func UpdateDr(c *gin.Context) {
 			return
 		}
 		op.ArtifactID = aID
-		op.Artifact.ID = aID  // to avoid unique constraint, since FullSaveAssociations in main table
+		op.Artifact.ID = aID // to avoid unique constraint, since FullSaveAssociations in main table
 	}
-
-	dr.UpdatedBy = service.User(c)
+	user := service.User(c)
+	dr.UpdatedBy = user
 	if err := db.Conn().Session(&gorm.Session{FullSaveAssociations: true}).Updates(&dr).Error; err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
 	}
-
-	go service.SyncImportState(dr.ID)
-
 	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": dr})
 }
 
@@ -226,4 +223,66 @@ func checkJIRA(jira string) bool {
 		return true
 	}
 	return true
+}
+
+// used for both import and deploy
+type DeliverOpRequest struct {
+	OpIDs        []uint `json:"opIDs"`
+	TargetTenant uint   `json:"targetTenant"`
+}
+
+func HandleImportOps(c *gin.Context) {
+	var req DeliverOpRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
+		return
+	}
+	if len(req.OpIDs) == 0 || req.TargetTenant == 0 {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "missing opIDs or targetNode"})
+		return
+	}
+	user := service.User(c)
+	success, err := service.NodeImportOp(req.OpIDs, req.TargetTenant, user)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": success})
+}
+
+func HandleDeployOps(c *gin.Context) {
+	var req DeliverOpRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
+		return
+	}
+	if len(req.OpIDs) == 0 || req.TargetTenant == 0 {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "missing opIDs or targetNode"})
+		return
+	}
+	user := service.User(c)
+	success, err := service.NodeDeployOp(req.OpIDs, req.TargetTenant, user)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": success})
+}
+
+func HandleSyncState(ctx *gin.Context) {
+	drIDStr := ctx.Param("deliveryRequestId")
+	if drIDStr == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"status": 400, "error": "missing query param: deliveryRequestId"})
+		return
+	}
+	user := service.User(ctx)
+	drID, err := service.ToUint(drIDStr)
+	if err != nil || drID <= 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"status": 400, "error": "invalid deliveryRequestId"})
+		return
+	}
+	service.SyncImportState(drID, user)
+	service.SyncDeployState(drID, user)
+
+	ctx.JSON(http.StatusOK, gin.H{"status": 200, "result": "sync finished"})
 }

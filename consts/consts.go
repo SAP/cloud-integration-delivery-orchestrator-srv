@@ -2,6 +2,8 @@ package consts
 
 type ArtifactType string
 
+type RuntimeState string
+
 const (
 	STEP_STATUS_ERROR   = "Error"
 	STEP_STATUS_RUNNING = "Running"
@@ -23,6 +25,12 @@ const (
 	UNDEPLOY_STATUS_UNDEPLOYING = "UNDEPLOYING"
 	UNDEPLOY_STATUS_SUCCESS     = DEPLOY_STATUS_SUCCESS
 	UNDEPLOY_STATUS_FAIL        = DEPLOY_STATUS_FAIL
+)
+
+const (
+	Artifact_Rt_Started  RuntimeState = "STARTED"
+	Artifact_Rt_Error    RuntimeState = "ERROR"
+	Artifact_Rt_Starting RuntimeState = "STARTING"
 )
 
 const (

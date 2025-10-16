@@ -37,7 +37,7 @@ const (
 // status from TMS API: INITIAL, RUNNING, SUCCEEDED, FATAL, etc...
 const (
 	ImportNotStarted ImportState = "NOT_STARTED"
-	ImportQueued     ImportState = "QUEUED"
+	ImportQueued     ImportState = "QUEUED" // INITIAL
 	ImportInProgress ImportState = "IN_PROGRESS"
 	ImportPartial    ImportState = "PARTIAL" // TODO: not a right situation, remove later
 	ImportFailed     ImportState = "FAILED"

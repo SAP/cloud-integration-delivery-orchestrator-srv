@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"mmt-delivery/consts"
 	"mmt-delivery/pkg/env"
 )
 
@@ -148,6 +149,7 @@ func (c *CpiClient) ImportPackage(cpiPackage importPackageRequest) (CPIPackage, 
 	}
 	return packcageResp.D, nil
 }
+
 type ArtifactCommonItem struct {
 	ID              string      `json:"Id"`
 	Version         string      `json:"Version"`
@@ -162,7 +164,7 @@ type ArtifactCommonItem struct {
 }
 type IflowItem struct {
 	ArtifactCommonItem
-	Configurations  struct {
+	Configurations struct {
 		Deferred struct {
 			URI string `json:"uri"`
 		} `json:"__deferred"`
@@ -300,6 +302,37 @@ func (c *CpiClient) DeployIflow(iflowID string, iflowVersion string) (string, er
 	return taskID, nil
 }
 
+// deploy a design time script collection
+func (c *CpiClient) DeployScriptCollection(scriptCollectionID string, scriptCollectionVersion string) (string, error) {
+	childCtx, cancel := context.WithCancel(c.Context)
+	defer cancel()
+	var taskID string
+	fullURL := fmt.Sprintf("%s/DeployScriptCollectionDesigntimeArtifact?Id='%s'&Version='%s'", c.ApiURL, scriptCollectionID, scriptCollectionVersion)
+	logger.Infof("Starting to deploy script collection %s in package from cpi tenant %s\n", scriptCollectionID, fullURL)
+	request := env.HttpRequest{
+		Ctx:    childCtx,
+		Method: http.MethodPost,
+		ApiURL: fullURL,
+	}
+	respBodyContent, errReq := c.Do(&request)
+	if errReq != nil {
+		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
+		return "", errReq
+	}
+	taskID = string(*respBodyContent)
+	return taskID, nil
+}
+
+func (c *CpiClient) DeployArtifact(artifactID, artifactVersion string, artifactType consts.ArtifactType) (string, error) {
+	switch artifactType {
+	case consts.Artifact_Type_Iflow:
+		return c.DeployIflow(artifactID, artifactVersion)
+	case consts.Artifact_Type_Sc:
+		return c.DeployScriptCollection(artifactID, artifactVersion)
+	}
+	return "", fmt.Errorf("unsupported artifact type %s for artifact %s:%s", artifactType, artifactID, artifactVersion)
+}
+
 type DeployStatus struct {
 	D struct {
 		Metadata struct {
@@ -361,7 +394,7 @@ func (c *CpiClient) DeleteIflow(iflowID string, iflowVersion string) error {
 
 type ScriptCollectionItem struct {
 	ArtifactCommonItem
-	Metadata        struct {
+	Metadata struct {
 		ID          string `json:"id"`
 		URI         string `json:"uri"`
 		Type        string `json:"type"`
@@ -438,27 +471,6 @@ func (c *CpiClient) GetDesignTimeScriptCollection(scriptCollectionID string, scr
 	return scriptCollectionResp.D, nil
 }
 
-// deploy a design time script collection
-func (c *CpiClient) DeployScriptCollection(scriptCollectionID string, scriptCollectionVersion string) (string, error) {
-	childCtx, cancel := context.WithCancel(c.Context)
-	defer cancel()
-	var taskID string
-	fullURL := fmt.Sprintf("%s/DeployScriptCollectionDesigntimeArtifact?Id='%s'&Version='%s'", c.ApiURL, scriptCollectionID, scriptCollectionVersion)
-	logger.Infof("Starting to deploy script collection %s in package from cpi tenant %s\n", scriptCollectionID, fullURL)
-	request := env.HttpRequest{
-		Ctx:    childCtx,
-		Method: http.MethodPost,
-		ApiURL: fullURL,
-	}
-	respBodyContent, errReq := c.Do(&request)
-	if errReq != nil {
-		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
-		return "", errReq
-	}
-	taskID = string(*respBodyContent)
-	return taskID, nil
-}
-
 func (c *CpiClient) DeleteScriptCollection(scriptCollectionID string, scriptCollectionVersion string) error {
 	childCtx, cancel := context.WithCancel(c.Context)
 	defer cancel()
@@ -504,13 +516,13 @@ type RuntimeArtifactsResp struct {
 }
 
 type RuntimeArtifact struct {
-	ID         string `json:"Id"`
-	Version    string `json:"Version"`
-	Name       string `json:"Name"`
-	Type       string `json:"Type"`
-	DeployedBy string `json:"DeployedBy"`
-	DeployedOn string `json:"DeployedOn"`
-	Status     string `json:"Status"`
+	ID         string              `json:"Id"`
+	Version    string              `json:"Version"`
+	Name       string              `json:"Name"`
+	Type       string              `json:"Type"`
+	DeployedBy string              `json:"DeployedBy"`
+	DeployedOn string              `json:"DeployedOn"`
+	Status     consts.RuntimeState `json:"Status"`
 }
 
 // Get all deployed(runtime) artifacts
@@ -563,7 +575,9 @@ func (c *CpiClient) CheckUndeployStatus(artifactId string) (string, error) {
 	return "UNDEPLOYING", nil
 }
 
-func (c *CpiClient) GetRuntimeArtifactById(artifactId string) (RuntimeArtifact, error) {
+// Get a runtime artifact by Id.
+// status: STARTED, ERROR, STARTING(not sure)
+func (c *CpiClient) RuntimeArtifact(artifactId string) (RuntimeArtifact, error) {
 	fullUrl := fmt.Sprintf("%s/IntegrationRuntimeArtifacts('%s')", c.ApiURL, artifactId)
 	logger.Infof("Starting to get runtime artifact %s on tenant %s\n", artifactId, fullUrl)
 	request := env.HttpRequest{

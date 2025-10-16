@@ -1,14 +1,32 @@
 package service
 
+// delivery request related services
+
 import (
 	"context"
 	"fmt"
+	"mmt-delivery/consts"
 	"mmt-delivery/db"
+	"mmt-delivery/pkg/cpi"
 	"mmt-delivery/pkg/lifecycle"
 	"mmt-delivery/pkg/tms"
+	"time"
 )
 
-// delivery request related services
+var nodeTenantCache map[uint]uint
+
+// map tms node ID to cpi tenant ID
+func init() {
+	nodeTenantCache = make(map[uint]uint)
+	// load all tenants
+	var tenants []db.CpiTenant
+	if err := db.Conn().Find(&tenants).Error; err != nil {
+		panic("failed to load cpi tenants: " + err.Error())
+	}
+	for _, t := range tenants {
+		nodeTenantCache[t.TransportNodeID] = t.ID
+	}
+}
 
 // check tr Number existence and origin
 func TrExist(ops []db.ArtifactTenantOperation, sourceTenant *db.CpiTenant) (bool, error) {
@@ -61,21 +79,81 @@ func LoadArtifact(op db.ArtifactTenantOperation) (artifactID uint, err error) {
 	return
 }
 
+// with preloaded Tenant and Artifact
+func queryOpsInDrWithAcc(drID uint) (ops []db.ArtifactTenantOperation, err error) {
+	if err = db.Conn().Where(&db.ArtifactTenantOperation{DeliveryRequestID: drID}).
+		Preload("Tenant").
+		Preload("Artifact").
+		Find(&ops).Error; err != nil {
+		err = fmt.Errorf("db query failed: %w", err)
+		return
+	}
+	if len(ops) == 0 {
+		err = fmt.Errorf("no artifact tenant operation found for delivery request %d", drID)
+		return
+	}
+	return
+}
+
+// do this after sync import state
+func SyncDeployState(deliveryRequestID uint, user string) (bool, error) {
+	var ops []db.ArtifactTenantOperation
+	var err error
+	if ops, err = queryOpsInDrWithAcc(deliveryRequestID); err != nil {
+		return false, err
+	}
+	errOps := make(map[uint]error)
+	for i := range ops {
+		op := &ops[i]
+		cpiCli, err := cpi.NewClient(context.Background(), op.Tenant.CpiEndpoint.Name)
+		if err != nil {
+			errOps[op.ID] = fmt.Errorf("failed to create cpi client for tenant %s: %s", op.Tenant.Name, err)
+			// TODO: add condition
+			continue
+		}
+		rt, err := cpiCli.RuntimeArtifact(op.ArtifactTechID)
+		if err != nil {
+			// if api return error, may not deployed yet, just continue
+			errOps[op.ID] = fmt.Errorf("failed to get runtime artifact %s in tenant %s: %s", op.ArtifactTechID, op.Tenant.Name, err)
+			// TODO: add a condition
+		}
+		var state lifecycle.DeployState
+		if _, ok := errOps[op.ID]; ok {
+			state = lifecycle.DeployFailed
+		} else if rt.Version == op.ArtifactVersion {
+			switch rt.Status {
+			case consts.Artifact_Rt_Started:
+				state = lifecycle.DeployComplete
+			case consts.Artifact_Rt_Starting:
+				state = lifecycle.DeployInProgress
+			case consts.Artifact_Rt_Error:
+				state = lifecycle.DeployFailed
+			}
+		}
+		if state != op.DeployState {
+			op.DeployState = state
+			op.UpdatedAt, op.UpdatedBy = time.Now(), user
+		}
+		if err := db.Conn().Updates(&op).Error; err != nil {
+			return false, fmt.Errorf("error when creating new artifact tenant operation for artifact %s in tenant %d: %w", op.ArtifactTechID, op.TenantID, err)
+		}
+	}
+	return true, nil
+}
+
 // when call this function, make sure all ops have valid tr number
-func SyncImportState(deliveryRequestID uint) ([]db.ArtifactTenantOperation, error) {
+func SyncImportState(deliveryRequestID uint, user string) (bool, error) {
 	var artifactOps []db.ArtifactTenantOperation
 	// Adjust the DB accessor (db.DB / db.GetDB()) to match your project setup
-	if err := db.Conn().Where(&db.ArtifactTenantOperation{DeliveryRequestID: deliveryRequestID}).Preload("Tenant").Find(&artifactOps).Error; err != nil {
-		return nil, fmt.Errorf("db query failed: %w", err)
-	}
-	if len(artifactOps) == 0 {
-		return []db.ArtifactTenantOperation{}, nil
+	artifactOps, err := queryOpsInDrWithAcc(deliveryRequestID)
+	if err != nil {
+		return false, err
 	}
 	tmsClient, err := tms.NewClient(context.Background())
 	if err != nil {
-		return nil, fmt.Errorf("error creating tms client: %w", err)
+		return false, fmt.Errorf("error creating tms client: %w", err)
 	}
-	trNodeStatus := make(map[string]map[uint]tms.TrNodeStatus)              // tr number status in all nodes. trNumber - map[nodeID]status
+	trNodeStatus := make(map[string]map[uint]tms.TrNodeStatus)          // tr number status in all nodes. trNumber - map[nodeID]status
 	tenantToOps := make(map[uint]map[string]db.ArtifactTenantOperation) // arTenantOp record in each node. cpi tenant ID - map[trNumber]ArtifactTenantOperation
 	//
 	for _, op := range artifactOps {
@@ -86,7 +164,7 @@ func SyncImportState(deliveryRequestID uint) ([]db.ArtifactTenantOperation, erro
 		// UpdateArtifactNodeStatus will call GetTransportRequest internally
 		ns, err := tmsClient.TrNodeStatuses(trNumber)
 		if err != nil {
-			return nil, fmt.Errorf("error when getting transport request %s: %w", trNumber, err)
+			return false, fmt.Errorf("error when getting transport request %s: %w", trNumber, err)
 		}
 		trNodeStatus[trNumber] = ns
 	}
@@ -110,7 +188,7 @@ func SyncImportState(deliveryRequestID uint) ([]db.ArtifactTenantOperation, erro
 			var tenantID uint
 			var ok bool
 			if tenantID, ok = nodetoTenantID[nID]; !ok {
-				return nil, fmt.Errorf("no cpi tenant found for tms node %d, please configure Cpi Tenant first", nID)
+				return false, fmt.Errorf("no cpi tenant found for tms node %d, please configure Cpi Tenant first", nID)
 			}
 			if _, ok := tenantToOps[tenantID]; !ok {
 				tenantToOps[tenantID] = make(map[string]db.ArtifactTenantOperation)
@@ -125,19 +203,28 @@ func SyncImportState(deliveryRequestID uint) ([]db.ArtifactTenantOperation, erro
 					TransportRequestNumber: trNumber,
 					ImportState:            lifecycle.DeriveImport(nState.Status),
 					DeployState:            lifecycle.DeployNotStarted,
+					CreatedBy:              user,
 				}
 				tenantToOps[tenantID][trNumber] = newOp
 			}
 			curOp := tenantToOps[tenantID][trNumber]
-			curOp.ImportState = lifecycle.DeriveImport(nState.Status)
-			if err := db.Conn().Save(&curOp).Error; err != nil {
-				return nil, fmt.Errorf("error when creating new artifact tenant operation for artifact %s in node %d: %w", curOp.ArtifactTechID, nID, err)
+			state := lifecycle.DeriveImport(nState.Status)
+			if state != curOp.ImportState {
+				curOp.ImportState = state
+				curOp.UpdatedAt, curOp.UpdatedBy = time.Now(), user
+			}
+			// NOTE: set deploy state if import completed
+			if curOp.ImportState == lifecycle.ImportComplete {
+				curOp.DeployState = lifecycle.DeployQueued
+			}
+			if err := db.Conn().Updates(&curOp).Error; err != nil {
+				return false, fmt.Errorf("error when creating new artifact tenant operation for artifact %s in node %d: %w", curOp.ArtifactTechID, nID, err)
 			}
 
 		}
 
 	}
-	return artifactOps, nil
+	return true, nil
 }
 
 func GenRoute(sourceTenant db.CpiTenant) (targetRoutes []db.TransportRoute, targetNodes []db.TransportNode, err error) {
@@ -160,54 +247,6 @@ func GenRoute(sourceTenant db.CpiTenant) (targetRoutes []db.TransportRoute, targ
 
 	targetRoutes, targetNodes = downstreamfromSource(sourceTenant.TransportNodeID, transportNodes, transportRoutes)
 	return
-}
-
-func ScheduleImport(drID uint, targetNode uint) (bool, error) {
-	var ops []db.ArtifactTenantOperation
-	if err := db.Conn().Preload("Artifact").
-		Where(&db.ArtifactTenantOperation{DeliveryRequestID: drID}).
-		Find(&ops).Error; err != nil {
-		return false, fmt.Errorf("failed to query artifact operations for delivery request %d: %s", drID, err)
-	}
-	var dr db.DeliveryRequest
-	if err := db.Conn().First(&dr, drID).Error; err != nil {
-		return false, fmt.Errorf("failed to query delivery request %d: %s", drID, err)
-	}
-
-	if len(ops) == 0 {
-		return false, fmt.Errorf("no artifact operations found for delivery request %d", drID)
-	}
-
-	trs := make([]uint, 0)
-	for i := range ops {
-		op := &ops[i]
-		if op.ImportState != lifecycle.ImportQueued || op.Tenant.TransportNodeID != targetNode { // only queued(INITIAL) state can be triggered for import
-			continue
-		}
-		op.ImportState = lifecycle.ImportInProgress
-		trNumber, err := ToUint(op.TransportRequestNumber)
-
-		if err != nil {
-			return false, fmt.Errorf("invalid transport request number %s for artifact operation %d: %s", op.TransportRequestNumber, op.ID, err)
-		}
-		trs = append(trs, trNumber)
-	}
-	tmsCli, err := tms.NewClient(context.Background())
-	if err != nil {
-		return false, err
-	}
-	if _, err := tmsCli.ImportTransportRequest(targetNode, trs); err != nil {
-		return false, err
-	}
-	// update import state in db
-	for i := range ops {
-		op := &ops[i]
-		if err := db.Conn().Model(op).Updates(op).Error; err != nil {
-			return false, fmt.Errorf("failed to update artifact operation %d: %s", op.ID, err)
-		}
-	}
-
-	return true, nil
 }
 
 // downstreamfromSource returns all downstream routes and nodes reachable from a source node (BFS).
@@ -265,19 +304,4 @@ func downstreamfromSource(sourceNodeID uint, transportNodes []db.TransportNode, 
 	}
 
 	return
-}
-
-var nodeTenantCache map[uint]uint
-
-// map tms node ID to cpi tenant ID
-func init() {
-	nodeTenantCache = make(map[uint]uint)
-	// load all tenants
-	var tenants []db.CpiTenant
-	if err := db.Conn().Find(&tenants).Error; err != nil {
-		panic("failed to load cpi tenants: " + err.Error())
-	}
-	for _, t := range tenants {
-		nodeTenantCache[t.TransportNodeID] = t.ID
-	}
 }
