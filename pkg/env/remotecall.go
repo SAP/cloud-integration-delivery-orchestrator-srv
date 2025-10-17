@@ -83,11 +83,11 @@ func NewClient(ctx context.Context, clientID string, clientSecret string, authUr
 }
 
 // returns response body as byte array
-func (c *HttpClient) Do(request *HttpRequest) (*[]byte, error) {
+func (c *HttpClient) Do(request *HttpRequest) (*[]byte, int, error) {
 	childCtx, cancel := context.WithCancel(request.Ctx)
 	defer cancel()
 	var req *http.Request
-	if request.RequestBody.String() == "<nil>" {
+	if request.RequestBody == nil || request.RequestBody.String() == "<nil>" {
 		req, _ = http.NewRequestWithContext(childCtx, request.Method, request.ApiURL, nil)
 	} else {
 		req, _ = http.NewRequestWithContext(childCtx, request.Method, request.ApiURL, request.RequestBody)
@@ -101,7 +101,7 @@ func (c *HttpClient) Do(request *HttpRequest) (*[]byte, error) {
 
 	if errReq != nil {
 		logger.Errorf("Error when getting response from api, the error message is %s", errReq)
-		return nil, errReq
+		return nil, 0, errReq
 	}
 	defer resp.Body.Close()
 	// refresh token
@@ -111,7 +111,7 @@ func (c *HttpClient) Do(request *HttpRequest) (*[]byte, error) {
 		newClient, err := NewClient(c.Context, c.ClientId, c.ClientSecret, c.AuthUrl, c.ApiURL)
 		if err != nil {
 			logger.Errorf("Error when creating new client to refresh token: %s", err)
-			return nil, err
+			return nil, 0, err
 		}
 		return newClient.Do(request)
 	}
@@ -119,8 +119,8 @@ func (c *HttpClient) Do(request *HttpRequest) (*[]byte, error) {
 	respBody, errIOreader := io.ReadAll(resp.Body)
 
 	if errIOreader != nil {
-		logger.Errorf("Error when getting content from response, the error message is %s", errReq)
-		return nil, errIOreader
+		logger.Errorf("Error when getting content from response, the error message is %s", errIOreader)
+		return nil, 0, errIOreader
 	}
-	return &respBody, nil
+	return &respBody, resp.StatusCode, nil
 }

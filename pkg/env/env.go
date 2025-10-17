@@ -126,7 +126,7 @@ func initDestinations() {
 		ApiURL: apiUrl,
 		Method: http.MethodGet,
 	}
-	resp, err := client.Do(req)
+	resp, _, err := client.Do(req)
 	if err != nil {
 		logger.Panic("Error while Get subaccount destinations")
 	}

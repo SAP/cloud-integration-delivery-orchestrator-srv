@@ -102,7 +102,7 @@ func (t *TmsClient) GetTransportRequest(TrNumber string) (*TransportRequestV1, e
 		ApiURL: fullURL,
 		Method: http.MethodGet,
 	}
-	body, err := t.Do(&request)
+	body, _, err := t.Do(&request)
 	if err != nil {
 		return nil, fmt.Errorf("error when getting transport request %s, error message %s", TrNumber, err)
 	}

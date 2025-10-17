@@ -37,7 +37,7 @@ func (t *TmsClient) GetNodes() ([]db.TransportNode, error) {
 		ApiURL: fullURL,
 		Method: http.MethodGet,
 	}
-	respBodyContent, errReq := t.Do(&request)
+	respBodyContent, _, errReq := t.Do(&request)
 	if errReq != nil {
 		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
 		return []db.TransportNode{}, errReq
@@ -82,7 +82,7 @@ func (t *TmsClient) GetNode(nodeID uint) (db.TransportNode, error) {
 		ApiURL: fullURL,
 		Method: http.MethodGet,
 	}
-	respBodyContent, errReq := t.Do(&request)
+	respBodyContent, _, errReq := t.Do(&request)
 	if errReq != nil {
 		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
 		return db.TransportNode{}, errReq
@@ -126,7 +126,7 @@ func (t *TmsClient) GetRoutes() ([]db.TransportRoute, error) {
 		ApiURL: fullURL,
 		Method: http.MethodGet,
 	}
-	respBodyContent, errReq := t.Do(&request)
+	respBodyContent, _, errReq := t.Do(&request)
 	if errReq != nil {
 		logger.Errorf("Error when getting response content of tms routes, the error message is %s", errReq)
 		return []db.TransportRoute{}, errReq
@@ -175,7 +175,7 @@ func (t *TmsClient) GetNodeTransportRequests(nodeID uint) ([]NodeTransportReques
 		ApiURL: fullURL,
 		Method: http.MethodGet,
 	}
-	respBodyContent, errReq := t.Do(&request)
+	respBodyContent, _, errReq := t.Do(&request)
 	if errReq != nil {
 		logger.Errorf("Error when getting response content, the error message is %s", errReq)
 		return []NodeTransportRequest{}, errReq
@@ -220,7 +220,7 @@ func (t *TmsClient) ImportTransportRequest(nodeID uint, transportRequestIDs []ui
 		Method:      http.MethodPost,
 		RequestBody: bytes.NewBuffer(requestBodyJson),
 	}
-	respBodyContent, errReq := t.Do(&request)
+	respBodyContent, _, errReq := t.Do(&request)
 
 	if errReq != nil {
 		logger.Errorf("Error when getting response content, the error message is %s", errReq)
@@ -274,7 +274,7 @@ func (t *TmsClient) GetActionResult(actionID uint) (string, string, error) {
 		ApiURL: fullURL,
 		Method: http.MethodGet,
 	}
-	respBodyContent, errReq := t.Do(&request)
+	respBodyContent, _, errReq := t.Do(&request)
 	if errReq != nil {
 		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
 		return "", "", errReq
@@ -326,7 +326,7 @@ func (t *TmsClient) GetActionResultLog(actionID uint) (ActionLogResp, error) {
 		ApiURL: fullURL,
 		Method: http.MethodGet,
 	}
-	respBodyContent, errReq := t.Do(&request)
+	respBodyContent, _, errReq := t.Do(&request)
 	if errReq != nil {
 		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
 		return ActionLogResp{}, errReq

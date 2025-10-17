@@ -44,7 +44,11 @@ type CpiClient struct {
 }
 
 func NewClient(ctx context.Context, tenant string) (*CpiClient, error) {
-	cpiDest := env.Destinations()[tenant]
+	var cpiDest env.Destination
+	var ok bool
+	if cpiDest, ok = env.Destinations()[tenant]; !ok {
+		return nil, fmt.Errorf("cpi tenant %s not found in destinations", tenant)
+	}
 	apiUrl := fmt.Sprintf("%s/v1", cpiDest.URL)
 	client, err := env.NewClient(ctx, cpiDest.ClientId, cpiDest.ClientSecret, cpiDest.TokenServiceURL, apiUrl)
 	return &CpiClient{*client}, err
@@ -61,7 +65,7 @@ func (c *CpiClient) GetPackages() ([]CPIPackage, error) {
 		ApiURL: fullURL,
 	}
 
-	respBodyContent, errReq := c.Do(&request)
+	respBodyContent, _, errReq := c.Do(&request)
 	if errReq != nil {
 		logger.Errorf("Error when getting response content, the error message is %s", errReq)
 		return []CPIPackage{}, errReq
@@ -92,7 +96,7 @@ func (c *CpiClient) GetPackage(packageID string) (CPIPackage, error) {
 		Method: http.MethodGet,
 		ApiURL: fullURL,
 	}
-	respBodyContent, errReq := c.Do(&request)
+	respBodyContent, _, errReq := c.Do(&request)
 	if errReq != nil {
 		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
 		return CPIPackage{}, errReq
@@ -134,7 +138,7 @@ func (c *CpiClient) ImportPackage(cpiPackage importPackageRequest) (CPIPackage, 
 		ApiURL:      fullURL,
 		RequestBody: bytes.NewBuffer(requestBodyJson),
 	}
-	respBodyContent, errReq := c.Do(&request)
+	respBodyContent, _, errReq := c.Do(&request)
 	if errReq != nil {
 		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
 		return CPIPackage{}, errReq
@@ -201,7 +205,7 @@ func (c *CpiClient) GetPackageIflows(packageID string) ([]IflowItem, error) {
 		Method: http.MethodGet,
 		ApiURL: fullURL,
 	}
-	respBodyContent, errReq := c.Do(&request)
+	respBodyContent, _, errReq := c.Do(&request)
 	if errReq != nil {
 		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
 		return []IflowItem{}, errReq
@@ -232,7 +236,7 @@ func (c *CpiClient) GetPackageIflow(packageID string, iflowID string, iflowVersi
 		Method: http.MethodGet,
 		ApiURL: fullURL,
 	}
-	respBodyContent, errReq := c.Do(&request)
+	respBodyContent, _, errReq := c.Do(&request)
 	if errReq != nil {
 		logger.Errorf("Error when getting response content: %s", errReq)
 		return IflowItem{}, errReq
@@ -265,7 +269,7 @@ func (c *CpiClient) GetDesignTimeIflow(iflowID string, iflowVersion string) (Ifl
 		Method: http.MethodGet,
 		ApiURL: fullURL,
 	}
-	respBodyContent, errReq := c.Do(&request)
+	respBodyContent, _, errReq := c.Do(&request)
 	if errReq != nil {
 		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
 		return IflowItem{}, errReq
@@ -293,7 +297,7 @@ func (c *CpiClient) DeployIflow(iflowID string, iflowVersion string) (string, er
 		Method: http.MethodPost,
 		ApiURL: fullURL,
 	}
-	respBodyContent, errReq := c.Do(&request)
+	respBodyContent, _, errReq := c.Do(&request)
 	if errReq != nil {
 		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
 		return taskID, errReq
@@ -314,7 +318,7 @@ func (c *CpiClient) DeployScriptCollection(scriptCollectionID string, scriptColl
 		Method: http.MethodPost,
 		ApiURL: fullURL,
 	}
-	respBodyContent, errReq := c.Do(&request)
+	respBodyContent, _, errReq := c.Do(&request)
 	if errReq != nil {
 		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
 		return "", errReq
@@ -357,7 +361,7 @@ func (c *CpiClient) CheckDeployStatusByTaskID(taskID string) (string, error) {
 		Method: http.MethodGet,
 		ApiURL: fullURL,
 	}
-	respBodyContent, errReq := c.Do(&request)
+	respBodyContent, _, errReq := c.Do(&request)
 	if errReq != nil {
 		logger.Errorf("Error when getting response content, the error message is %s", errReq)
 		return "", fmt.Errorf("error when getting response from %s: %s", fullURL, errReq)
@@ -382,7 +386,7 @@ func (c *CpiClient) DeleteIflow(iflowID string, iflowVersion string) error {
 		Method: http.MethodGet,
 		ApiURL: fullURL,
 	}
-	_, errReq := c.Do(&request)
+	_, _, errReq := c.Do(&request)
 	if errReq != nil {
 		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
 		return errReq
@@ -420,7 +424,7 @@ func (c *CpiClient) GetPackageScriptcollections(packageID string) ([]ScriptColle
 		Method: http.MethodGet,
 		ApiURL: fullURL,
 	}
-	respBodyContent, errReq := c.Do(&request)
+	respBodyContent, _, errReq := c.Do(&request)
 	if errReq != nil {
 		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
 		return []ScriptCollectionItem{}, errReq
@@ -451,7 +455,7 @@ func (c *CpiClient) GetDesignTimeScriptCollection(scriptCollectionID string, scr
 		Method: http.MethodGet,
 		ApiURL: fullURL,
 	}
-	respBodyContent, errReq := c.Do(&request)
+	respBodyContent, _, errReq := c.Do(&request)
 	if errReq != nil {
 		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
 		return ScriptCollectionItem{}, errReq
@@ -481,7 +485,7 @@ func (c *CpiClient) DeleteScriptCollection(scriptCollectionID string, scriptColl
 		Method: http.MethodGet,
 		ApiURL: fullURL,
 	}
-	_, errReq := c.Do(&request)
+	_, _, errReq := c.Do(&request)
 	if errReq != nil {
 		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
 		return errReq
@@ -501,7 +505,7 @@ func (c *CpiClient) UndeployRuntimeArtifacts(artifactID string) error {
 		Method: http.MethodDelete,
 		ApiURL: fullURL,
 	}
-	_, errReq := c.Do(&request)
+	_, _, errReq := c.Do(&request)
 	if errReq != nil {
 		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
 		return errReq
@@ -537,7 +541,7 @@ func (c *CpiClient) GetRuntimeArtifacts() ([]RuntimeArtifact, error) {
 		Method: http.MethodGet,
 		ApiURL: fullURL,
 	}
-	response, err := c.Do(&request)
+	response, _, err := c.Do(&request)
 	if err != nil {
 		return nil, err
 	}
@@ -560,7 +564,7 @@ func (c *CpiClient) CheckUndeployStatus(artifactId string) (string, error) {
 	}
 	var response *[]byte
 	var err error
-	if response, err = c.Do(&request); err != nil {
+	if response, _, err = c.Do(&request); err != nil {
 		return "", fmt.Errorf("failed to get undeploy stauts from %s: %s", fullUrl, err)
 	}
 	var runtimeArtifact RuntimeArtifact
@@ -585,13 +589,18 @@ func (c *CpiClient) RuntimeArtifact(artifactId string) (RuntimeArtifact, error) 
 		Method: http.MethodGet,
 		ApiURL: fullUrl,
 	}
-	response, err := c.Do(&request)
+	response, code, err := c.Do(&request)
 	if err != nil {
 		return RuntimeArtifact{}, fmt.Errorf("failed to get runtime artifact from %s: %s", fullUrl, err)
 	}
-	var runtimeArtifact RuntimeArtifact
-	if err := json.Unmarshal(*response, &runtimeArtifact); err != nil {
+	if code == http.StatusNotFound {
+		return RuntimeArtifact{}, fmt.Errorf("runtime artifact %s not found", artifactId)
+	}
+	var t struct {
+		D RuntimeArtifact `json:"d"`
+	}
+	if err := json.Unmarshal(*response, &t); err != nil {
 		return RuntimeArtifact{}, fmt.Errorf("failed to unmarshal response: %s", err)
 	}
-	return runtimeArtifact, nil
+	return t.D, nil
 }

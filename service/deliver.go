@@ -72,7 +72,7 @@ func NodeDeployOp(opIDs []uint, targetTenantID uint, user string) (bool, error) 
 	errOps := make(map[uint]error)
 	for i := range ops {
 		op := &ops[i]
-		if op.DeployState != lifecycle.DeployQueued { // deploy should be QUEUED. i.e., 
+		if op.DeployState != lifecycle.DeployQueued { // deploy should be QUEUED. i.e.,
 			continue
 		}
 		if op.Tenant.ID != targetTenantID { // only queued state can be triggered for deploy
@@ -80,7 +80,7 @@ func NodeDeployOp(opIDs []uint, targetTenantID uint, user string) (bool, error) 
 			errOps[op.ID] = fmt.Errorf("artifact operation %d not match target tenant %s#%d", op.ID, tenant.Name, tenant.ID)
 			continue
 		}
-		cpiCli, err := cpi.NewClient(context.Background(), op.Tenant.Name)
+		cpiCli, err := cpi.NewClient(context.Background(), op.Tenant.CpiEndpoint.Name)
 		if err != nil {
 			errOps[op.ID] = fmt.Errorf("failed to create cpi client for tenant %s: %s", op.Tenant.Name, err)
 			continue

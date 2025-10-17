@@ -105,6 +105,9 @@ func SyncDeployState(deliveryRequestID uint, user string) (bool, error) {
 	errOps := make(map[uint]error)
 	for i := range ops {
 		op := &ops[i]
+		if op.DeployState != lifecycle.DeployInProgress {
+			continue
+		}
 		cpiCli, err := cpi.NewClient(context.Background(), op.Tenant.CpiEndpoint.Name)
 		if err != nil {
 			errOps[op.ID] = fmt.Errorf("failed to create cpi client for tenant %s: %s", op.Tenant.Name, err)
@@ -129,6 +132,8 @@ func SyncDeployState(deliveryRequestID uint, user string) (bool, error) {
 			case consts.Artifact_Rt_Error:
 				state = lifecycle.DeployFailed
 			}
+		} else {
+			continue // not triggered by this operation
 		}
 		if state != op.DeployState {
 			op.DeployState = state
@@ -209,12 +214,14 @@ func SyncImportState(deliveryRequestID uint, user string) (bool, error) {
 			}
 			curOp := tenantToOps[tenantID][trNumber]
 			state := lifecycle.DeriveImport(nState.Status)
-			if state != curOp.ImportState {
-				curOp.ImportState = state
-				curOp.UpdatedAt, curOp.UpdatedBy = time.Now(), user
+			if state == curOp.ImportState {
+				continue
 			}
+			// update state if changed
+			curOp.ImportState = state
+			curOp.UpdatedAt, curOp.UpdatedBy = time.Now(), user
 			// NOTE: set deploy state if import completed
-			if curOp.ImportState == lifecycle.ImportComplete {
+			if curOp.ImportState == lifecycle.ImportComplete && curOp.DeployState == lifecycle.DeployNotStarted {
 				curOp.DeployState = lifecycle.DeployQueued
 			}
 			if err := db.Conn().Updates(&curOp).Error; err != nil {
