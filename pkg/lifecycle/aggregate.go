@@ -1,6 +1,9 @@
 package lifecycle
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // DeriveAggregate computes an AggregateStatus from component phase states and conditions.
 // Priority ordering (highest first):
@@ -114,5 +117,23 @@ func LegacyCodeFromAggregate(a AggregateStatus) int {
 		return 9
 	default:
 		return 0
+	}
+}
+
+// INITIAL, RUNNING, SUCCEEDED, FATAL
+func DeriveImport(state string) ImportState {
+	switch strings.ToUpper(state) {
+	case "INITIAL":
+		return ImportQueued
+	case "RUNNING":
+		return ImportInProgress
+	case "SUCCEEDED":
+		return ImportComplete
+	case "FATAL", "FAILED", "ERROR":
+		return ImportFailed
+	case "PARTIAL":
+		return ImportPartial
+	default:
+		return ImportNotStarted
 	}
 }

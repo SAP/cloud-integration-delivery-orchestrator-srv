@@ -114,3 +114,12 @@ type DeliveryRule struct {
 	CreatedBy string
 	UpdatedBy string
 }
+
+type TenantGroup struct {
+	gorm.Model
+	Name        string
+	Description string
+	Tenants     []CpiTenant `gorm:"many2many:tenant_group_tenants;"`
+	CreatedBy   string
+	UpdatedBy   string
+}

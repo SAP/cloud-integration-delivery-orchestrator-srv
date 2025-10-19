@@ -75,6 +75,13 @@ func main() {
 		v1Group.POST("/deliveryRequest/deploy", handler.HandleDeployOps)
 		v1Group.POST("/deliveryRequest/syncState/:deliveryRequestId", handler.HandleSyncState)
 
+		// tenant group
+		v1Group.GET("/tenantGroup/:id", handler.GetTenantGroupByID)
+		v1Group.GET("/tenantGroups", handler.ListTenantGroups)
+		v1Group.POST("/tenantGroup", handler.CreateTenantGroup)
+		v1Group.PUT("/tenantGroup", handler.UpdateTenantGroup)
+		v1Group.DELETE("/tenantGroup/:id", handler.DeleteTenantGroup)
+
 	}
 
 	v2Group := router.Group("/api/v2")

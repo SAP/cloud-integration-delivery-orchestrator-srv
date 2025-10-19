@@ -90,7 +90,7 @@ type TrNodeStatus struct {
 }
 
 // check status of a single TR. /v1/transportRequests/{TrNumber}
-// NOTE: this api is not from api hub
+// NOTE: this api is not from api hub. may not be stable
 func (t *TmsClient) GetTransportRequest(TrNumber string) (*TransportRequestV1, error) {
 	childCtx, cancel := context.WithCancel(t.Context)
 	defer cancel()
