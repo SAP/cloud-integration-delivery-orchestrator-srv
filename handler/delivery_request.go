@@ -281,8 +281,14 @@ func HandleSyncState(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"status": 400, "error": "invalid deliveryRequestId"})
 		return
 	}
-	service.SyncImportState(drID, user)
-	service.SyncDeployState(drID, user)
+	if err := service.SyncImportState(drID, user); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"status": 500, "error": err.Error()})
+		return
+	}
+	if err := service.SyncDeployState(drID, user); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"status": 500, "error": err.Error()})
+		return
+	}
 
 	ctx.JSON(http.StatusOK, gin.H{"status": 200, "result": "sync finished"})
 }

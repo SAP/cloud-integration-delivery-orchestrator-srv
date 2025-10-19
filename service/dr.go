@@ -96,11 +96,11 @@ func queryOpsInDrWithAcc(drID uint) (ops []db.ArtifactTenantOperation, err error
 }
 
 // do this after sync import state
-func SyncDeployState(deliveryRequestID uint, user string) (bool, error) {
+func SyncDeployState(deliveryRequestID uint, user string) error {
 	var ops []db.ArtifactTenantOperation
 	var err error
 	if ops, err = queryOpsInDrWithAcc(deliveryRequestID); err != nil {
-		return false, err
+		return err
 	}
 	errOps := make(map[uint]error)
 	for i := range ops {
@@ -140,23 +140,23 @@ func SyncDeployState(deliveryRequestID uint, user string) (bool, error) {
 			op.UpdatedAt, op.UpdatedBy = time.Now(), user
 		}
 		if err := db.Conn().Updates(&op).Error; err != nil {
-			return false, fmt.Errorf("error when creating new artifact tenant operation for artifact %s in tenant %d: %w", op.ArtifactTechID, op.TenantID, err)
+			return fmt.Errorf("error when creating new artifact tenant operation for artifact %s in tenant %d: %w", op.ArtifactTechID, op.TenantID, err)
 		}
 	}
-	return true, nil
+	return nil
 }
 
 // when call this function, make sure all ops have valid tr number
-func SyncImportState(deliveryRequestID uint, user string) (bool, error) {
+func SyncImportState(deliveryRequestID uint, user string) error {
 	var artifactOps []db.ArtifactTenantOperation
 	// Adjust the DB accessor (db.DB / db.GetDB()) to match your project setup
 	artifactOps, err := queryOpsInDrWithAcc(deliveryRequestID)
 	if err != nil {
-		return false, err
+		return err
 	}
 	tmsClient, err := tms.NewClient(context.Background())
 	if err != nil {
-		return false, fmt.Errorf("error creating tms client: %w", err)
+		return fmt.Errorf("error creating tms client: %w", err)
 	}
 	trNodeStatus := make(map[string]map[uint]tms.TrNodeStatus)          // tr number status in all nodes. trNumber - map[nodeID]status
 	tenantToOps := make(map[uint]map[string]db.ArtifactTenantOperation) // arTenantOp record in each node. cpi tenant ID - map[trNumber]ArtifactTenantOperation
@@ -169,7 +169,7 @@ func SyncImportState(deliveryRequestID uint, user string) (bool, error) {
 		// UpdateArtifactNodeStatus will call GetTransportRequest internally
 		ns, err := tmsClient.TrNodeStatuses(trNumber)
 		if err != nil {
-			return false, fmt.Errorf("error when getting transport request %s: %w", trNumber, err)
+			return fmt.Errorf("error when getting transport request %s: %w", trNumber, err)
 		}
 		trNodeStatus[trNumber] = ns
 	}
@@ -188,12 +188,12 @@ func SyncImportState(deliveryRequestID uint, user string) (bool, error) {
 	nodetoTenantID := nodeTenantCache // tms node ID - cpi tenant ID
 	for _, op := range artifactOps {  // check to create new record if new tr status happens in tms
 		trNumber := op.TransportRequestNumber
-		// same artifactOp == same trNumber, but in diffrent tms nods
+		// same artifactOp equals same trNumber, but in diffrent tms nods
 		for nID, nState := range trNodeStatus[trNumber] {
 			var tenantID uint
 			var ok bool
 			if tenantID, ok = nodetoTenantID[nID]; !ok {
-				return false, fmt.Errorf("no cpi tenant found for tms node %d, please configure Cpi Tenant first", nID)
+				return fmt.Errorf("no cpi tenant found for tms node %d, please configure Cpi Tenant first", nID)
 			}
 			if _, ok := tenantToOps[tenantID]; !ok {
 				tenantToOps[tenantID] = make(map[string]db.ArtifactTenantOperation)
@@ -206,7 +206,7 @@ func SyncImportState(deliveryRequestID uint, user string) (bool, error) {
 					ArtifactVersion:        op.ArtifactVersion,
 					TenantID:               tenantID,
 					TransportRequestNumber: trNumber,
-					ImportState:            lifecycle.DeriveImport(nState.Status),
+					ImportState:            lifecycle.ImportNotStarted,
 					DeployState:            lifecycle.DeployNotStarted,
 					CreatedBy:              user,
 				}
@@ -224,14 +224,14 @@ func SyncImportState(deliveryRequestID uint, user string) (bool, error) {
 			if curOp.ImportState == lifecycle.ImportComplete && curOp.DeployState == lifecycle.DeployNotStarted {
 				curOp.DeployState = lifecycle.DeployQueued
 			}
-			if err := db.Conn().Updates(&curOp).Error; err != nil {
-				return false, fmt.Errorf("error when creating new artifact tenant operation for artifact %s in node %d: %w", curOp.ArtifactTechID, nID, err)
+			if err := db.Conn().Save(&curOp).Error; err != nil {
+				return fmt.Errorf("error when creating new artifact tenant operation for artifact %s in node %d: %w", curOp.ArtifactTechID, nID, err)
 			}
 
 		}
 
 	}
-	return true, nil
+	return nil
 }
 
 func GenRoute(sourceTenant db.CpiTenant) (targetRoutes []db.TransportRoute, targetNodes []db.TransportNode, err error) {
