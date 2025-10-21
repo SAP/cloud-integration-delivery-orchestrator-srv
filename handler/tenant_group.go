@@ -33,7 +33,8 @@ func CreateTenantGroup(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"msg": "Failed to bind tenant group: " + err.Error()})
 		return
 	}
-	if err := repo.Create(c, &g); err != nil {
+	user := service.User(c)
+	if err := repo.Create(c, &g, user); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"msg": "Failed to create tenant group: " + err.Error()})
 		return
 	}
@@ -46,7 +47,8 @@ func UpdateTenantGroup(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"msg": "Failed to bind tenant group: " + err.Error()})
 		return
 	}
-	if err := repo.Update(c, &g); err != nil {
+	user := service.User(c)
+	if err := repo.Update(c, &g, user); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"msg": "Tenant group not found"})
 			return

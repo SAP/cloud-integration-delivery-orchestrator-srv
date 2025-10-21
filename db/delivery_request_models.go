@@ -10,6 +10,7 @@ import (
 type DeliveryRequest struct {
 	gorm.Model
 	Name string
+	Description string
 
 	JiraLink        string                    // related Jira ticket URL
 	AggregateStatus lifecycle.AggregateStatus // pending, in-progress, completed, failed
@@ -20,11 +21,11 @@ type DeliveryRequest struct {
 	// One-to-many: a delivery request has many artifacts
 	ArtifactTenantOperations []ArtifactTenantOperation `gorm:"foreignKey:DeliveryRequestID"`
 
-	SourceTenantID *uint
-	SourceTenant   *CpiTenant `gorm:"foreignKey:SourceTenantID"`
+	SourceTenantID uint
+	SourceTenant   CpiTenant `gorm:"foreignKey:SourceTenantID"`
 
-	DeliveryRuleID *uint
-	DeliveryRule   *DeliveryRule `gorm:"foreignKey:DeliveryRuleID"`
+	DeliveryRuleID uint
+	DeliveryRule   DeliveryRule `gorm:"foreignKey:DeliveryRuleID"`
 
 	TargetNodes  []TransportNode  `gorm:"serializer:json"`
 	TargetRoutes []TransportRoute `gorm:"serializer:json"`

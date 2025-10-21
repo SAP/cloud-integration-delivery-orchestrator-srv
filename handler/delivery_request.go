@@ -22,14 +22,25 @@ func CreateDr(c *gin.Context) {
 	}
 	user := service.User(c)
 	dr.CreatedBy, dr.UpdatedBy = user, user
+	if dr.DeliveryRule.ID == 0 {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "missing delivery rule"})
+	}
 
 	if !checkJIRA(dr.JiraLink) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "invalid jira link"})
 	}
 
-	if dr.DeliveryRule.ID == 0 {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "missing delivery rule"})
+	rule, err := service.GetDeliveryRule(dr.DeliveryRule.ID)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 	}
+	sourceTenant, targetRoutes, targetNodes, err := service.GenRoute(rule.IncludedTenants)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": fmt.Errorf("failed to generate target routes and nodes: %s", err)})
+		return
+	}
+	dr.TargetNodes, dr.TargetRoutes = targetNodes, targetRoutes
+	dr.SourceTenantID = sourceTenant.ID
 
 	dr.AggregateStatus = lifecycle.AggPending
 
@@ -47,26 +58,8 @@ func UpdateDr(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
 		return
 	}
-	// check existence
-	var count int64
-	db.Conn().Model(&db.DeliveryRequest{}).Where("id = ?", dr.ID).Count(&count)
-	if count == 0 {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": fmt.Sprintf("delivery request id %d not found", dr.ID)})
-		return
-	}
-	if dr.SourceTenant.ID == 0 {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "missing source tenant"})
-		return
-	}
-	targetRoutes, targetNodes, err := service.GenRoute(*dr.SourceTenant)
-	if err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": fmt.Errorf("failed to generate target routes and nodes: %s", err)})
-		return
-	}
-	dr.TargetNodes, dr.TargetRoutes = targetNodes, targetRoutes
-
 	// check tr existence and origin. TODO: wrap a function in v1 to validate, check in parallel
-	if _, err := service.TrExist(dr.ArtifactTenantOperations, dr.SourceTenant); err != nil {
+	if _, err := service.TrExist(dr.ArtifactTenantOperations, &dr.SourceTenant); err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
 	}
@@ -218,6 +211,7 @@ func DeleteDr(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": id})
 }
 
+// TODO: finish this
 func checkJIRA(jira string) bool {
 	if jira == "" {
 		return true

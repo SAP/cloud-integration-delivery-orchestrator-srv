@@ -21,9 +21,8 @@ type tenantGroupRepo struct{}
 
 func NewTenantGroupRepo() *tenantGroupRepo { return &tenantGroupRepo{} }
 
-func (r *tenantGroupRepo) Create(ctx context.Context, g *db.TenantGroup) error {
-	user := ctx.Value("User")
-	g.CreatedBy, g.UpdatedBy = user.(string), user.(string)
+func (r *tenantGroupRepo) Create(ctx context.Context, g *db.TenantGroup, user string) error {
+	g.CreatedBy, g.UpdatedBy = user, user
 	return db.Conn().Session(&gorm.Session{FullSaveAssociations: true}).Create(&g).Error
 }
 
@@ -32,9 +31,8 @@ func (r *tenantGroupRepo) GetByID(ctx context.Context, id uint) (g *db.TenantGro
 	return
 }
 
-func (r *tenantGroupRepo) Update(ctx context.Context, g *db.TenantGroup) error {
-	user := ctx.Value("User")
-	g.CreatedBy, g.UpdatedBy = user.(string), user.(string)
+func (r *tenantGroupRepo) Update(ctx context.Context, g *db.TenantGroup, user string) error {
+	g.CreatedBy, g.UpdatedBy = user, user
 	return db.Conn().Session(&gorm.Session{FullSaveAssociations: true}).Updates(&g).Error
 }
 

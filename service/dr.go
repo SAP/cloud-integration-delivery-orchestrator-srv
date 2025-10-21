@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"mmt-delivery/consts"
 	"mmt-delivery/db"
@@ -11,6 +12,8 @@ import (
 	"mmt-delivery/pkg/lifecycle"
 	"mmt-delivery/pkg/tms"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 var nodeTenantCache map[uint]uint
@@ -234,25 +237,53 @@ func SyncImportState(deliveryRequestID uint, user string) error {
 	return nil
 }
 
-func GenRoute(sourceTenant db.CpiTenant) (targetRoutes []db.TransportRoute, targetNodes []db.TransportNode, err error) {
+func GenRoute(includedTenants []db.CpiTenant) (sorceTenant *db.CpiTenant, includedRoutes []db.TransportRoute, includedNodes []db.TransportNode, err error) {
 	// generate Transport routes
 	var tmsCli *tms.TmsClient
-	tmsCli, err = tms.NewClient(context.Background())
-	if err != nil {
+	if tmsCli, err = tms.NewClient(context.Background()); err != nil {
 		return
 	}
 	var transportRoutes []db.TransportRoute
-	transportRoutes, err = tmsCli.GetRoutes()
-	if err != nil {
+	if transportRoutes, err = tmsCli.GetRoutes(); err != nil {
 		return
 	}
 	var transportNodes []db.TransportNode
-	transportNodes, err = tmsCli.GetNodes()
-	if err != nil {
+	if transportNodes, err = tmsCli.GetNodes(); err != nil {
 		return
 	}
+	nodeAll := make(map[uint]db.TransportNode) // all nodes map
+	for _, n := range transportNodes {
+		nodeAll[n.ID] = n
+	}
 
-	targetRoutes, targetNodes = downstreamfromSource(sourceTenant.TransportNodeID, transportNodes, transportRoutes)
+	includedNodes = make([]db.TransportNode, 0)
+	includedRoutes = make([]db.TransportRoute, 0)
+
+	nodeIDs := make(map[uint]bool) // nodeid - tenant
+	for i := range includedTenants {
+		t := &includedTenants[i]
+		nodeIDs[t.TransportNodeID] = true
+		includedNodes = append(includedNodes, nodeAll[t.TransportNodeID])
+	}
+	targetNodeIDs := make(map[uint]bool) // to determine source node
+	for _, r := range transportRoutes {
+		if nodeIDs[r.SourceNodeID] && nodeIDs[r.TargetNodeID] {
+			includedRoutes = append(includedRoutes, r)
+			targetNodeIDs[r.TargetNodeID] = true
+		}
+	}
+	for i := range includedTenants {
+		t := &includedTenants[i]
+		if !targetNodeIDs[t.TransportNodeID] {
+			sorceTenant = t
+			break
+		}
+	}
+
+	if sorceTenant == nil {
+		err = fmt.Errorf("no source node found among included tenants' transport nodes")
+		return
+	}
 	return
 }
 
@@ -311,4 +342,15 @@ func downstreamfromSource(sourceNodeID uint, transportNodes []db.TransportNode, 
 	}
 
 	return
+}
+
+func GetDeliveryRule(drRuleID uint) (db.DeliveryRule, error) {
+	var rule db.DeliveryRule
+	if err := db.Conn().First(&rule, drRuleID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return rule, fmt.Errorf("delivery rule %d not found", drRuleID)
+		}
+		return rule, fmt.Errorf("failed to get delivery rule %d: %s", drRuleID, err)
+	}
+	return rule, nil
 }
