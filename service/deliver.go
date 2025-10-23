@@ -14,7 +14,7 @@ import (
 )
 
 // import INITIAL artifact operations under target node
-func NodeImportOp(opIDs []uint, targetTenantID uint, user string) (bool, error) {
+func BatchImportTenantOps(opIDs []uint, targetTenantID uint, user string) (bool, error) {
 	var ops []db.ArtifactTenantOperation
 	var err error
 	if ops, err = queryOpsWithAcco(opIDs); err != nil {
@@ -59,7 +59,7 @@ func NodeImportOp(opIDs []uint, targetTenantID uint, user string) (bool, error) 
 }
 
 // when trggered deploy, the artifact operation will be set to DeployInProgress
-func NodeDeployOp(opIDs []uint, targetTenantID uint, user string) (bool, error) {
+func BatchDeployTenantOps(opIDs []uint, targetTenantID uint, user string) (bool, error) {
 	var ops []db.ArtifactTenantOperation
 	var err error
 	if ops, err = queryOpsWithAcco(opIDs); err != nil {

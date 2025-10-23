@@ -9,7 +9,7 @@ import (
 
 type DeliveryRequest struct {
 	gorm.Model
-	Name string
+	Name        string
 	Description string
 
 	JiraLink        string                    // related Jira ticket URL
@@ -100,6 +100,7 @@ type CpiTenant struct {
 	TransportNodeName        string      // TMS Node Name, for easier query
 	TransportNodeDescription string      // TMS Node Description
 	CpiEndpoint              ApiEndpoint `gorm:"serializer:json"`
+	Group                    string
 }
 
 type DeliveryRule struct {
@@ -114,13 +115,4 @@ type DeliveryRule struct {
 	Active    bool
 	CreatedBy string
 	UpdatedBy string
-}
-
-type TenantGroup struct {
-	gorm.Model
-	Name        string
-	Description string
-	Tenants     []CpiTenant `gorm:"many2many:tenant_group_tenants;"`
-	CreatedBy   string
-	UpdatedBy   string
 }

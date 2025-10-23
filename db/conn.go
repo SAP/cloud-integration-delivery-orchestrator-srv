@@ -42,7 +42,7 @@ func init() {
 	db.AutoMigrate(
 		&Job{}, &ImportStep{}, &DeployStep{}, &ExecutionLog{}, &TransportPlan{}, &TransportGroup{},
 		&CpiTenant{}, &DeliveryRule{}, &DeliveryRequest{}, &ArtifactTenantOperation{}, &BatchJob{},
-		&Artifact{}, &TenantGroup{},
+		&Artifact{},
 	)
 }
 

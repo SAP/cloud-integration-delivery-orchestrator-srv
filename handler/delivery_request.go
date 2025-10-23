@@ -34,7 +34,7 @@ func CreateDr(c *gin.Context) {
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 	}
-	sourceTenant, targetRoutes, targetNodes, err := service.GenRoute(rule.IncludedTenants)
+	sourceTenant, targetRoutes, targetNodes, err := service.SourceAndRoute(rule.IncludedTenants)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": fmt.Errorf("failed to generate target routes and nodes: %s", err)})
 		return
@@ -236,7 +236,7 @@ func HandleImportOps(c *gin.Context) {
 		return
 	}
 	user := service.User(c)
-	success, err := service.NodeImportOp(req.OpIDs, req.TargetTenant, user)
+	success, err := service.BatchImportTenantOps(req.OpIDs, req.TargetTenant, user)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
@@ -255,7 +255,7 @@ func HandleDeployOps(c *gin.Context) {
 		return
 	}
 	user := service.User(c)
-	success, err := service.NodeDeployOp(req.OpIDs, req.TargetTenant, user)
+	success, err := service.BatchDeployTenantOps(req.OpIDs, req.TargetTenant, user)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return

@@ -237,7 +237,8 @@ func SyncImportState(deliveryRequestID uint, user string) error {
 	return nil
 }
 
-func GenRoute(includedTenants []db.CpiTenant) (sorceTenant *db.CpiTenant, includedRoutes []db.TransportRoute, includedNodes []db.TransportNode, err error) {
+// generate source tenant, included routes and nodes from included tenants
+func SourceAndRoute(includedTenants []db.CpiTenant) (sorceTenant *db.CpiTenant, includedRoutes []db.TransportRoute, includedNodes []db.TransportNode, err error) {
 	// generate Transport routes
 	var tmsCli *tms.TmsClient
 	if tmsCli, err = tms.NewClient(context.Background()); err != nil {
