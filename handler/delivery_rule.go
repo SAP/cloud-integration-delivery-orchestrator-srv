@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -26,6 +27,11 @@ func UpsertDeliveryRule(ctx *gin.Context) {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
 	}
+	if err := service.GenRouteForRule(rule.ID); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": fmt.Errorf("failed to generate delivery route by included tenants: %s", err.Error())})
+		return
+	}
+
 	ctx.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": rule})
 }
 

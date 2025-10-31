@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 
 	"mmt-delivery/db"
 	"mmt-delivery/pkg/lifecycle"
@@ -16,33 +15,32 @@ import (
 
 func CreateDr(c *gin.Context) {
 	var dr db.DeliveryRequest
-	if err := c.ShouldBindJSON(&dr); err != nil {
+	var err error
+	if err = c.ShouldBindJSON(&dr); err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
 		return
 	}
-	user := service.User(c)
-	dr.CreatedBy, dr.UpdatedBy = user, user
 	if dr.DeliveryRule.ID == 0 {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "missing delivery rule"})
+		return
 	}
 
 	if !checkJIRA(dr.JiraLink) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "invalid jira link"})
+		return
 	}
-
-	rule, err := service.GetDeliveryRule(dr.DeliveryRule.ID)
-	if err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
-	}
-	sourceTenant, targetRoutes, targetNodes, err := service.SourceAndRoute(rule.IncludedTenants)
-	if err != nil {
+	var rule db.DeliveryRule
+	if rule, err = service.GetDeliveryRule(dr.DeliveryRule.ID); err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": fmt.Errorf("failed to generate target routes and nodes: %s", err)})
 		return
 	}
-	dr.TargetNodes, dr.TargetRoutes = targetNodes, targetRoutes
-	dr.SourceTenantID = sourceTenant.ID
+	dr.SourceTenantID = rule.SourceTenantID
+	dr.DeliveryRuleID = rule.ID
 
 	dr.AggregateStatus = lifecycle.AggPending
+
+	user := service.User(c)
+	dr.CreatedBy, dr.UpdatedBy = user, user
 
 	if err := db.Conn().Create(&dr).Error; err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
@@ -58,25 +56,28 @@ func UpdateDr(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
 		return
 	}
-	// check tr existence and origin. TODO: wrap a function in v1 to validate, check in parallel
-	if _, err := service.TrExist(dr.ArtifactTenantOperations, &dr.SourceTenant); err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
+	var existing db.DeliveryRequest
+	if err := db.Conn().First(&existing, dr.ID).Error; err != nil {
+		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"status": "fail", "code": 404, "error": fmt.Sprintf("delivery request id %d not found", dr.ID)})
 		return
 	}
-	// load artifact info, set ArtifactID in ops
-	for i := range dr.ArtifactTenantOperations {
-		op := &dr.ArtifactTenantOperations[i]
-		aID, err := service.LoadArtifact(*op)
-		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": fmt.Errorf("failed to load artifact for operation %d: %s", op.ID, err)})
+	if existing.AggregateStatus != lifecycle.AggPending {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "only pending delivery request can be updated"})
+		return
+	}
+	user, now := service.User(c), time.Now()
+	if existing.JiraLink != dr.JiraLink {
+		if !checkJIRA(dr.JiraLink) {
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "invalid jira link"})
 			return
 		}
-		op.ArtifactID = aID
-		op.Artifact.ID = aID // to avoid unique constraint, since FullSaveAssociations in main table
+		dr.UpdatedBy, dr.UpdatedAt = user, now
 	}
-	user := service.User(c)
-	dr.UpdatedBy = user
-	if err := db.Conn().Session(&gorm.Session{FullSaveAssociations: true}).Updates(&dr).Error; err != nil {
+	if existing.DeliveryRule.ID != dr.DeliveryRule.ID {
+		existing.DeliveryRule.ID = dr.DeliveryRule.ID
+		dr.UpdatedBy, dr.UpdatedAt = user, now
+	}
+	if err := db.Conn().Updates(dr).Error; err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
 	}
@@ -285,4 +286,13 @@ func HandleSyncState(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{"status": 200, "result": "sync finished"})
+}
+
+
+func HandleDeleteOps(c *gin.Context) {
+
+}
+
+func HandleInsertOps(c *gin.Context) {
+	
 }

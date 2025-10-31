@@ -27,9 +27,6 @@ type DeliveryRequest struct {
 	DeliveryRuleID uint
 	DeliveryRule   DeliveryRule `gorm:"foreignKey:DeliveryRuleID"`
 
-	TargetNodes  []TransportNode  `gorm:"serializer:json"`
-	TargetRoutes []TransportRoute `gorm:"serializer:json"`
-
 	CreatedBy string
 	UpdatedBy string
 }
@@ -111,6 +108,12 @@ type DeliveryRule struct {
 	// Associations to CpiTenant
 	IncludedTenants []CpiTenant `gorm:"serializer:json;"` // included CPI tenants
 	ExcludedTenants []CpiTenant `gorm:"serializer:json;"` // excluded CPI tenants
+
+	TargetNodes  []TransportNode  `gorm:"serializer:json"`
+	TargetRoutes []TransportRoute `gorm:"serializer:json"`
+
+	SourceTenantID uint
+	SourceTenant   CpiTenant `gorm:"foreignKey:SourceTenantID"`
 
 	Active    bool
 	CreatedBy string

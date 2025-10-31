@@ -30,44 +30,58 @@ func init() {
 		nodeTenantCache[t.TransportNodeID] = t.ID
 	}
 }
-
-// check tr Number existence and origin
-func TrExist(ops []db.ArtifactTenantOperation, sourceTenant *db.CpiTenant) (bool, error) {
+func BatchTrExist(ops []db.ArtifactTenantOperation, sourceTenant *db.CpiTenant) (bool, error) {
+	errOps := make(map[uint]error)
 	for i := range ops {
 		op := &ops[i]
-		trNumber := op.TransportRequestNumber
-		if trNumber == "" {
-			return false, fmt.Errorf("artifact %s has empty transport request number", op.ArtifactTechID)
-		}
-		tmsCli, err := tms.NewClient(context.Background())
+		_, err := TrExist(op, sourceTenant)
 		if err != nil {
-			return false, fmt.Errorf("error when creating tms client: %s", err)
+			errOps[op.ID] = err
 		}
-		trV1, err := tmsCli.GetTransportRequest(trNumber) // v1 to check state
-		if err != nil {
-			return false, fmt.Errorf("error when getting transport request %s, the tr number may not exist, error message: %s", trNumber, err)
-		}
-		if trV1 == nil || trV1.ID == 0 || trV1.State != "RELEASED" { // only released tr can be imported
-			return false, fmt.Errorf("artifact %s has invalid transport request number %s", op.ArtifactTechID, trNumber)
-		}
-		if trV1.Origin != sourceTenant.TransportNodeName { // check if match source tenant. can only be checked by origin node name, not id.
-			return false, fmt.Errorf("artifact %s has transport request number %s not from source tenant node %s", op.ArtifactTechID, trNumber, sourceTenant.TransportNodeName)
-		}
-		// check Content Field, should match techID, Version, Type
-		// index := -1
-		// for i, md := range trV1.Content[0].Metadata {
-		// 	if md.Name == op.ArtifactTechID || md.Type == op.Artifact.Type || md.Version == op.ArtifactVersion {
-		// 		index = i
-		// 		break
-		// 	}
-		// }
-		// if index == -1 {
-		// 	return false, fmt.Errorf("artifact %s, trNumber %s: not match. May use a wrong trNumber for this artifact", op.ArtifactTechID, trNumber)
-		// }
-
-		// update status of artifact tenant operation
-
 	}
+	if len(errOps) > 0 {
+		errMsg := "transport request existence check failed for some artifact tenant operations:\n"
+		for id, err := range errOps {
+			errMsg += fmt.Sprintf("  operation %d: %s\n", id, err)
+		}
+		return false, errors.New(errMsg)
+	}
+	return true, nil
+}
+
+// check tr Number existence and origin
+func TrExist(op *db.ArtifactTenantOperation, sourceTenant *db.CpiTenant) (bool, error) {
+	trNumber := op.TransportRequestNumber
+	if trNumber == "" {
+		return false, fmt.Errorf("artifact %s has empty transport request number", op.ArtifactTechID)
+	}
+	tmsCli, err := tms.NewClient(context.Background())
+	if err != nil {
+		return false, fmt.Errorf("error when creating tms client: %s", err)
+	}
+	trV1, err := tmsCli.GetTransportRequest(trNumber) // v1 to check state
+	if err != nil {
+		return false, fmt.Errorf("error when getting transport request %s, the tr number may not exist, error message: %s", trNumber, err)
+	}
+	if trV1 == nil || trV1.ID == 0 || trV1.State != "RELEASED" { // only released tr can be imported
+		return false, fmt.Errorf("artifact %s has invalid transport request number %s", op.ArtifactTechID, trNumber)
+	}
+	if trV1.Origin != sourceTenant.TransportNodeName { // check if match source tenant. can only be checked by origin node name, not id.
+		return false, fmt.Errorf("artifact %s has transport request number %s not from source tenant node %s", op.ArtifactTechID, trNumber, sourceTenant.TransportNodeName)
+	}
+	// check Content Field, should match techID, Version, Type
+	// index := -1
+	// for i, md := range trV1.Content[0].Metadata {
+	// 	if md.Name == op.ArtifactTechID || md.Type == op.Artifact.Type || md.Version == op.ArtifactVersion {
+	// 		index = i
+	// 		break
+	// 	}
+	// }
+	// if index == -1 {
+	// 	return false, fmt.Errorf("artifact %s, trNumber %s: not match. May use a wrong trNumber for this artifact", op.ArtifactTechID, trNumber)
+	// }
+
+	// update status of artifact tenant operation
 	return true, nil
 }
 
@@ -354,4 +368,53 @@ func GetDeliveryRule(drRuleID uint) (db.DeliveryRule, error) {
 		return rule, fmt.Errorf("failed to get delivery rule %d: %s", drRuleID, err)
 	}
 	return rule, nil
+}
+// generate route info for delivery rule
+func GenRouteForRule(ruleID uint) (err error) {
+	rule, err := GetDeliveryRule(ruleID)
+	if err != nil {
+		return
+	}
+	sourceTenant, targetRoutes, targetNodes, err := SourceAndRoute(rule.IncludedTenants)
+	if err != nil {
+		return
+	}
+	rule.TargetNodes, rule.TargetRoutes = targetNodes, targetRoutes
+	rule.SourceTenantID = sourceTenant.ID
+
+	if err := db.Conn().Save(&rule).Error; err != nil {
+		return err
+	}
+
+	return
+}
+
+func DeleteTenantOps(opIDs []uint) error {
+	if len(opIDs) == 0 {
+		return nil
+	}
+	if err := db.Conn().Delete(&db.ArtifactTenantOperation{}, opIDs).Error; err != nil {
+		return fmt.Errorf("failed to delete artifact tenant operations %v: %s", opIDs, err)
+	}
+	return nil
+}
+
+func InsertTenantOps(drID uint, ops []db.ArtifactTenantOperation, user string) error {
+	if len(ops) == 0 {
+		return nil
+	}
+	for i := range ops {
+		op := &ops[i]
+		aID, err := LoadArtifact(*op)
+		if err != nil {
+			return fmt.Errorf("failed to load artifact for operation %d: %s", op.ID, err)
+		}
+		op.CreatedAt, op.CreatedBy = time.Now(), user
+		op.ArtifactID, op.Artifact.ID = aID, aID
+		op.DeliveryRequestID = drID
+	}
+	if err := db.Conn().Create(&ops).Error; err != nil {
+		return fmt.Errorf("failed to insert artifact tenant operations: %s", err)
+	}
+	return nil
 }
