@@ -36,6 +36,7 @@ func BatchImportTenantOps(opIDs []uint, targetTenantID uint, user string) (bool,
 		}
 		op.ImportState = lifecycle.ImportInProgress
 		trNumber, err := ToUint(op.TransportRequestNumber)
+		// TODO: EVERY IMPORTANT! validate if there is version decrease in target tenant before import
 
 		if err != nil {
 			return false, fmt.Errorf("invalid transport request number %s for artifact operation %d: %s", op.TransportRequestNumber, op.ID, err)

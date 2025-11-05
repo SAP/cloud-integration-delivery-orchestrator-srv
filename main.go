@@ -74,6 +74,8 @@ func main() {
 		v1Group.POST("/deliveryRequest/import", handler.HandleImportOps)
 		v1Group.POST("/deliveryRequest/deploy", handler.HandleDeployOps)
 		v1Group.POST("/deliveryRequest/syncState/:deliveryRequestId", handler.HandleSyncState)
+		v1Group.POST("/deliveryRequest/deleteOps", handler.HandleDeleteOps)
+		v1Group.POST("/deliveryRequest/insertOps", handler.HandleInsertOps)
 
 	}
 

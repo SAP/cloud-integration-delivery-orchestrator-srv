@@ -86,13 +86,13 @@ func TrExist(op *db.ArtifactTenantOperation, sourceTenant *db.CpiTenant) (bool, 
 }
 
 // check and load artifact info into db, set ArtifactID in ops
-func LoadArtifact(op db.ArtifactTenantOperation) (artifactID uint, err error) {
+func LoadArtifact(op db.ArtifactTenantOperation) (atf db.Artifact, err error) {
 	a := &op.Artifact
 	if db.Conn().FirstOrCreate(a, &db.Artifact{TechID: a.TechID, Version: a.Version}).Error != nil {
 		err = fmt.Errorf("error when saving artifact %s:%s", a.TechID, a.Version)
 		return
 	}
-	artifactID = a.ID
+	atf = *a
 	return
 }
 
@@ -369,6 +369,7 @@ func GetDeliveryRule(drRuleID uint) (db.DeliveryRule, error) {
 	}
 	return rule, nil
 }
+
 // generate route info for delivery rule
 func GenRouteForRule(ruleID uint) (err error) {
 	rule, err := GetDeliveryRule(ruleID)
@@ -393,8 +394,29 @@ func DeleteTenantOps(opIDs []uint) error {
 	if len(opIDs) == 0 {
 		return nil
 	}
-	if err := db.Conn().Delete(&db.ArtifactTenantOperation{}, opIDs).Error; err != nil {
-		return fmt.Errorf("failed to delete artifact tenant operations %v: %s", opIDs, err)
+	errOps := make(map[uint]error)
+	for _, id := range opIDs {
+		if id == 0 {
+			return fmt.Errorf("invalid operation id 0")
+		}
+		var op db.ArtifactTenantOperation
+		if err := db.Conn().First(&op, id).Error; err != nil {
+			errOps[id] = fmt.Errorf("failed to find artifact tenant operation %d. Op may not exists: %s", id, err)
+		}
+		// check state before delete
+		if op.RequestState != lifecycle.RequestPending {
+			errOps[id] = fmt.Errorf("cannot delete artifact tenant operation %d in state %s. Can disable delivery", id, op.RequestState)
+		}
+		if err := db.Conn().Delete(&db.ArtifactTenantOperation{}, id).Error; err != nil {
+			errOps[id] = fmt.Errorf("failed to delete artifact operation %d: %s", id, err)
+		}
+	}
+	if len(errOps) > 0 {
+		errMsg := "errors occurred during delete artifact tenant operations:\n"
+		for id, e := range errOps {
+			errMsg += fmt.Sprintf("\t operation %d: %s\n", id, e)
+		}
+		return errors.New(errMsg)
 	}
 	return nil
 }
@@ -405,13 +427,16 @@ func InsertTenantOps(drID uint, ops []db.ArtifactTenantOperation, user string) e
 	}
 	for i := range ops {
 		op := &ops[i]
-		aID, err := LoadArtifact(*op)
+		a, err := LoadArtifact(*op)
 		if err != nil {
 			return fmt.Errorf("failed to load artifact for operation %d: %s", op.ID, err)
 		}
 		op.CreatedAt, op.CreatedBy = time.Now(), user
-		op.ArtifactID, op.Artifact.ID = aID, aID
+		op.Artifact = a
 		op.DeliveryRequestID = drID
+		op.ArtifactTechID, op.ArtifactVersion = a.TechID, a.Version // cache techID and version for quick access
+		op.ImportState, op.DeployState, op.RequestState =
+			lifecycle.ImportNotStarted, lifecycle.DeployNotStarted, lifecycle.RequestPending
 	}
 	if err := db.Conn().Create(&ops).Error; err != nil {
 		return fmt.Errorf("failed to insert artifact tenant operations: %s", err)

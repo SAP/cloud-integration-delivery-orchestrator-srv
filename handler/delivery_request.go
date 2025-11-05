@@ -66,18 +66,21 @@ func UpdateDr(c *gin.Context) {
 		return
 	}
 	user, now := service.User(c), time.Now()
+	// check and update JIRA
 	if existing.JiraLink != dr.JiraLink {
 		if !checkJIRA(dr.JiraLink) {
 			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "invalid jira link"})
 			return
 		}
+		existing.JiraLink = dr.JiraLink
+		existing.UpdatedBy, existing.UpdatedAt = user, now
+	}
+	if existing.DeliveryRuleID != dr.DeliveryRule.ID {
+		// TODO: check artifact ops in this dr. prevent changing rule if ops has different source tenant id 
+		existing.DeliveryRuleID = dr.DeliveryRule.ID
 		dr.UpdatedBy, dr.UpdatedAt = user, now
 	}
-	if existing.DeliveryRule.ID != dr.DeliveryRule.ID {
-		existing.DeliveryRule.ID = dr.DeliveryRule.ID
-		dr.UpdatedBy, dr.UpdatedAt = user, now
-	}
-	if err := db.Conn().Updates(dr).Error; err != nil {
+	if err := db.Conn().Updates(&existing).Error; err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
 	}
@@ -288,11 +291,39 @@ func HandleSyncState(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"status": 200, "result": "sync finished"})
 }
 
+type DeleteOpsRequest struct {
+	OpIds []uint `json:"opIds"`
+}
 
 func HandleDeleteOps(c *gin.Context) {
+	var req DeleteOpsRequest
+	if err := c.ShouldBindBodyWithJSON(&req); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
+	}
+	if err := service.DeleteTenantOps(req.OpIds); err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": req.OpIds})
 
 }
 
+type InsertOpsRequest struct {
+	Ops               []db.ArtifactTenantOperation `json:"ops"`
+	DeliveryRequestID uint                         `json:"deliveryRequestID"`
+}
+
 func HandleInsertOps(c *gin.Context) {
-	
+	var req InsertOpsRequest
+	if err := c.ShouldBindBodyWithJSON(&req); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
+		return
+	}
+	user := service.User(c)
+	if err := service.InsertTenantOps(req.DeliveryRequestID, req.Ops, user); err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": req.Ops})
+
 }
