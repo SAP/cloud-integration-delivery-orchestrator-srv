@@ -1,6 +1,10 @@
 package main
 
 import (
+	"context"
+	"crypto/rsa"
+	"fmt"
+	"strings"
 	"time"
 
 	"mmt-delivery/pkg/env"
@@ -9,6 +13,8 @@ import (
 
 	ginzap "github.com/gin-contrib/zap"
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/lestrrat-go/jwx/jwk"
 )
 
 var logger = env.Logger().Desugar()
@@ -89,15 +95,47 @@ func main() {
 	}
 
 }
+
+type UaaClaims struct {
+	UserName string   `json:"user_name"`
+	Scope    []string `json:"scope"`
+	jwt.RegisteredClaims
+}
+
+func keyFromJKU(jku string, kid string) (*rsa.PublicKey, error) {
+	set, err := jwk.Fetch(context.Background(), jku)
+	if err != nil {
+		return nil, err
+	}
+	key, ok := set.LookupKeyID(kid)
+	if !ok {
+		return nil, fmt.Errorf("kid %s not found in JWKS", kid)
+	}
+	var rsaPubKey rsa.PublicKey
+	if err := key.Raw(&rsaPubKey); err != nil {
+		return nil, err
+	}
+	return &rsaPubKey, nil
+}
 func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Do some authentication here
-		if len(c.Request.Header["X-User-Email"]) == 0 {
-			c.AbortWithStatusJSON(401, gin.H{"error": "Unauthorized. Please provide X-User-Email header"})
+		auth := c.GetHeader("Authorization")
+		tokenStr := strings.TrimPrefix(auth, "Bearer ")
+		token, err := jwt.ParseWithClaims(tokenStr, &UaaClaims{}, func(t *jwt.Token) (any, error) {
+			jku, _ := t.Header["jku"].(string)
+			kid, _ := t.Header["kid"].(string)
+			if jku == "" || kid == "" {
+				return nil, fmt.Errorf("missing jku or kid in header")
+			}
+			return keyFromJKU(jku, kid)
+		})
+		if err != nil || !token.Valid {
+			c.AbortWithStatusJSON(403, gin.H{"error": "invalid token:" + err.Error()})
 			return
 		}
-		email := c.Request.Header["X-User-Email"][0]
-		c.Set("user", email)
+		claims := token.Claims.(*UaaClaims)
+		c.Set("user_name", claims.UserName)
+		c.Set("scope", claims.Scope)
 		c.Next()
 	}
 }
