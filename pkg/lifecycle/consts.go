@@ -38,6 +38,7 @@ const (
 const (
 	ImportNotStarted ImportState = "NOT_STARTED"
 	ImportQueued     ImportState = "QUEUED" // INITIAL
+	ImportDisabled   ImportState = "IMPORT_DISABLED"
 	ImportInProgress ImportState = "IN_PROGRESS"
 	ImportPartial    ImportState = "PARTIAL" // TODO: not a right situation, remove later
 	ImportFailed     ImportState = "FAILED"
@@ -48,6 +49,7 @@ const (
 const (
 	DeployNotStarted  DeployState = "NOT_STARTED"
 	DeployQueued      DeployState = "QUEUED"
+	DeployDisabled    DeployState = "DEPLOY_DISABLED"
 	DeployInProgress  DeployState = "IN_PROGRESS"
 	DeployPartial     DeployState = "PARTIAL" // TODO: not a right situation, remove later
 	DeployFailed      DeployState = "FAILED"

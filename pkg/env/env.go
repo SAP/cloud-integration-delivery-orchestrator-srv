@@ -54,6 +54,22 @@ func TmsCredential() Credentials {
 	}
 }
 
+func UaaCredential() Credentials {
+	service, err := appEnv.Services.WithName("uaa-api")
+	if err != nil {
+		Logger().Panic("Failed to get service instance uaa-api")
+	}
+	apiUrl, _ := service.CredentialString("apiurl")
+	uaa := service.Credentials
+
+	return Credentials{
+		Clientid:     uaa["clientid"].(string),
+		Clientsecret: uaa["clientsecret"].(string),
+		AuthUrl:      uaa["url"].(string),
+		ApiUrl:       apiUrl,
+	}
+}
+
 func PostgreUri() string {
 	dbService, err := appEnv.Services.WithName("mmt-devops-pgsql")
 	if err != nil {

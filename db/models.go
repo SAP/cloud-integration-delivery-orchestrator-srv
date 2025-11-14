@@ -4,6 +4,7 @@ import (
 	. "mmt-delivery/consts"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/lib/pq"
 	"gorm.io/gorm"
 )
@@ -156,4 +157,10 @@ type ApiEndpoint struct {
 	Name string `json:"name"`
 	Type string `json:"type"`
 	URL  string `json:"url"`
+}
+
+type UaaClaims struct {
+	UserName string   `json:"user_name"`
+	Scope    []string `json:"scope"`
+	jwt.RegisteredClaims
 }

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"mmt-delivery/db"
 	"mmt-delivery/pkg/env"
 
 	"mmt-delivery/handler"
@@ -81,7 +82,11 @@ func main() {
 		v1Group.POST("/deliveryRequest/deploy", handler.HandleDeployOps)
 		v1Group.POST("/deliveryRequest/syncState/:deliveryRequestId", handler.HandleSyncState)
 		v1Group.POST("/deliveryRequest/deleteOps", handler.HandleDeleteOps)
-		v1Group.POST("/deliveryRequest/insertOps", handler.HandleInsertOps)
+		v1Group.POST("/deliveryRequest/insertOps", handler.HandleInsertOps) // batch delete
+		v1Group.PUT("/deliveryRequest/updateOps", handler.HandleUpdateOps)
+
+		// uaa
+		v1Group.GET("/uaa/search/:email", handler.HandleUaaUserSearch)
 
 	}
 
@@ -94,12 +99,6 @@ func main() {
 		panic(err)
 	}
 
-}
-
-type UaaClaims struct {
-	UserName string   `json:"user_name"`
-	Scope    []string `json:"scope"`
-	jwt.RegisteredClaims
 }
 
 func keyFromJKU(jku string, kid string) (*rsa.PublicKey, error) {
@@ -121,7 +120,7 @@ func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		auth := c.GetHeader("Authorization")
 		tokenStr := strings.TrimPrefix(auth, "Bearer ")
-		token, err := jwt.ParseWithClaims(tokenStr, &UaaClaims{}, func(t *jwt.Token) (any, error) {
+		token, err := jwt.ParseWithClaims(tokenStr, &db.UaaClaims{}, func(t *jwt.Token) (any, error) {
 			jku, _ := t.Header["jku"].(string)
 			kid, _ := t.Header["kid"].(string)
 			if jku == "" || kid == "" {
@@ -133,7 +132,7 @@ func AuthMiddleware() gin.HandlerFunc {
 			c.AbortWithStatusJSON(403, gin.H{"error": "invalid token:" + err.Error()})
 			return
 		}
-		claims := token.Claims.(*UaaClaims)
+		claims := token.Claims.(*db.UaaClaims)
 		c.Set("user_name", claims.UserName)
 		c.Set("scope", claims.Scope)
 		c.Next()

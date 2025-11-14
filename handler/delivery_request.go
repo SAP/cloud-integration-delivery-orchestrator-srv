@@ -49,7 +49,7 @@ func CreateDr(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": dr})
 }
 
-// update DeliveryRequest
+// update DeliveryRequest, not including ops
 func UpdateDr(c *gin.Context) {
 	var dr db.DeliveryRequest
 	if err := c.ShouldBindJSON(&dr); err != nil {
@@ -307,23 +307,41 @@ func HandleDeleteOps(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": req.OpIds})
 
 }
-
-type InsertOpsRequest struct {
+// update or insert ops request
+type OpsRequest struct {
 	Ops               []db.ArtifactTenantOperation `json:"ops"`
 	DeliveryRequestID uint                         `json:"deliveryRequestID"`
 }
 
 func HandleInsertOps(c *gin.Context) {
-	var req InsertOpsRequest
+	var req OpsRequest
 	if err := c.ShouldBindBodyWithJSON(&req); err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
 		return
 	}
 	user := service.User(c)
+	if req.DeliveryRequestID == 0 {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "missing deliveryRequestID"})
+		return
+	}
 	if err := service.InsertTenantOps(req.DeliveryRequestID, req.Ops, user); err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": req.Ops})
 
+}
+
+func HandleUpdateOps(c *gin.Context) {
+	var req OpsRequest
+	if err := c.ShouldBindBodyWithJSON(&req); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
+		return
+	}
+	user := service.User(c)
+	if err := service.UpdateTenantOps(req.DeliveryRequestID, req.Ops, user); err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": req.Ops})
 }
