@@ -30,15 +30,6 @@ func main() {
 
 	v1Group := router.Group("/api/v1")
 	{
-		v1Group.GET("/count", handler.JobCounts)
-		v1Group.GET("/job", handler.GetJobsByType)
-		v1Group.POST("/job", handler.CreateJobHandler)
-		v1Group.POST("job/copy/:id", handler.CopyJob)
-		v1Group.DELETE("/job/:id", handler.DeleteJob)
-		v1Group.PUT("/job", handler.UpSertJobWithStep) // update or insert steps within a job
-		v1Group.POST("/job/:id", handler.ExecuteJob)
-		v1Group.GET("/job/:id", handler.GetJobAndStepsByID)
-
 		v1Group.GET("/tanant/packages", handler.GetPackagesHandler)                   //get all packages under a tenant
 		v1Group.GET("/tenant/packages/artifacts", handler.GetPackageArtifactsHandler) // get all iflows under a package
 		v1Group.GET("/tenant/runtime", handler.GetRuntimeArtifacts)                   // get all runtime artifacts under a tenant
@@ -47,21 +38,7 @@ func main() {
 		v1Group.GET("/tms/trs", handler.GetTranportRequestsHandler)
 		v1Group.GET("/tms/routes", handler.GetRoutesHandler)
 
-		v1Group.DELETE("/step", handler.DeleteStep)
-
 		v1Group.GET("/destinations", handler.GetDestinationsHandler) // get cpi tenant destinations
-		// transport plan
-		v1Group.POST("/parse", handler.ParseYaml)
-		v1Group.POST("/transportplan/generate/import", handler.GenerateImportJob)
-		v1Group.POST("/transportplan/generate/deploy", handler.GenerateDeployJob)
-		v1Group.GET("/transportplan/:id", handler.GetTransportPlan)
-		v1Group.GET("/transportplan", handler.GetAllTransportPlans)
-		v1Group.POST("/transportplan", handler.SaveTransportPlan)
-		v1Group.DELETE("/transportplan/:id", handler.DeleteTransportPlan)
-		// transport group
-		v1Group.GET("/transportGroup", handler.GetTransportGroups)
-		v1Group.POST("/transportGroup", handler.CreateTransportGroup)
-		v1Group.DELETE("/transportGroup", handler.DeleteTransportGroup)
 		// cpi tenant bind
 		v1Group.GET("/cpiTenant", handler.GetCpiTenants)
 		v1Group.GET("/cpiTenant/:id", handler.GetCpiTenant)

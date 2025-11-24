@@ -40,11 +40,10 @@ func init() {
 	}
 	// AutoMigrate core legacy models plus new lifecycle models
 	if err := db.AutoMigrate(
-		&Job{}, &ImportStep{}, &DeployStep{}, &ExecutionLog{}, &TransportPlan{}, &TransportGroup{},
 		&CpiTenant{}, &DeliveryRule{}, &DeliveryRequest{}, &ArtifactTenantOperation{}, &BatchJob{},
 		&Artifact{},
 	); err != nil {
-		panic("failed to migrate: "+ err.Error())
+		panic("failed to migrate: " + err.Error())
 	}
 }
 
