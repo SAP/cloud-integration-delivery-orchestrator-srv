@@ -163,4 +163,6 @@ type UaaClaims struct {
 	UserName string   `json:"user_name"`
 	Scope    []string `json:"scope"`
 	jwt.RegisteredClaims
+	Origin string `json:"origin"` //maco.accounts400.ondemand.com
+	UserID string `json:"user_id"`
 }

@@ -22,8 +22,38 @@ func NewClient(c context.Context) (*UaaClient, error) {
 	return &UaaClient{*client}, err
 }
 
+// get user by sub/user_id from JWT claim body
+func (uaa *UaaClient) UserInfo(userID string) (*UserInfo, error) {
+	childCtx, cancel := context.WithCancel(uaa.Context)
+	defer cancel()
+	fullUrl := fmt.Sprintf("%s/Users/%s", uaa.ApiURL, userID)
+	logger.Infof("searching user info by sub/user_id, at %s", fullUrl)
+	request := env.HttpRequest{
+		Ctx:    childCtx,
+		ApiURL: fullUrl,
+		Method: http.MethodGet,
+	}
+	body, _, err := uaa.Do(&request)
+	if err != nil {
+		logger.Errorf("Error when getting uaa user by id, %s", err)
+		return nil, err
+	}
+	var resource Resource
+	if err := json.Unmarshal(*body, &resource); err != nil {
+		logger.Errorf("Error when unmarshal uaa user response, %s", err)
+		return nil, err
+	}
+	user := UserInfo{
+		ID:       resource.ID,
+		Email:    resource.Emails[0].Value,
+		UserName: resource.UserName,
+		Groups:   resource.Groups,
+	}
+	return &user, nil
+}
+
 // search uaa user by email, 'co' operator(https://simplecloud.info/specs/draft-scim-api-01.html#query-resources)
-func (uaa *UaaClient) SearchUserByEmail(email string) ([]UserInfo, error) {
+func (uaa *UaaClient) SearchByEmail(email string) ([]UserInfo, error) {
 	childCtx, cancel := context.WithCancel(uaa.Context)
 	defer cancel()
 	q := url.Values{}

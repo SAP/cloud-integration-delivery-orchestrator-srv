@@ -17,6 +17,7 @@ type DeliveryRequest struct {
 
 	ApprovedBy string // user who approved the import
 	ApprovedAt *time.Time
+	Approvers  []string `gorm:"serializer:json"` // sub, or user_id in JWT claim body
 
 	// One-to-many: a delivery request has many artifacts
 	ArtifactTenantOperations []ArtifactTenantOperation `gorm:"foreignKey:DeliveryRequestID"`

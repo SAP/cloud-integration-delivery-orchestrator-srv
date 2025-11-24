@@ -1,16 +1,20 @@
 package service
 
 import (
+	"mmt-delivery/db"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
 )
 
-
-
 func User(ctx *gin.Context) string {
 	email, _ := ctx.Get("user_name")
 	return email.(string)
+}
+
+func UaaClaim(ctx *gin.Context) *db.UaaClaims {
+	claim, _ := ctx.Get("uaa_claim")
+	return claim.(*db.UaaClaims)
 }
 
 func Scope(ctx *gin.Context) []string {

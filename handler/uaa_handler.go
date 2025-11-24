@@ -13,7 +13,7 @@ func HandleUaaUserSearch(c *gin.Context) {
 		c.JSON(500, gin.H{"status": 500, "error": err.Error()})
 		return
 	}
-	document, err := uaaClient.SearchUserByEmail(email)
+	document, err := uaaClient.SearchByEmail(email)
 	if err != nil {
 		c.JSON(500, gin.H{"status": 500, "error": err.Error()})
 		return

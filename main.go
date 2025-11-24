@@ -84,6 +84,9 @@ func main() {
 		v1Group.POST("/deliveryRequest/deleteOps", handler.HandleDeleteOps)
 		v1Group.POST("/deliveryRequest/insertOps", handler.HandleInsertOps) // batch delete
 		v1Group.PUT("/deliveryRequest/updateOps", handler.HandleUpdateOps)
+		// approve
+		v1Group.POST("/deliveryRequest/requestApproval", handler.HandleRequestApproval)
+		v1Group.POST("/deliveryRequest/approve", handler.HandleApproveDeliveryRequest)
 
 		// uaa
 		v1Group.GET("/uaa/search/:email", handler.HandleUaaUserSearch)
@@ -135,6 +138,7 @@ func AuthMiddleware() gin.HandlerFunc {
 		claims := token.Claims.(*db.UaaClaims)
 		c.Set("user_name", claims.UserName)
 		c.Set("scope", claims.Scope)
+		c.Set("uaa_claim", *claims)
 		c.Next()
 	}
 }
