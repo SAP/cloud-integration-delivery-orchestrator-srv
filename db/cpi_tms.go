@@ -68,6 +68,19 @@ type ApiEndpoint struct {
 	URL  string `json:"url"`
 }
 
+// bind cpi tenant with tms node
+type CpiTenant struct {
+	gorm.Model
+	Name                     string `gorm:"uniqueIndex,where:deleted_at IS NULL"` // grom tag for soft delete issue. cpi-mmt-dev, cpi-ci, may use cpi tenant domain
+	CreatedBy                string
+	UpdatedBy                string
+	TransportNodeID          uint        //TMS Node ID
+	TransportNodeName        string      // TMS Node Name, for easier query
+	TransportNodeDescription string      // TMS Node Description
+	CpiEndpoint              ApiEndpoint `gorm:"serializer:json"`
+	Group                    string
+}
+
 type UaaClaims struct {
 	UserName string   `json:"user_name"`
 	Scope    []string `json:"scope"`
