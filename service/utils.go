@@ -13,13 +13,13 @@ func UserEmail(ctx *gin.Context) string {
 }
 func UserID(ctx *gin.Context) string {
 	claim, _ := ctx.Get("uaa_claim")
-	uid := claim.(*db.UaaClaims).Subject
+	uid := claim.(db.UaaClaims).Subject
 	return uid
 }
 
-func UaaClaim(ctx *gin.Context) *db.UaaClaims {
+func UaaClaim(ctx *gin.Context) db.UaaClaims {
 	claim, _ := ctx.Get("uaa_claim")
-	return claim.(*db.UaaClaims)
+	return claim.(db.UaaClaims)
 }
 
 func Scope(ctx *gin.Context) []string {
