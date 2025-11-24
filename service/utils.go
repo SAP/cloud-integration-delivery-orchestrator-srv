@@ -11,6 +11,11 @@ func UserEmail(ctx *gin.Context) string {
 	email, _ := ctx.Get("user_name")
 	return email.(string)
 }
+func UserID(ctx *gin.Context) string {
+	claim, _ := ctx.Get("uaa_claim")
+	uid := claim.(*db.UaaClaims).Subject
+	return uid
+}
 
 func UaaClaim(ctx *gin.Context) *db.UaaClaims {
 	claim, _ := ctx.Get("uaa_claim")

@@ -17,7 +17,7 @@ func UpsertCpiTenant(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
 		return
 	}
-	user := service.UserEmail(ctx)
+	user := service.UserID(ctx)
 	tenant.UpdatedBy = user
 	if tenant.ID == 0 {
 		tenant.CreatedBy = user

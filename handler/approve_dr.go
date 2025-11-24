@@ -22,8 +22,8 @@ func HandleRequestApproval(ctx *gin.Context) {
 		ctx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "no approvers provided"})
 		return
 	}
-	user := service.UaaClaim(ctx)
-	if err := service.RequestApproval(approvalReq.DrID, user.Subject, approvalReq.Approvers, approvalReq.Comment); err != nil {
+	user := service.UserID(ctx)
+	if err := service.RequestApproval(approvalReq.DrID, user, approvalReq.Approvers, approvalReq.Comment); err != nil {
 		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
 	}
@@ -39,8 +39,8 @@ func HandleApproveDeliveryRequest(ctx *gin.Context) {
 		ctx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "invalid request body"})
 		return
 	}
-	user := service.UaaClaim(ctx)
-	if err := service.Approve(approvalReq.DrID, user.UserID); err != nil {
+	user := service.UserID(ctx)
+	if err := service.Approve(approvalReq.DrID, user); err != nil {
 		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
 	}
