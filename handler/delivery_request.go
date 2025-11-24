@@ -39,7 +39,7 @@ func CreateDr(c *gin.Context) {
 
 	dr.AggregateStatus = lifecycle.AggPending
 
-	user := service.User(c)
+	user := service.UserEmail(c)
 	dr.CreatedBy, dr.UpdatedBy = user, user
 
 	if err := db.Conn().Create(&dr).Error; err != nil {
@@ -65,7 +65,7 @@ func UpdateDr(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "only pending delivery request can be updated"})
 		return
 	}
-	user, now := service.User(c), time.Now()
+	user, now := service.UserEmail(c), time.Now()
 	// check and update JIRA
 	if existing.JiraLink != dr.JiraLink {
 		if !checkJIRA(dr.JiraLink) {
@@ -76,7 +76,7 @@ func UpdateDr(c *gin.Context) {
 		existing.UpdatedBy, existing.UpdatedAt = user, now
 	}
 	if existing.DeliveryRuleID != dr.DeliveryRule.ID {
-		// TODO: check artifact ops in this dr. prevent changing rule if ops has different source tenant id 
+		// TODO: check artifact ops in this dr. prevent changing rule if ops has different source tenant id
 		existing.DeliveryRuleID = dr.DeliveryRule.ID
 		dr.UpdatedBy, dr.UpdatedAt = user, now
 	}
@@ -160,7 +160,7 @@ func HandleImportOps(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "missing opIDs or targetNode"})
 		return
 	}
-	user := service.User(c)
+	user := service.UserEmail(c)
 	success, err := service.BatchImportTenantOps(req.OpIDs, req.TargetTenant, user)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
@@ -179,7 +179,7 @@ func HandleDeployOps(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "missing opIDs or targetNode"})
 		return
 	}
-	user := service.User(c)
+	user := service.UserEmail(c)
 	success, err := service.BatchDeployTenantOps(req.OpIDs, req.TargetTenant, user)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
@@ -194,7 +194,7 @@ func HandleSyncState(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"status": 400, "error": "missing query param: deliveryRequestId"})
 		return
 	}
-	user := service.User(ctx)
+	user := service.UserEmail(ctx)
 	drID, err := service.ToUint(drIDStr)
 	if err != nil || drID <= 0 {
 		ctx.JSON(http.StatusBadRequest, gin.H{"status": 400, "error": "invalid deliveryRequestId"})
@@ -228,6 +228,7 @@ func HandleDeleteOps(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": req.OpIds})
 
 }
+
 // update or insert ops request
 type OpsRequest struct {
 	Ops               []db.ArtifactTenantOperation `json:"ops"`
@@ -240,7 +241,7 @@ func HandleInsertOps(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
 		return
 	}
-	user := service.User(c)
+	user := service.UserEmail(c)
 	if req.DeliveryRequestID == 0 {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "missing deliveryRequestID"})
 		return
@@ -259,7 +260,7 @@ func HandleUpdateOps(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
 		return
 	}
-	user := service.User(c)
+	user := service.UserEmail(c)
 	if err := service.UpdateTenantOps(req.DeliveryRequestID, req.Ops, user); err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return

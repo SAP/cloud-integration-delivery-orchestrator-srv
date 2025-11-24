@@ -7,7 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func User(ctx *gin.Context) string {
+func UserEmail(ctx *gin.Context) string {
 	email, _ := ctx.Get("user_name")
 	return email.(string)
 }

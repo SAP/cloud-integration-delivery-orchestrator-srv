@@ -33,6 +33,7 @@ func HandleRequestApproval(ctx *gin.Context) {
 func HandleApproveDeliveryRequest(ctx *gin.Context) {
 	var approvalReq struct {
 		DrID uint `json:"deliveryRequestId"`
+		Comment string `json:"comment"`
 	}
 	if err := ctx.ShouldBindJSON(&approvalReq); err != nil {
 		ctx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "invalid request body"})
