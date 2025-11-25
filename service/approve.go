@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"mmt-delivery/db"
 	"mmt-delivery/pkg/lifecycle"
+	"mmt-delivery/pkg/notify"
 	"time"
 )
 
@@ -21,18 +22,20 @@ func RequestApproval(drID uint, currentUserID string, approvers []string, commen
 	if dr.ApprovedAt != nil {
 		return errors.New("delivery request already approved")
 	}
-	if dr.AggregateStatus != lifecycle.AggPending {
+	if dr.AggregateStatus != lifecycle.AggPending && dr.AggregateStatus != lifecycle.AggWaitingApprove {
 		return fmt.Errorf("only pending delivery request can be submitted for approval, current status: %s", dr.AggregateStatus)
 	}
-	now := time.Now()
-	dr.AggregateStatus = lifecycle.AggWaitingApprove
-	dr.Approvers = approvers
-	dr.UpdatedBy, dr.UpdatedAt = currentUserID, now
-	if err := db.Conn().Updates(&dr).Error; err != nil {
+	// TODO: send email to approver, update JIRA
+	sendMailto := sendMailto(dr.Approvers, approvers)
+	if err := notify.SendEmail(sendMailto); err != nil {
+		return fmt.Errorf("failed to nofity approvers via email: %s", err.Error())
+	}
+	if err := db.Conn().Model(&dr).Updates(db.DeliveryRequest{
+		AggregateStatus: lifecycle.AggWaitingApprove,
+		Approvers:       approvers, UpdatedBy: currentUserID,
+	}).Error; err != nil {
 		return fmt.Errorf("failed to update delivery request status: %s", err.Error())
 	}
-	// TODO: send email to approver, update JIRA
-
 	return nil
 }
 
@@ -48,14 +51,32 @@ func Approve(drID uint, approverID string) error {
 	if dr.CreatedBy == approverID {
 		return fmt.Errorf("cannot approve your own delivery request")
 	}
-	dr.AggregateStatus = lifecycle.AggAwaitingImport
 	now := time.Now()
-	dr.ApprovedAt, dr.ApprovedBy = &now, approverID
-
 	// TODO: send email, update JIRA
+	if err := notify.SendEmail([]string{approverID, dr.CreatedBy, dr.UpdatedBy}); err != nil {
+		return fmt.Errorf("failed to nofity approvers via email: %s", err.Error())
+	}
 
-	if err := db.Conn().Updates(&dr).Error; err != nil {
+	if err := db.Conn().Model(&dr).Updates(db.DeliveryRequest{
+		AggregateStatus: lifecycle.AggAwaitingImport, ApprovedBy: approverID, ApprovedAt: &now,
+		UpdatedBy: approverID,
+	}).Error; err != nil {
 		return fmt.Errorf("failed to update delivery request status: %s", err.Error())
 	}
 	return nil
+}
+
+// existAppr: already send mail to; newAppr: receive from http request.
+func sendMailto(existAppr []string, newAppr []string) []string {
+	markSent := make(map[string]bool) // mark user id that already send to approvers
+	for _, uid := range existAppr {
+		markSent[uid] = true
+	}
+	sendMailto := make([]string, 0)
+	for _, appr := range newAppr {
+		if _, ok := markSent[appr]; !ok {
+			sendMailto = append(sendMailto, appr)
+		}
+	}
+	return sendMailto
 }

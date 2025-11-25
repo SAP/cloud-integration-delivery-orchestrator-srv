@@ -66,7 +66,8 @@ func main() {
 		v1Group.POST("/deliveryRequest/approve", handler.HandleApproveDeliveryRequest)
 
 		// uaa
-		v1Group.GET("/uaa/search/:email", handler.HandleUaaUserSearch)
+		v1Group.GET("/uaa/search/:email", handler.HandleUaaUserEmailSearch)
+		v1Group.GET("/uaa/id/:id", handler.HandleUaaUserIDSearch)
 
 	}
 

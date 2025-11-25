@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -65,7 +64,7 @@ func UpdateDr(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "only pending delivery request can be updated"})
 		return
 	}
-	user, now := service.UserID(c), time.Now()
+	user := service.UserID(c)
 	// check and update JIRA
 	if existing.JiraLink != dr.JiraLink {
 		if !checkJIRA(dr.JiraLink) {
@@ -73,12 +72,12 @@ func UpdateDr(c *gin.Context) {
 			return
 		}
 		existing.JiraLink = dr.JiraLink
-		existing.UpdatedBy, existing.UpdatedAt = user, now
+		existing.UpdatedBy = user
 	}
 	if existing.DeliveryRuleID != dr.DeliveryRule.ID {
 		// TODO: check artifact ops in this dr. prevent changing rule if ops has different source tenant id
 		existing.DeliveryRuleID = dr.DeliveryRule.ID
-		dr.UpdatedBy, dr.UpdatedAt = user, now
+		dr.UpdatedBy = user
 	}
 	if err := db.Conn().Updates(&existing).Error; err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})

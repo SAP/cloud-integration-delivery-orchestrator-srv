@@ -152,11 +152,12 @@ func SyncDeployState(deliveryRequestID uint, user string) error {
 		} else {
 			continue // not triggered by this operation
 		}
-		if state != op.DeployState {
-			op.DeployState = state
-			op.UpdatedAt, op.UpdatedBy = time.Now(), user
+		if state == op.DeployState { // only need update if deploy state changed
+			continue
 		}
-		if err := db.Conn().Updates(&op).Error; err != nil {
+		if err := db.Conn().Model(&op).Updates(db.ArtifactTenantOperation{
+			DeployState: state, UpdatedBy: user,
+		}).Error; err != nil {
 			return fmt.Errorf("error when creating new artifact tenant operation for artifact %s in tenant %d: %w", op.ArtifactTechID, op.TenantID, err)
 		}
 	}
@@ -235,8 +236,7 @@ func SyncImportState(deliveryRequestID uint, user string) error {
 				continue
 			}
 			// update state if changed
-			curOp.ImportState = state
-			curOp.UpdatedAt, curOp.UpdatedBy = time.Now(), user
+			curOp.ImportState, curOp.UpdatedBy = state, user
 			// NOTE: set deploy state if import completed
 			if curOp.ImportState == lifecycle.ImportComplete && curOp.DeployState == lifecycle.DeployNotStarted {
 				curOp.DeployState = lifecycle.DeployQueued
@@ -481,7 +481,6 @@ func UpdateTenantOps(drID uint, ops []db.ArtifactTenantOperation, user string) e
 				continue
 			}
 		}
-		existingOp.UpdatedAt = time.Now()
 		existingOp.UpdatedBy = user
 		existingOp.TransportRequestNumber = op.TransportRequestNumber
 

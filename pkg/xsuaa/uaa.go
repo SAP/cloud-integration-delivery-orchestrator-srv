@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"mmt-delivery/db"
 	"mmt-delivery/pkg/env"
+
 	"net/http"
 	"net/url"
 	"time"
@@ -23,7 +25,7 @@ func NewClient(c context.Context) (*UaaClient, error) {
 }
 
 // get user by sub/user_id from JWT claim body
-func (uaa *UaaClient) UserInfo(userID string) (*UserInfo, error) {
+func (uaa *UaaClient) UserInfo(userID string) (*db.UserInfo, error) {
 	childCtx, cancel := context.WithCancel(uaa.Context)
 	defer cancel()
 	fullUrl := fmt.Sprintf("%s/Users/%s", uaa.ApiURL, userID)
@@ -43,17 +45,16 @@ func (uaa *UaaClient) UserInfo(userID string) (*UserInfo, error) {
 		logger.Errorf("Error when unmarshal uaa user response, %s", err)
 		return nil, err
 	}
-	user := UserInfo{
+	user := db.UserInfo{
 		ID:       resource.ID,
 		Email:    resource.Emails[0].Value,
 		UserName: resource.UserName,
-		Groups:   resource.Groups,
 	}
 	return &user, nil
 }
 
 // search uaa user by email, 'co' operator(https://simplecloud.info/specs/draft-scim-api-01.html#query-resources)
-func (uaa *UaaClient) SearchByEmail(email string) ([]UserInfo, error) {
+func (uaa *UaaClient) SearchByEmail(email string) ([]db.UserInfo, error) {
 	childCtx, cancel := context.WithCancel(uaa.Context)
 	defer cancel()
 	q := url.Values{}
@@ -69,34 +70,26 @@ func (uaa *UaaClient) SearchByEmail(email string) ([]UserInfo, error) {
 	respBodyContent, _, err := uaa.Do(&request)
 	if err != nil {
 		logger.Errorf("Error when getting uaa users by email, %s", err)
-		return []UserInfo{}, err
+		return []db.UserInfo{}, err
 	}
 	var document Document
 	if err := json.Unmarshal(*respBodyContent, &document); err != nil {
 		logger.Errorf("Error when unmarshal uaa users response, %s", err)
-		return []UserInfo{}, err
+		return []db.UserInfo{}, err
 	}
 	logger.Infof("Successfully retrieved uaa users: %+v", document)
-	users := make([]UserInfo, 0)
+	users := make([]db.UserInfo, 0)
 	for _, u := range document.Resources {
 		for _, em := range u.Emails {
-			users = append(users, UserInfo{
+			users = append(users, db.UserInfo{
 				ID:       u.ID,
 				Email:    em.Value,
 				UserName: u.UserName,
-				Groups:   u.Groups,
 			})
 			break
 		}
 	}
 	return users, nil
-}
-
-type UserInfo struct {
-	ID       string  `json:"id"`
-	Email    string  `json:"email"`
-	UserName string  `json:"userName"`
-	Groups   []Group `json:"groups"`
 }
 
 type Document struct {

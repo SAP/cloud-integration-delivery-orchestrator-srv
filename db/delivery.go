@@ -88,7 +88,6 @@ type BatchJob struct {
 	CreatedBy  string
 }
 
-
 type DeliveryRule struct {
 	gorm.Model
 	Name           string
@@ -107,4 +106,10 @@ type DeliveryRule struct {
 	Active    bool
 	CreatedBy string
 	UpdatedBy string
+}
+
+type UserInfo struct {
+	ID       string `json:"id"`
+	Email    string `json:"email"`
+	UserName string `json:"userName"`
 }

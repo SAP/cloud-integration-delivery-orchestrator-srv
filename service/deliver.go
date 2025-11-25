@@ -8,7 +8,6 @@ import (
 	"mmt-delivery/pkg/cpi"
 	"mmt-delivery/pkg/lifecycle"
 	"mmt-delivery/pkg/tms"
-	"time"
 
 	"gorm.io/gorm"
 )
@@ -42,7 +41,6 @@ func BatchImportTenantOps(opIDs []uint, targetTenantID uint, user string) (bool,
 			return false, fmt.Errorf("invalid transport request number %s for artifact operation %d: %s", op.TransportRequestNumber, op.ID, err)
 		}
 		trs = append(trs, trNumber)
-		op.UpdatedAt = time.Now()
 		op.UpdatedBy = user
 	}
 	tmsCli, err := tms.NewClient(context.Background())
@@ -92,7 +90,6 @@ func BatchDeployTenantOps(opIDs []uint, targetTenantID uint, user string) (bool,
 			continue
 		}
 		op.DeployState = lifecycle.DeployInProgress
-		op.UpdatedAt = time.Now()
 		op.UpdatedBy = user
 		if err := db.Conn().Model(op).Updates(op).Error; err != nil {
 			errOps[op.ID] = fmt.Errorf("failed to update artifact operation %d: %s", op.ID, err)

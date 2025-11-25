@@ -32,7 +32,7 @@ func HandleRequestApproval(ctx *gin.Context) {
 
 func HandleApproveDeliveryRequest(ctx *gin.Context) {
 	var approvalReq struct {
-		DrID uint `json:"deliveryRequestId"`
+		DrID    uint   `json:"deliveryRequestId"`
 		Comment string `json:"comment"`
 	}
 	if err := ctx.ShouldBindJSON(&approvalReq); err != nil {
