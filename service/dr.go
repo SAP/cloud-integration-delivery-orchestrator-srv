@@ -421,20 +421,20 @@ func DeleteTenantOps(opIDs []uint) error {
 	return nil
 }
 
-func InsertTenantOps(drID uint, ops []db.ArtifactTenantOperation, user string) error {
+func InsertTenantOps(drID uint, ops []db.ArtifactTenantOperation, user string) ([]db.ArtifactTenantOperation, error) {
 	if len(ops) == 0 {
-		return nil
+		return nil, nil
 	}
 	sourceTenant, err := SourceTenant(context.Background(), drID)
 	if err != nil {
-		return fmt.Errorf("failed to get source tenant for delivery request %d: %s", drID, err)
+		return nil, fmt.Errorf("failed to get source tenant for delivery request %d: %s", drID, err)
 	}
 	errOps := make(map[uint]error)
 	for i := range ops {
 		op := &ops[i]
 		a, err := LoadArtifact(*op)
 		if err != nil {
-			return fmt.Errorf("failed to load artifact for operation %d: %s", op.ID, err)
+			return nil, fmt.Errorf("failed to load artifact for operation %d: %s", op.ID, err)
 		}
 		// check TR
 		if _, err := TrExist(op, sourceTenant); err != nil {
@@ -448,19 +448,27 @@ func InsertTenantOps(drID uint, ops []db.ArtifactTenantOperation, user string) e
 		op.ImportState, op.DeployState, op.RequestState =
 			lifecycle.ImportNotStarted, lifecycle.DeployNotStarted, lifecycle.RequestPending
 	}
-	if err := db.Conn().Create(&ops).Error; err != nil {
-		return fmt.Errorf("failed to insert artifact tenant operations: %s", err)
+	if len(errOps) > 0 {
+		errMsg := "errors Occurs while inserting artifact ops:\n"
+		for id, e := range errOps {
+			errMsg += fmt.Sprintf("\t operation %d: %s\n", id, e)
+		}
+		return nil, errors.New(errMsg)
 	}
-	return nil
+	if err := db.Conn().Create(&ops).Error; err != nil {
+		return nil, fmt.Errorf("failed to insert artifact tenant operations: %s", err)
+	}
+	return ops, nil
 }
 
-func UpdateTenantOps(drID uint, ops []db.ArtifactTenantOperation, user string) error {
+// note: this can only update transport request number
+func UpdateTenantOps(drID uint, ops []db.ArtifactTenantOperation, user string) ([]db.ArtifactTenantOperation, error) {
 	if len(ops) == 0 {
-		return nil
+		return nil, nil
 	}
 	sourceTenant, err := SourceTenant(context.Background(), drID)
 	if err != nil {
-		return fmt.Errorf("failed to get source tenant for delivery request %d: %s", drID, err)
+		return nil, fmt.Errorf("failed to get source tenant for delivery request %d: %s", drID, err)
 	}
 	errOps := make(map[uint]error)
 	for i := range ops {
@@ -487,15 +495,16 @@ func UpdateTenantOps(drID uint, ops []db.ArtifactTenantOperation, user string) e
 		if err := db.Conn().Save(&existingOp).Error; err != nil {
 			errOps[op.ID] = fmt.Errorf("failed to update artifact tenant operation %d: %s", op.ID, err)
 		}
+		op = &existingOp // update back
 	}
 	if len(errOps) > 0 {
 		errMsg := "errors occurred during update artifact tenant operations:\n"
 		for id, e := range errOps {
 			errMsg += fmt.Sprintf("\t operation %d: %s\n", id, e)
 		}
-		return errors.New(errMsg)
+		return nil, errors.New(errMsg)
 	}
-	return nil
+	return ops, nil
 }
 
 func SourceTenant(c context.Context, drID uint) (*db.CpiTenant, error) {

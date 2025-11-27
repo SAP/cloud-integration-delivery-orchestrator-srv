@@ -245,11 +245,13 @@ func HandleInsertOps(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "missing deliveryRequestID"})
 		return
 	}
-	if err := service.InsertTenantOps(req.DeliveryRequestID, req.Ops, user); err != nil {
+	var ops []db.ArtifactTenantOperation
+	ops, err := service.InsertTenantOps(req.DeliveryRequestID, req.Ops, user)
+	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": req.Ops})
+	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": ops})
 
 }
 
@@ -260,9 +262,10 @@ func HandleUpdateOps(c *gin.Context) {
 		return
 	}
 	user := service.UserID(c)
-	if err := service.UpdateTenantOps(req.DeliveryRequestID, req.Ops, user); err != nil {
+	ops, err := service.UpdateTenantOps(req.DeliveryRequestID, req.Ops, user)
+	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": req.Ops})
+	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": ops})
 }
