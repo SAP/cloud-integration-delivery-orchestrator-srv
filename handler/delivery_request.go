@@ -269,3 +269,36 @@ func HandleUpdateOps(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": ops})
 }
+
+func HandleCheckTr(c *gin.Context) {
+	var req struct {
+		Op                db.ArtifactTenantOperation `json:"op"`
+		DeliveryRequestID uint                       `json:"deliveryRequestID"`
+	}
+	if err := c.ShouldBindBodyWithJSON(&req); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
+		return
+	}
+	var dr db.DeliveryRequest
+	if err := db.Conn().First(&dr, req.DeliveryRequestID).Error; err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": fmt.Sprintf("failed to get delivery request id %d: %s", req.DeliveryRequestID, err)})
+		return
+	}
+	sourceTenantID := dr.SourceTenantID
+	if req.Op.TenantID != sourceTenantID {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": fmt.Sprintf("artifact tenant operation id %d has different source tenant id %d than delivery request source tenant id %d", req.Op.ID, req.Op.TenantID, sourceTenantID)})
+		return
+	}
+	var sourceTenant db.CpiTenant
+	if err := db.Conn().First(&sourceTenant, sourceTenantID).Error; err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": fmt.Sprintf("failed to get source tenant id %d: %s", sourceTenantID, err)})
+		return
+	}
+
+	_, err := service.TrExist(&req.Op, &sourceTenant)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": "valid"})
+}

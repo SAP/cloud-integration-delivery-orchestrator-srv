@@ -61,6 +61,7 @@ func main() {
 		v1Group.POST("/deliveryRequest/deleteOps", handler.HandleDeleteOps)
 		v1Group.POST("/deliveryRequest/insertOps", handler.HandleInsertOps) // batch delete
 		v1Group.PUT("/deliveryRequest/updateOps", handler.HandleUpdateOps)
+		v1Group.POST("/deliveryRequest/checkTr", handler.HandleCheckTr)
 		// approve
 		v1Group.POST("/deliveryRequest/requestApproval", handler.HandleRequestApproval)
 		v1Group.POST("/deliveryRequest/approve", handler.HandleApproveDeliveryRequest)
