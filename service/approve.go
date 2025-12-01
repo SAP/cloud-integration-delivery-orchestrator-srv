@@ -32,7 +32,8 @@ func RequestApproval(drID uint, currentUserID string, approvers []string, commen
 	}
 	if err := db.Conn().Model(&dr).Updates(db.DeliveryRequest{
 		AggregateStatus: lifecycle.AggWaitingApprove,
-		Approvers:       approvers, UpdatedBy: currentUserID,
+		Approvers:       approvers, 
+		UpdatedBy: currentUserID,
 	}).Error; err != nil {
 		return fmt.Errorf("failed to update delivery request status: %s", err.Error())
 	}
@@ -40,30 +41,31 @@ func RequestApproval(drID uint, currentUserID string, approvers []string, commen
 }
 
 // approverID: from JWT claim, user_id/subject
-func Approve(drID uint, approverID string) error {
+func Approve(drID uint, approverID string) (*db.DeliveryRequest, error) {
 	var dr db.DeliveryRequest
 	if err := db.Conn().First(&dr, drID).Error; err != nil {
-		return fmt.Errorf("delivery request #%d not found", drID)
+		return nil, fmt.Errorf("delivery request #%d not found", drID)
 	}
 	if dr.AggregateStatus != lifecycle.AggWaitingApprove && dr.AggregateStatus != lifecycle.AggPending {
-		return fmt.Errorf("cannot apprve delivery request %d: current status is %s", drID, dr.AggregateStatus)
+		return nil, fmt.Errorf("cannot apprve delivery request %d: current status is %s", drID, dr.AggregateStatus)
 	}
-	if dr.CreatedBy == approverID {
-		return fmt.Errorf("cannot approve your own delivery request")
-	}
+	// TODO: prevent self-approval
+	// if dr.CreatedBy == approverID {
+	// 	return fmt.Errorf("cannot approve your own delivery request")
+	// }
 	now := time.Now()
 	// TODO: send email, update JIRA
 	if err := notify.SendEmail([]string{approverID, dr.CreatedBy, dr.UpdatedBy}); err != nil {
-		return fmt.Errorf("failed to nofity approvers via email: %s", err.Error())
+		return nil, fmt.Errorf("failed to nofity approvers via email: %s", err.Error())
 	}
 
 	if err := db.Conn().Model(&dr).Updates(db.DeliveryRequest{
 		AggregateStatus: lifecycle.AggAwaitingImport, ApprovedBy: approverID, ApprovedAt: &now,
 		UpdatedBy: approverID,
 	}).Error; err != nil {
-		return fmt.Errorf("failed to update delivery request status: %s", err.Error())
+		return nil, fmt.Errorf("failed to update delivery request status: %s", err.Error())
 	}
-	return nil
+	return &dr, nil
 }
 
 // existAppr: already send mail to; newAppr: receive from http request.

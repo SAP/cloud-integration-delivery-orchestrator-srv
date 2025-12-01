@@ -60,8 +60,8 @@ func UpdateDr(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"status": "fail", "code": 404, "error": fmt.Sprintf("delivery request id %d not found", dr.ID)})
 		return
 	}
-	if existing.AggregateStatus != lifecycle.AggPending {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "only pending delivery request can be updated"})
+	if existing.AggregateStatus != lifecycle.AggPending && existing.AggregateStatus != lifecycle.AggWaitingApprove {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "only pending or waiting approval delivery request can be updated"})
 		return
 	}
 	user := service.UserID(c)

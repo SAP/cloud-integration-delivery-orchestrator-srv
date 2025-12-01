@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"mmt-delivery/db"
 	"mmt-delivery/service"
 	"net/http"
 
@@ -40,9 +41,11 @@ func HandleApproveDeliveryRequest(ctx *gin.Context) {
 		return
 	}
 	user := service.UserID(ctx)
-	if err := service.Approve(approvalReq.DrID, user); err != nil {
+	var dr *db.DeliveryRequest
+	var err error
+	if dr, err = service.Approve(approvalReq.DrID, user); err != nil {
 		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
 	}
-	ctx.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": "delivery request approved"})
+	ctx.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": dr})
 }
