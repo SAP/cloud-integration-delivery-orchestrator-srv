@@ -27,10 +27,12 @@ func BatchImportTenantOps(opIDs []uint, targetTenantID uint, user string) (bool,
 	targetNodeID := tenant.TransportNodeID
 
 	trs := make([]uint, 0)
+	errOps := make(map[uint]error)
 	for i := range ops {
 		op := &ops[i]
 		if op.ImportState != lifecycle.ImportQueued || op.Tenant.TransportNodeID != targetNodeID { // only queued(INITIAL) state can be triggered for import
 			// TODO: may create a Condition for these check failures
+			errOps[op.ID] = fmt.Errorf("cannot import artifact operation #%d(at TMS node %d) for target TMS node %d. Import State: %s", op.ID, op.Tenant.TransportNodeID, targetNodeID, op.ImportState)
 			continue
 		}
 		op.ImportState = lifecycle.ImportInProgress
@@ -38,10 +40,18 @@ func BatchImportTenantOps(opIDs []uint, targetTenantID uint, user string) (bool,
 		// TODO: EVERY IMPORTANT! validate if there is version decrease in target tenant before import
 
 		if err != nil {
-			return false, fmt.Errorf("invalid transport request number %s for artifact operation %d: %s", op.TransportRequestNumber, op.ID, err)
+			errOps[op.ID] = fmt.Errorf("invalid transport request number %s for artifact operation %d: %s", op.TransportRequestNumber, op.ID, err)
+			continue
 		}
 		trs = append(trs, trNumber)
 		op.UpdatedBy = user
+	}
+	if len(errOps) > 0 {
+		errMsg := "errors occurred during preparing import operations:\n"
+		for id, e := range errOps {
+			errMsg += fmt.Sprintf("\t operation #%d: %s\n", id, e)
+		}
+		return false, errors.New(errMsg)
 	}
 	tmsCli, err := tms.NewClient(context.Background())
 	if err != nil {

@@ -70,16 +70,16 @@ func TrExist(op *db.ArtifactTenantOperation, sourceTenant *db.CpiTenant) (bool, 
 		return false, fmt.Errorf("artifact %s has transport request number %s not from source tenant node %s", op.ArtifactTechID, trNumber, sourceTenant.TransportNodeName)
 	}
 	// check Content Field, should match techID, Version, Type
-	// index := -1
-	// for i, md := range trV1.Content[0].Metadata {
-	// 	if md.Name == op.ArtifactTechID || md.Type == op.Artifact.Type || md.Version == op.ArtifactVersion {
-	// 		index = i
-	// 		break
-	// 	}
-	// }
-	// if index == -1 {
-	// 	return false, fmt.Errorf("artifact %s, trNumber %s: not match. May use a wrong trNumber for this artifact", op.ArtifactTechID, trNumber)
-	// }
+	index := -1
+	for i, md := range trV1.Content[0].Metadata {
+		if md.Name == op.ArtifactTechID || md.Type == op.Artifact.Type || md.Version == op.ArtifactVersion {
+			index = i
+			break
+		}
+	}
+	if index == -1 {
+		return false, fmt.Errorf("artifact %s, trNumber %s: not match. May use a wrong trNumber for this artifact", op.ArtifactTechID, trNumber)
+	}
 
 	// update status of artifact tenant operation
 	return true, nil
@@ -93,6 +93,18 @@ func LoadArtifact(op db.ArtifactTenantOperation) (atf db.Artifact, err error) {
 		return
 	}
 	atf = *a
+	return
+}
+
+func QueryDrWithAcc(drID uint) (dr *db.DeliveryRequest, err error) {
+	if err := db.Conn().
+		Preload("SourceTenant").
+		Preload("DeliveryRule").
+		Preload("ArtifactTenantOperations.Artifact").
+		Preload("ArtifactTenantOperations.Tenant").
+		First(&dr, drID).Error; err != nil {
+		return nil, fmt.Errorf("failed to query delivery request %d: %w", drID, err)
+	}
 	return
 }
 
@@ -202,10 +214,14 @@ func SyncImportState(deliveryRequestID uint, user string) error {
 		}
 		tenantToOps[tenantID][trNumber] = op
 	}
-
+	trUpdated := make(map[string]bool)
 	nodetoTenantID := nodeTenantCache // tms node ID - cpi tenant ID
 	for _, op := range artifactOps {  // check to create new record if new tr status happens in tms
 		trNumber := op.TransportRequestNumber
+		if _, ok := trUpdated[trNumber]; ok { // prevent duplicate update
+			continue
+		}
+		trUpdated[trNumber] = true
 		// same artifactOp equals same trNumber, but in diffrent tms nods
 		for nID, nState := range trNodeStatus[trNumber] {
 			var tenantID uint

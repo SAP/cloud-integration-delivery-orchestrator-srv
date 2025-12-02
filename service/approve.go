@@ -32,8 +32,8 @@ func RequestApproval(drID uint, currentUserID string, approvers []string, commen
 	}
 	if err := db.Conn().Model(&dr).Updates(db.DeliveryRequest{
 		AggregateStatus: lifecycle.AggWaitingApprove,
-		Approvers:       approvers, 
-		UpdatedBy: currentUserID,
+		Approvers:       approvers,
+		UpdatedBy:       currentUserID,
 	}).Error; err != nil {
 		return fmt.Errorf("failed to update delivery request status: %s", err.Error())
 	}
@@ -42,13 +42,17 @@ func RequestApproval(drID uint, currentUserID string, approvers []string, commen
 
 // approverID: from JWT claim, user_id/subject
 func Approve(drID uint, approverID string) (*db.DeliveryRequest, error) {
-	var dr db.DeliveryRequest
-	if err := db.Conn().First(&dr, drID).Error; err != nil {
-		return nil, fmt.Errorf("delivery request #%d not found", drID)
+	dr, err := QueryDrWithAcc(drID)
+	if err != nil {
+		return nil, err
+	}
+	if len(dr.ArtifactTenantOperations) == 0 {
+		return nil, fmt.Errorf("cannot approve delivery request %d: no artifact operations found", drID)
 	}
 	if dr.AggregateStatus != lifecycle.AggWaitingApprove && dr.AggregateStatus != lifecycle.AggPending {
 		return nil, fmt.Errorf("cannot apprve delivery request %d: current status is %s", drID, dr.AggregateStatus)
 	}
+
 	// TODO: prevent self-approval
 	// if dr.CreatedBy == approverID {
 	// 	return fmt.Errorf("cannot approve your own delivery request")
@@ -58,14 +62,22 @@ func Approve(drID uint, approverID string) (*db.DeliveryRequest, error) {
 	if err := notify.SendEmail([]string{approverID, dr.CreatedBy, dr.UpdatedBy}); err != nil {
 		return nil, fmt.Errorf("failed to nofity approvers via email: %s", err.Error())
 	}
-
+	// no need to call TrExist, for it will be done in update/insert ops.
 	if err := db.Conn().Model(&dr).Updates(db.DeliveryRequest{
 		AggregateStatus: lifecycle.AggAwaitingImport, ApprovedBy: approverID, ApprovedAt: &now,
 		UpdatedBy: approverID,
 	}).Error; err != nil {
 		return nil, fmt.Errorf("failed to update delivery request status: %s", err.Error())
 	}
-	return &dr, nil
+	// sync import/deploy state after approval
+	if err := SyncImportState(drID, approverID); err != nil {
+		return nil, fmt.Errorf("failed to sync import state: %s", err.Error())
+	}
+	if err := SyncDeployState(drID, approverID); err != nil {
+		return nil, fmt.Errorf("failed to sync deploy state: %s", err.Error())
+	}
+
+	return dr, nil
 }
 
 // existAppr: already send mail to; newAppr: receive from http request.

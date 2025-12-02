@@ -102,18 +102,13 @@ func GetAllDr(c *gin.Context) {
 // Get a single DeliveryRequest by id
 func GetDeliveryRequest(c *gin.Context) {
 	raw := c.Param("id")
-	id, err := strconv.Atoi(raw)
-	if err != nil || id <= 0 {
+	drID, err := strconv.Atoi(raw)
+	if err != nil || drID <= 0 {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "invalid id"})
 		return
 	}
-	var dr db.DeliveryRequest
-	if err := db.Conn().
-		Preload("SourceTenant").
-		Preload("DeliveryRule").
-		Preload("ArtifactTenantOperations.Artifact").
-		Preload("ArtifactTenantOperations.Tenant").
-		First(&dr, id).Error; err != nil {
+	dr, err := service.QueryDrWithAcc(uint(drID))
+	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
 	}
