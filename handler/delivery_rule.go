@@ -23,22 +23,28 @@ func UpsertDeliveryRule(ctx *gin.Context) {
 	if rule.ID == 0 {
 		rule.CreatedBy = user
 	}
+	// determine source tenant and target routes/nodes based on included tenants
+	sourceTenant, targetRoutes, targetNodes, err := service.SourceAndRoute(rule.IncludedTenants)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": fmt.Errorf("failed to determine source tenant and target routes/nodes: %s", err.Error())})
+		return
+	}
+	rule.SourceTenantID = sourceTenant.ID
+	rule.TargetNodes, rule.TargetRoutes = targetNodes, targetRoutes
 	if err := db.Conn().Save(&rule).Error; err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
 	}
-	if err := service.GenRouteForRule(rule.ID); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": fmt.Errorf("failed to generate delivery route by included tenants: %s", err.Error())})
-		return
-	}
-
 	ctx.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": rule})
 }
 
 // List all
 func GetDeliveryRules(ctx *gin.Context) {
 	var rules []db.DeliveryRule
-	if err := db.Conn().Find(&rules).Error; err != nil {
+	if err := db.Conn().
+		Preload("IncludedTenants").
+		Preload("ExcludedTenants").
+		Find(&rules).Error; err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
 	}
@@ -53,9 +59,9 @@ func GetDeliveryRule(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "invalid id"})
 		return
 	}
-	var rule db.DeliveryRule
-	if err := db.Conn().First(&rule, id).Error; err != nil {
-		ctx.JSON(http.StatusNotFound, gin.H{"status": "fail", "code": 404, "error": "not found"})
+	rule, err := service.GetDeliveryRule(uint(id))
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": rule})

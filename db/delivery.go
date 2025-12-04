@@ -94,14 +94,15 @@ type DeliveryRule struct {
 	VersionPattern string
 
 	// Associations to CpiTenant
-	IncludedTenants []CpiTenant `gorm:"serializer:json;"` // included CPI tenants
-	ExcludedTenants []CpiTenant `gorm:"serializer:json;"` // excluded CPI tenants
+	IncludedTenants []CpiTenant `gorm:"many2many:included_tenants"` // included CPI tenants
+	ExcludedTenants []CpiTenant `gorm:"many2many:excluded_tenants"` // excluded CPI tenants
 
 	TargetNodes  []TransportNode  `gorm:"serializer:json"`
 	TargetRoutes []TransportRoute `gorm:"serializer:json"`
 
 	SourceTenantID uint
 	SourceTenant   CpiTenant `gorm:"foreignKey:SourceTenantID"`
+	SkipApprove   bool // enable skip approval, directly process delivery
 
 	Active    bool
 	CreatedBy string

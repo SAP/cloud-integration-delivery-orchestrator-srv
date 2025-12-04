@@ -72,7 +72,7 @@ func TrExist(op *db.ArtifactTenantOperation, sourceTenant *db.CpiTenant) (bool, 
 	// check Content Field, should match techID, Version, Type
 	index := -1
 	for i, md := range trV1.Content[0].Metadata {
-		if md.Name == op.ArtifactTechID || md.Type == op.Artifact.Type || md.Version == op.ArtifactVersion {
+		if md.Name == op.ArtifactTechID && md.Type == op.Artifact.Type && md.Version == op.ArtifactVersion {
 			index = i
 			break
 		}
@@ -184,6 +184,20 @@ func SyncImportState(deliveryRequestID uint, user string) error {
 	if err != nil {
 		return err
 	}
+	// find delivery rule id in delivery request
+	var dr db.DeliveryRequest
+	if err := db.Conn().First(&dr, deliveryRequestID).Error; err != nil {
+		return fmt.Errorf("failed to find delivery request %d: %w", deliveryRequestID, err)
+	}
+	drRuleID := dr.DeliveryRuleID
+	if drRuleID == 0 {
+		return fmt.Errorf("delivery request %d has no delivery rule", deliveryRequestID)
+	}
+	var deliveryRule db.DeliveryRule
+	if err := db.Conn().First(&deliveryRule, drRuleID).Error; err != nil {
+		return fmt.Errorf("failed to find delivery rule %d: %w", drRuleID, err)
+	}
+
 	tmsClient, err := tms.NewClient(context.Background())
 	if err != nil {
 		return fmt.Errorf("error creating tms client: %w", err)
@@ -226,6 +240,8 @@ func SyncImportState(deliveryRequestID uint, user string) error {
 		for nID, nState := range trNodeStatus[trNumber] {
 			var tenantID uint
 			var ok bool
+			// TODO: skip node that is not in delivery rule. currently will create op for all nodes, see dr id #20
+
 			if tenantID, ok = nodetoTenantID[nID]; !ok {
 				return fmt.Errorf("no cpi tenant found for tms node %d, please configure Cpi Tenant first", nID)
 			}
@@ -377,7 +393,10 @@ func downstreamfromSource(sourceNodeID uint, transportNodes []db.TransportNode, 
 
 func GetDeliveryRule(drRuleID uint) (db.DeliveryRule, error) {
 	var rule db.DeliveryRule
-	if err := db.Conn().First(&rule, drRuleID).Error; err != nil {
+	if err := db.Conn().
+		Preload("IncludedTenants").
+		Preload("ExcludedTenants").
+		First(&rule, drRuleID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return rule, fmt.Errorf("delivery rule %d not found", drRuleID)
 		}
@@ -386,7 +405,7 @@ func GetDeliveryRule(drRuleID uint) (db.DeliveryRule, error) {
 	return rule, nil
 }
 
-// generate route info for delivery rule
+// generate route info for delivery rule. determine source tenant, TMS target routes and nodes
 func GenRouteForRule(ruleID uint) (err error) {
 	rule, err := GetDeliveryRule(ruleID)
 	if err != nil {
