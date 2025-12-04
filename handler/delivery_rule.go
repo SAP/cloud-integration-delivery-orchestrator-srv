@@ -3,6 +3,7 @@ package handler
 import (
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -19,6 +20,21 @@ func UpsertDeliveryRule(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
 		return
 	}
+	if rule.Name == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "rule name cannot be empty"})
+		return
+	}
+	if rule.VersionPattern == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "VersionPattern cannot be empty"})
+		return
+	}
+	// Validate VersionPattern: allow formats like 5.8.* , 6.2.*
+	vpRe := regexp.MustCompile(`^\d+\.\d+\.\*$`)
+	if !vpRe.MatchString(rule.VersionPattern) {
+		ctx.JSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "invalid VersionPattern: expected format X.Y.* (e.g., 5.8.*, 6.2.*)"})
+		return
+	}
+	
 	user := service.UserID(ctx)
 	rule.UpdatedBy = user
 	if rule.ID == 0 {
@@ -35,49 +51,16 @@ func UpsertDeliveryRule(ctx *gin.Context) {
 		rule.SourceTenantID = sourceTenant.ID
 		rule.TargetNodes, rule.TargetRoutes = targetNodes, targetRoutes
 
-		if rule.ID == 0 {
-			// Create scalar fields first
-			if err := tx.Create(&rule).Error; err != nil {
-				return err
-			}
-			// Replace associations explicitly
-			if err := tx.Model(&rule).Association("IncludedTenants").Replace(rule.IncludedTenants); err != nil {
-				return err
-			}
-			if err := tx.Model(&rule).Association("ExcludedTenants").Replace(rule.ExcludedTenants); err != nil {
-				return err
-			}
-			return nil
-		}
-
-		// Update path: load existing then update scalars
-		var existing db.DeliveryRule
-		if err := tx.First(&existing, rule.ID).Error; err != nil {
+		if err := tx.Save(&rule).Error; err != nil {
 			return err
 		}
-
-		existing.Name = rule.Name
-		existing.VersionPattern = rule.VersionPattern
-		existing.SourceTenantID = rule.SourceTenantID
-		existing.TargetNodes = rule.TargetNodes
-		existing.TargetRoutes = rule.TargetRoutes
-		existing.SkipApprove = rule.SkipApprove
-		existing.Active = rule.Active
-		existing.UpdatedBy = user
-
-		if err := tx.Save(&existing).Error; err != nil {
-			return err
-		}
-
 		// Replace associations to reflect the incoming payload exactly
-		if err := tx.Model(&existing).Association("IncludedTenants").Replace(rule.IncludedTenants); err != nil {
+		if err := tx.Model(&rule).Association("IncludedTenants").Replace(rule.IncludedTenants); err != nil {
 			return err
 		}
-		if err := tx.Model(&existing).Association("ExcludedTenants").Replace(rule.ExcludedTenants); err != nil {
+		if err := tx.Model(&rule).Association("ExcludedTenants").Replace(rule.ExcludedTenants); err != nil {
 			return err
 		}
-
-		rule = existing
 		return nil
 	}); err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
