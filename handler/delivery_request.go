@@ -23,6 +23,10 @@ func CreateDr(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "missing delivery rule"})
 		return
 	}
+	if dr.Name == "" {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "missing name"})
+		return
+	}
 
 	if !checkJIRA(dr.JiraLink) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "invalid jira link"})
@@ -79,6 +83,7 @@ func UpdateDr(c *gin.Context) {
 		existing.DeliveryRuleID = dr.DeliveryRule.ID
 		dr.UpdatedBy = user
 	}
+	existing.Name = dr.Name
 	if err := db.Conn().Updates(&existing).Error; err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
@@ -133,7 +138,7 @@ func DeleteDr(c *gin.Context) {
 // TODO: finish this
 func checkJIRA(jira string) bool {
 	if jira == "" {
-		return true
+		return false
 	}
 	return true
 }
