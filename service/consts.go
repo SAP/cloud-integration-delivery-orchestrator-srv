@@ -1,4 +1,4 @@
-package lifecycle
+package service
 
 import (
 	"time"
@@ -63,16 +63,14 @@ const (
 	AggUnknown        AggregateStatus = "UNKNOWN"
 	AggPending        AggregateStatus = "PENDING"          // waiting for TR or queued work
 	AggWaitingApprove AggregateStatus = "WAITING_APPROVAL" // waiting for manual approval to import
+	
 	AggAwaitingImport AggregateStatus = "AWAITING_IMPORT"  // TR ready, import not started
 	AggImporting      AggregateStatus = "IMPORTING"
 	AggImportFailed   AggregateStatus = "IMPORT_FAILED"
-	AggImported       AggregateStatus = "IMPORTED"
 	AggWaitingDeploy  AggregateStatus = "AWAITING_DEPLOY" // import done, deploy not started
 	AggDeploying      AggregateStatus = "DEPLOYING"
 	AggDeployFailed   AggregateStatus = "DEPLOY_FAILED"
 	AggDeployed       AggregateStatus = "DEPLOYED"
-	AggRollbacking    AggregateStatus = "ROLLBACKING"
-	AggRolledBack     AggregateStatus = "ROLLED_BACK"
 	AggCanceled       AggregateStatus = "CANCELED"
 )
 

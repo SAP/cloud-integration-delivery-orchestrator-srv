@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"mmt-delivery/db"
-	"mmt-delivery/pkg/lifecycle"
 	"mmt-delivery/pkg/notify"
 	"time"
 )
@@ -22,7 +21,7 @@ func RequestApproval(drID uint, currentUserID string, approvers []string, commen
 	if dr.ApprovedAt != nil {
 		return errors.New("delivery request already approved")
 	}
-	if dr.AggregateStatus != lifecycle.AggPending && dr.AggregateStatus != lifecycle.AggWaitingApprove {
+	if dr.AggregateStatus != AggPending && dr.AggregateStatus != AggWaitingApprove {
 		return fmt.Errorf("only pending delivery request can be submitted for approval, current status: %s", dr.AggregateStatus)
 	}
 	// TODO: send email to approver, update JIRA
@@ -31,7 +30,7 @@ func RequestApproval(drID uint, currentUserID string, approvers []string, commen
 		return fmt.Errorf("failed to nofity approvers via email: %s", err.Error())
 	}
 	if err := db.Conn().Model(&dr).Updates(db.DeliveryRequest{
-		AggregateStatus: lifecycle.AggWaitingApprove,
+		AggregateStatus: AggWaitingApprove,
 		Approvers:       approvers,
 		UpdatedBy:       currentUserID,
 	}).Error; err != nil {
@@ -49,7 +48,7 @@ func Approve(drID uint, approverID string) (*db.DeliveryRequest, error) {
 	if len(dr.ArtifactTenantOperations) == 0 {
 		return nil, fmt.Errorf("cannot approve delivery request %d: no artifact operations found", drID)
 	}
-	if dr.AggregateStatus != lifecycle.AggWaitingApprove && dr.AggregateStatus != lifecycle.AggPending {
+	if dr.AggregateStatus != AggWaitingApprove && dr.AggregateStatus != AggPending {
 		return nil, fmt.Errorf("cannot apprve delivery request %d: current status is %s", drID, dr.AggregateStatus)
 	}
 
@@ -64,8 +63,10 @@ func Approve(drID uint, approverID string) (*db.DeliveryRequest, error) {
 	}
 	// no need to call TrExist, for it will be done in update/insert ops.
 	if err := db.Conn().Model(&dr).Updates(db.DeliveryRequest{
-		AggregateStatus: lifecycle.AggAwaitingImport, ApprovedBy: approverID, ApprovedAt: &now,
-		UpdatedBy: approverID,
+		AggregateStatus: AggAwaitingImport,
+		ApprovedBy:      approverID,
+		ApprovedAt:      &now,
+		UpdatedBy:       approverID,
 	}).Error; err != nil {
 		return nil, fmt.Errorf("failed to update delivery request status: %s", err.Error())
 	}

@@ -77,6 +77,8 @@ func main() {
 		v2Group.POST("/deliver", handler.NativeDeliver)
 	}
 
+	router.GET("/ws", handler.WsHandler)
+
 	if err := router.Run(":8080"); err != nil {
 		panic(err)
 	}
