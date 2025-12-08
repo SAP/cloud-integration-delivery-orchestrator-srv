@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"mmt-delivery/db"
+	"mmt-delivery/pkg/lifecycle"
 	"mmt-delivery/pkg/tms"
 	"time"
 
@@ -277,7 +278,7 @@ func DeleteTenantOps(opIDs []uint) error {
 			errOps[id] = fmt.Errorf("failed to find artifact tenant operation %d. Op may not exists: %s", id, err)
 		}
 		// check state before delete
-		if op.RequestState != RequestPending {
+		if op.RequestState != lifecycle.RequestPending {
 			errOps[id] = fmt.Errorf("cannot delete artifact tenant operation %d in state %s. Can disable delivery", id, op.RequestState)
 		}
 		if err := db.Conn().Delete(&db.ArtifactTenantOperation{}, id).Error; err != nil {
@@ -319,7 +320,7 @@ func InsertTenantOps(drID uint, ops []db.ArtifactTenantOperation, user string) (
 		op.DeliveryRequestID = drID
 		op.ArtifactTechID, op.ArtifactVersion = a.TechID, a.Version // cache techID and version for quick access
 		op.ImportState, op.DeployState, op.RequestState =
-			ImportNotStarted, DeployNotStarted, RequestPending
+			lifecycle.ImportNotStarted, lifecycle.DeployNotStarted, lifecycle.RequestPending
 	}
 	if len(errOps) > 0 {
 		errMsg := "errors Occurs while inserting artifact ops:\n"
@@ -351,7 +352,7 @@ func UpdateTenantOps(drID uint, ops []db.ArtifactTenantOperation, user string) (
 			errOps[op.ID] = fmt.Errorf("failed to find artifact tenant operation %d: %s", op.ID, err)
 			continue
 		}
-		if existingOp.RequestState != RequestPending {
+		if existingOp.RequestState != lifecycle.RequestPending {
 			errOps[op.ID] = fmt.Errorf("cannot update artifact tenant operation %d in state %s. Can only update pending operations", op.ID, existingOp.RequestState)
 			continue
 		}

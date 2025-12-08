@@ -6,27 +6,9 @@ import (
 	"mmt-delivery/consts"
 	"mmt-delivery/db"
 	"mmt-delivery/pkg/cpi"
+	"mmt-delivery/pkg/lifecycle"
 	"mmt-delivery/pkg/tms"
-	"strings"
 )
-
-// INITIAL, RUNNING, SUCCEEDED, FATAL
-func DeriveImport(state string) ImportState {
-	switch strings.ToUpper(state) {
-	case "INITIAL":
-		return ImportQueued
-	case "RUNNING":
-		return ImportInProgress
-	case "SUCCEEDED":
-		return ImportComplete
-	case "FATAL", "FAILED", "ERROR":
-		return ImportFailed
-	case "PARTIAL":
-		return ImportPartial
-	default:
-		return ImportNotStarted
-	}
-}
 
 // do this after sync import state
 func SyncDeployState(deliveryRequestID uint, user string) error {
@@ -38,7 +20,7 @@ func SyncDeployState(deliveryRequestID uint, user string) error {
 	errOps := make(map[uint]error)
 	for i := range ops {
 		op := &ops[i]
-		if op.DeployState != DeployInProgress {
+		if op.DeployState != lifecycle.DeployInProgress {
 			continue
 		}
 		cpiCli, err := cpi.NewClient(context.Background(), op.Tenant.CpiEndpoint.Name)
@@ -53,17 +35,17 @@ func SyncDeployState(deliveryRequestID uint, user string) error {
 			errOps[op.ID] = fmt.Errorf("failed to get runtime artifact %s in tenant %s: %s", op.ArtifactTechID, op.Tenant.Name, err)
 			// TODO: add a condition
 		}
-		var state DeployState
+		var state lifecycle.DeployState
 		if _, ok := errOps[op.ID]; ok {
-			state = DeployFailed
+			state = lifecycle.DeployFailed
 		} else if rt.Version == op.ArtifactVersion {
 			switch rt.Status {
 			case consts.Artifact_Rt_Started:
-				state = DeployComplete
+				state = lifecycle.DeployComplete
 			case consts.Artifact_Rt_Starting:
-				state = DeployInProgress
+				state = lifecycle.DeployInProgress
 			case consts.Artifact_Rt_Error:
-				state = DeployFailed
+				state = lifecycle.DeployFailed
 			}
 		} else {
 			continue // not triggered by this operation
@@ -160,22 +142,22 @@ func SyncImportState(deliveryRequestID uint, user string) error {
 					ArtifactVersion:        op.ArtifactVersion,
 					TenantID:               tenantID,
 					TransportRequestNumber: trNumber,
-					ImportState:            ImportNotStarted,
-					DeployState:            DeployNotStarted,
+					ImportState:            lifecycle.ImportNotStarted,
+					DeployState:            lifecycle.DeployNotStarted,
 					CreatedBy:              user,
 				}
 				tenantToOps[tenantID][trNumber] = newOp
 			}
 			curOp := tenantToOps[tenantID][trNumber]
-			state := DeriveImport(nState.Status)
+			state := lifecycle.DeriveImport(nState.Status)
 			if state == curOp.ImportState {
 				continue
 			}
 			// update state if changed
 			curOp.ImportState, curOp.UpdatedBy = state, user
 			// NOTE: set deploy state if import completed
-			if curOp.ImportState == ImportComplete && curOp.DeployState == DeployNotStarted {
-				curOp.DeployState = DeployQueued
+			if curOp.ImportState == lifecycle.ImportComplete && curOp.DeployState == lifecycle.DeployNotStarted {
+				curOp.DeployState = lifecycle.DeployQueued
 			}
 			if err := db.Conn().Save(&curOp).Error; err != nil {
 				return fmt.Errorf("error when creating new artifact tenant operation for artifact %s in node %d: %w", curOp.ArtifactTechID, nID, err)

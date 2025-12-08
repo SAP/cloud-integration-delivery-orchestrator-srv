@@ -1,6 +1,7 @@
-package service
+package lifecycle
 
 import (
+	"strings"
 	"time"
 )
 
@@ -63,8 +64,8 @@ const (
 	AggUnknown        AggregateStatus = "UNKNOWN"
 	AggPending        AggregateStatus = "PENDING"          // waiting for TR or queued work
 	AggWaitingApprove AggregateStatus = "WAITING_APPROVAL" // waiting for manual approval to import
-	
-	AggAwaitingImport AggregateStatus = "AWAITING_IMPORT"  // TR ready, import not started
+
+	AggAwaitingImport AggregateStatus = "AWAITING_IMPORT" // TR ready, import not started
 	AggImporting      AggregateStatus = "IMPORTING"
 	AggImportFailed   AggregateStatus = "IMPORT_FAILED"
 	AggWaitingDeploy  AggregateStatus = "AWAITING_DEPLOY" // import done, deploy not started
@@ -86,3 +87,21 @@ const (
 	CondLastFailurePhase  = "LastFailurePhase"  // Reason holds phase name
 	CondLastFailureReason = "LastFailureReason" // Reason holds error code
 )
+
+// INITIAL, RUNNING, SUCCEEDED, FATAL
+func DeriveImport(state string) ImportState {
+	switch strings.ToUpper(state) {
+	case "INITIAL":
+		return ImportQueued
+	case "RUNNING":
+		return ImportInProgress
+	case "SUCCEEDED":
+		return ImportComplete
+	case "FATAL", "FAILED", "ERROR":
+		return ImportFailed
+	case "PARTIAL":
+		return ImportPartial
+	default:
+		return ImportNotStarted
+	}
+}

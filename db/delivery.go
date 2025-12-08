@@ -102,7 +102,7 @@ type DeliveryRule struct {
 
 	SourceTenantID uint
 	SourceTenant   CpiTenant `gorm:"foreignKey:SourceTenantID"`
-	SkipApprove   bool // enable skip approval, directly process delivery
+	SkipApprove    bool      // enable skip approval, directly process delivery
 
 	Active    bool
 	CreatedBy string

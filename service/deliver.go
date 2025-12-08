@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"mmt-delivery/db"
 	"mmt-delivery/pkg/cpi"
+	"mmt-delivery/pkg/lifecycle"
 	"mmt-delivery/pkg/tms"
 
 	"gorm.io/gorm"
@@ -29,12 +30,12 @@ func BatchImportTenantOps(opIDs []uint, targetTenantID uint, user string) (bool,
 	errOps := make(map[uint]error)
 	for i := range ops {
 		op := &ops[i]
-		if op.ImportState != ImportQueued || op.Tenant.TransportNodeID != targetNodeID { // only queued(INITIAL) state can be triggered for import
+		if op.ImportState != lifecycle.ImportQueued || op.Tenant.TransportNodeID != targetNodeID { // only queued(INITIAL) state can be triggered for import
 			// TODO: may create a Condition for these check failures
 			errOps[op.ID] = fmt.Errorf("cannot import artifact operation #%d(at TMS node %d) for target TMS node %d. Import State: %s", op.ID, op.Tenant.TransportNodeID, targetNodeID, op.ImportState)
 			continue
 		}
-		op.ImportState = ImportInProgress
+		op.ImportState = lifecycle.ImportInProgress
 		trNumber, err := ToUint(op.TransportRequestNumber)
 		// TODO: EVERY IMPORTANT! validate if there is version decrease in target tenant before import
 
@@ -80,7 +81,7 @@ func BatchDeployTenantOps(opIDs []uint, targetTenantID uint, user string) (bool,
 	errOps := make(map[uint]error)
 	for i := range ops {
 		op := &ops[i]
-		if op.DeployState != DeployQueued { // deploy should be QUEUED. i.e.,
+		if op.DeployState != lifecycle.DeployQueued { // deploy should be QUEUED. i.e.,
 			continue
 		}
 		if op.Tenant.ID != targetTenantID { // only queued state can be triggered for deploy
@@ -98,7 +99,7 @@ func BatchDeployTenantOps(opIDs []uint, targetTenantID uint, user string) (bool,
 			errOps[op.ID] = fmt.Errorf("failed to deploy artifact %s:%s to tenant %s: %s", op.ArtifactTechID, op.ArtifactVersion, op.Tenant.Name, err)
 			continue
 		}
-		op.DeployState = DeployInProgress
+		op.DeployState = lifecycle.DeployInProgress
 		op.UpdatedBy = user
 		if err := db.Conn().Model(op).Updates(op).Error; err != nil {
 			errOps[op.ID] = fmt.Errorf("failed to update artifact operation %d: %s", op.ID, err)
