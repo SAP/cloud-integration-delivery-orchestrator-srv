@@ -70,7 +70,8 @@ func TrExist(op *db.ArtifactTenantOperation, sourceTenant *db.CpiTenant) (bool, 
 	// check Content Field, should match techID, Version, Type
 	index := -1
 	for i, md := range trV1.Content[0].Metadata {
-		if md.Name == op.ArtifactTechID && md.Type == op.Artifact.Type && md.Version == op.ArtifactVersion {
+		// NOTE: tms response use Name, not tech ID
+		if (md.Name == op.ArtifactTechID || md.Name == op.Artifact.Name) && md.Type == op.Artifact.Type && md.Version == op.ArtifactVersion {
 			index = i
 			break
 		}
