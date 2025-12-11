@@ -28,6 +28,8 @@ type DeliveryRequest struct {
 	DeliveryRuleID uint
 	DeliveryRule   DeliveryRule `gorm:"foreignKey:DeliveryRuleID"`
 
+	Conditions []Condition `gorm:"foreignKey:DeliveryRequestID"`
+
 	CreatedBy string
 	UpdatedBy string
 }
@@ -61,7 +63,6 @@ type ArtifactTenantOperation struct {
 	RetryCountImport int
 	RetryCountDeploy int
 	NextRetryAt      *time.Time
-	Conditions       []byte // TODO: may asscociate with lifecycle.Condition. 'Actions' may be better name(ask AI to confirm)
 
 	CreatedBy string
 	UpdatedBy string
@@ -113,4 +114,16 @@ type UserInfo struct {
 	ID       string `json:"id"`
 	Email    string `json:"email"`
 	UserName string `json:"userName"`
+}
+
+// Condition models a discrete boolean fact about an artifact or operation, inspired by Kubernetes conditions.
+type Condition struct {
+	ID                        uint `gorm:"primarykey"`
+	CreatedAt                 time.Time
+	DeliveryRequestID         uint
+	ArtifactTenantOperationID uint
+
+	State     lifecycle.ConditionState
+	Message   string
+	Timestamp time.Time
 }

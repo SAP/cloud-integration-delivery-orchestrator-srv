@@ -2,7 +2,6 @@ package lifecycle
 
 import (
 	"strings"
-	"time"
 )
 
 // RequestState represents the state of the transport (TMS) phase for an artifact per tenant.
@@ -17,14 +16,7 @@ type DeployState string
 // AggregateStatus is the externally exposed rolled-up status at the artifact (or batch) level.
 type AggregateStatus string
 
-// Condition models a discrete boolean fact about an artifact or operation, inspired by Kubernetes conditions.
-type Condition struct {
-	Type               string    `json:"type"`   // e.g. TransportReady, PartialProgress
-	Status             string    `json:"status"` // "True" | "False" | "Unknown"
-	Reason             string    `json:"reason,omitempty"`
-	Message            string    `json:"message,omitempty"`
-	LastTransitionTime time.Time `json:"lastTransitionTime"`
-}
+type ConditionState string
 
 // Canonical Delivery Request states.
 const (
@@ -77,15 +69,9 @@ const (
 
 // Condition type constants (non-exhaustive). Keeping as strings for flexibility.
 const (
-	CondTransportReady    = "TransportReady"
-	CondImportComplete    = "ImportComplete"
-	CondDeployComplete    = "DeployComplete"
-	CondPartialProgress   = "PartialProgress"
-	CondRetryScheduled    = "RetryScheduled"
-	CondRollbackInProgess = "RollbackInProgress"
-	CondCanceled          = "Canceled"
-	CondLastFailurePhase  = "LastFailurePhase"  // Reason holds phase name
-	CondLastFailureReason = "LastFailureReason" // Reason holds error code
+	CondError   ConditionState = "Error"
+	CondWarn    ConditionState = "Warn"
+	CondSuccess ConditionState = "Success"
 )
 
 // INITIAL, RUNNING, SUCCEEDED, FATAL

@@ -33,7 +33,7 @@ func CreateDr(c *gin.Context) {
 		return
 	}
 	var rule db.DeliveryRule
-	if rule, err = service.GetDeliveryRule(dr.DeliveryRule.ID); err != nil {
+	if rule, err = service.GetDeliveryRuleWithAcc(dr.DeliveryRule.ID); err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": fmt.Errorf("failed to generate target routes and nodes: %s", err)})
 		return
 	}
@@ -246,7 +246,7 @@ func HandleInsertOps(c *gin.Context) {
 		return
 	}
 	var ops []db.ArtifactTenantOperation
-	ops, err := service.InsertTenantOps(req.DeliveryRequestID, req.Ops, user)
+	ops, _, err := service.InsertTenantOps(req.DeliveryRequestID, req.Ops, user)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return

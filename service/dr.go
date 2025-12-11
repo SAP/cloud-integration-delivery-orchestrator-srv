@@ -6,10 +6,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"mmt-delivery/consts"
 	"mmt-delivery/db"
+	"mmt-delivery/pkg/cpi"
 	"mmt-delivery/pkg/lifecycle"
 	"mmt-delivery/pkg/tms"
+	"strings"
 	"time"
+
+	"github.com/gobwas/glob"
+	"golang.org/x/mod/semver"
 
 	"gorm.io/gorm"
 )
@@ -47,6 +53,58 @@ func BatchTrExist(ops []db.ArtifactTenantOperation, sourceTenant *db.CpiTenant) 
 	return true, nil
 }
 
+// artifact version matches pattern in delivery rule.
+// 5.2.2 - 5.2.* -> true
+// 6.1.3 - 6.2.* -> false
+func checkVersionPattern(op *db.ArtifactTenantOperation, rule *db.DeliveryRule) error {
+	version := op.ArtifactVersion
+	g := glob.MustCompile(rule.VersionPattern)
+	if !g.Match(version) {
+		return fmt.Errorf("artifact %s has version %s not match pattern %s(delivery rule %s)", op.ArtifactTechID, version, rule.VersionPattern, rule.Name)
+	}
+	return nil
+}
+
+// before deliver, should check if version would cause downgrade in target tenants
+func checkVersionDowngrade(op *db.ArtifactTenantOperation, rule *db.DeliveryRule) error {
+	for _, tenant := range rule.IncludedTenants {
+		if op.TenantID == tenant.ID {
+			continue
+		}
+		cli, err := cpi.NewClient(context.Background(), tenant.CpiEndpoint.Name)
+		if err != nil {
+			return err
+		}
+		sourceVersion := op.ArtifactVersion
+		var targetVersion string
+		switch op.Artifact.Type {
+		case consts.Artifact_Type_Iflow:
+			iflow, err := cli.GetDesignTimeIflow(op.ArtifactTechID, "active")
+			if err != nil {
+				return err
+			}
+			targetVersion = iflow.Version
+		case consts.Artifact_Type_Sc:
+			sc, err := cli.GetDesignTimeScriptCollection(op.ArtifactTechID, "active")
+			if err != nil {
+				return err
+			}
+			targetVersion = sc.Version
+		}
+		if !strings.HasPrefix(targetVersion, "v") {
+			targetVersion = "v" + targetVersion
+		}
+		if !strings.HasPrefix(sourceVersion, "v") {
+			sourceVersion = "v" + sourceVersion
+		}
+		if semver.Compare(sourceVersion, targetVersion) < 0 {
+			return fmt.Errorf("artifact %s: delivering version %s to tenant %s would downgrade existing version %s, please confirm",
+				op.ArtifactTechID, sourceVersion, tenant.CpiEndpoint.Name, targetVersion)
+		}
+	}
+	return nil
+}
+
 // check tr Number existence in source tenant, and check state is RELEASED
 func TrExist(op *db.ArtifactTenantOperation, sourceTenant *db.CpiTenant) (bool, error) {
 	trNumber := op.TransportRequestNumber
@@ -71,7 +129,7 @@ func TrExist(op *db.ArtifactTenantOperation, sourceTenant *db.CpiTenant) (bool, 
 	index := -1
 	for i, md := range trV1.Content[0].Metadata {
 		// NOTE: tms response use Name, not tech ID
-		if (md.Name == op.ArtifactTechID || md.Name == op.Artifact.Name) && md.Type == op.Artifact.Type && md.Version == op.ArtifactVersion {
+		if (md.Name == op.Artifact.Name || md.Name == op.ArtifactTechID) && md.Type == op.Artifact.Type && md.Version == op.ArtifactVersion {
 			index = i
 			break
 		}
@@ -95,12 +153,14 @@ func LoadArtifact(op db.ArtifactTenantOperation) (atf db.Artifact, err error) {
 	return
 }
 
+// query delivery request with all associations
 func QueryDrWithAcc(drID uint) (dr *db.DeliveryRequest, err error) {
 	if err := db.Conn().
 		Preload("SourceTenant").
 		Preload("DeliveryRule").
 		Preload("ArtifactTenantOperations.Artifact").
 		Preload("ArtifactTenantOperations.Tenant").
+		Preload("Conditions").
 		First(&dr, drID).Error; err != nil {
 		return nil, fmt.Errorf("failed to query delivery request %d: %w", drID, err)
 	}
@@ -231,7 +291,7 @@ func downstreamfromSource(sourceNodeID uint, transportNodes []db.TransportNode, 
 	return
 }
 
-func GetDeliveryRule(drRuleID uint) (db.DeliveryRule, error) {
+func GetDeliveryRuleWithAcc(drRuleID uint) (db.DeliveryRule, error) {
 	var rule db.DeliveryRule
 	if err := db.Conn().
 		Preload("IncludedTenants").
@@ -247,7 +307,7 @@ func GetDeliveryRule(drRuleID uint) (db.DeliveryRule, error) {
 
 // generate route info for delivery rule. determine source tenant, TMS target routes and nodes
 func GenRouteForRule(ruleID uint) (err error) {
-	rule, err := GetDeliveryRule(ruleID)
+	rule, err := GetDeliveryRuleWithAcc(ruleID)
 	if err != nil {
 		return
 	}
@@ -272,7 +332,7 @@ func DeleteTenantOps(opIDs []uint) error {
 	errOps := make(map[uint]error)
 	for _, id := range opIDs {
 		if id == 0 {
-			return fmt.Errorf("invalid operation id 0")
+			return fmt.Errorf("invalid operation id: 0")
 		}
 		var op db.ArtifactTenantOperation
 		if err := db.Conn().First(&op, id).Error; err != nil {
@@ -296,24 +356,57 @@ func DeleteTenantOps(opIDs []uint) error {
 	return nil
 }
 
-func InsertTenantOps(drID uint, ops []db.ArtifactTenantOperation, user string) ([]db.ArtifactTenantOperation, error) {
+func InsertTenantOps(drID uint, ops []db.ArtifactTenantOperation, user string) ([]db.ArtifactTenantOperation, []db.Condition, error) {
 	if len(ops) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
-	sourceTenant, err := SourceTenant(context.Background(), drID)
+	dr, err := QueryDrWithAcc(drID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get source tenant for delivery request %d: %s", drID, err)
+		return nil, nil, fmt.Errorf("failed to query delivery request %d: %s", drID, err)
 	}
-	errOps := make(map[uint]error)
+	sourceTenant := dr.SourceTenant
+	rule, err := GetDeliveryRuleWithAcc(dr.DeliveryRuleID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get delivery rule %d: %s", dr.DeliveryRuleID, err)
+	}
+	condis := make([]db.Condition, 0)
 	for i := range ops {
 		op := &ops[i]
 		a, err := LoadArtifact(*op)
 		if err != nil {
-			return nil, fmt.Errorf("failed to load artifact for operation %d: %s", op.ID, err)
+			return nil, nil, fmt.Errorf("failed to load artifact for operation %d: %s", op.ID, err)
+		}
+		// check if version pattern matches delivery rule
+		if err := checkVersionPattern(op, &rule); err != nil {
+			condis = append(condis, db.Condition{
+				DeliveryRequestID:         drID,
+				ArtifactTenantOperationID: op.ID,
+				State:                     lifecycle.CondError,
+				Message:                   err.Error(),
+				Timestamp:                 time.Now(),
+			})
+			continue
+		}
+
+		if err := checkVersionDowngrade(op, &rule); err != nil {
+			condis = append(condis, db.Condition{
+				DeliveryRequestID:         drID,
+				ArtifactTenantOperationID: op.ID,
+				State:                     lifecycle.CondWarn,
+				Message:                   err.Error(),
+				Timestamp:                 time.Now(),
+			})
+			continue
 		}
 		// check TR
-		if _, err := TrExist(op, sourceTenant); err != nil {
-			errOps[op.ID] = fmt.Errorf("transport request check failed for artifact %s: %s", op.ArtifactTechID, err)
+		if _, err := TrExist(op, &sourceTenant); err != nil {
+			condis = append(condis, db.Condition{
+				DeliveryRequestID:         drID,
+				ArtifactTenantOperationID: op.ID,
+				State:                     lifecycle.CondError,
+				Message:                   fmt.Sprintf("transport request check failed for artifact %s: %s", op.ArtifactTechID, err),
+				Timestamp:                 time.Now(),
+			})
 			continue
 		}
 		op.CreatedAt, op.CreatedBy = time.Now(), user
@@ -323,17 +416,13 @@ func InsertTenantOps(drID uint, ops []db.ArtifactTenantOperation, user string) (
 		op.ImportState, op.DeployState, op.RequestState =
 			lifecycle.ImportNotStarted, lifecycle.DeployNotStarted, lifecycle.RequestPending
 	}
-	if len(errOps) > 0 {
-		errMsg := "errors Occurs while inserting artifact ops:\n"
-		for id, e := range errOps {
-			errMsg += fmt.Sprintf("\t operation %d: %s\n", id, e)
-		}
-		return nil, errors.New(errMsg)
+	if len(condis) > 0 {
+		return nil, condis, errors.New("errors occurred during insert, please check")
 	}
 	if err := db.Conn().Create(&ops).Error; err != nil {
-		return nil, fmt.Errorf("failed to insert artifact tenant operations: %s", err)
+		return nil, nil, fmt.Errorf("failed to insert artifact tenant operations: %s", err)
 	}
-	return ops, nil
+	return ops, nil, nil
 }
 
 // note: this can only update transport request number
@@ -341,36 +430,37 @@ func UpdateTenantOps(drID uint, ops []db.ArtifactTenantOperation, user string) (
 	if len(ops) == 0 {
 		return nil, nil
 	}
-	sourceTenant, err := SourceTenant(context.Background(), drID)
+	dr, err := QueryDrWithAcc(drID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get source tenant for delivery request %d: %s", drID, err)
+		return nil, fmt.Errorf("failed to query delivery request %d: %s", drID, err)
 	}
+	sourceTenant := dr.SourceTenant
 	errOps := make(map[uint]error)
 	for i := range ops {
-		op := &ops[i]
+		draftOp := &ops[i]
 		var existingOp db.ArtifactTenantOperation
-		if err := db.Conn().First(&existingOp, op.ID).Error; err != nil {
-			errOps[op.ID] = fmt.Errorf("failed to find artifact tenant operation %d: %s", op.ID, err)
+		if err := db.Conn().First(&existingOp, draftOp.ID).Error; err != nil {
+			errOps[draftOp.ID] = fmt.Errorf("failed to find artifact tenant operation %d: %s", draftOp.ID, err)
 			continue
 		}
 		if existingOp.RequestState != lifecycle.RequestPending {
-			errOps[op.ID] = fmt.Errorf("cannot update artifact tenant operation %d in state %s. Can only update pending operations", op.ID, existingOp.RequestState)
+			errOps[draftOp.ID] = fmt.Errorf("cannot update artifact tenant operation %d in state %s. Can only update pending operations", draftOp.ID, existingOp.RequestState)
 			continue
 		}
-		if existingOp.TransportRequestNumber != op.TransportRequestNumber {
-			if _, err := TrExist(op, sourceTenant); err != nil {
-				errOps[op.ID] = fmt.Errorf("transport request check failed for artifact %s, new %s, old: %s: %s",
-					op.ArtifactTechID, op.TransportRequestNumber, existingOp.TransportRequestNumber, err)
+		if existingOp.TransportRequestNumber != draftOp.TransportRequestNumber {
+			if _, err := TrExist(draftOp, &sourceTenant); err != nil {
+				errOps[draftOp.ID] = fmt.Errorf("transport request check failed for artifact %s, new %s, old: %s: %s",
+					draftOp.ArtifactTechID, draftOp.TransportRequestNumber, existingOp.TransportRequestNumber, err)
 				continue
 			}
 		}
 		existingOp.UpdatedBy = user
-		existingOp.TransportRequestNumber = op.TransportRequestNumber
+		existingOp.TransportRequestNumber = draftOp.TransportRequestNumber
 
 		if err := db.Conn().Save(&existingOp).Error; err != nil {
-			errOps[op.ID] = fmt.Errorf("failed to update artifact tenant operation %d: %s", op.ID, err)
+			errOps[draftOp.ID] = fmt.Errorf("failed to update artifact tenant operation %d: %s", draftOp.ID, err)
 		}
-		op = &existingOp // update back
+		draftOp = &existingOp // update back
 	}
 	if len(errOps) > 0 {
 		errMsg := "errors occurred during update artifact tenant operations:\n"
@@ -380,16 +470,4 @@ func UpdateTenantOps(drID uint, ops []db.ArtifactTenantOperation, user string) (
 		return nil, errors.New(errMsg)
 	}
 	return ops, nil
-}
-
-func SourceTenant(c context.Context, drID uint) (*db.CpiTenant, error) {
-	var dr db.DeliveryRequest
-	if err := db.Conn().First(&dr, drID).Error; err != nil {
-		return nil, fmt.Errorf("delivery request id %d not found", drID)
-	}
-	var tenant db.CpiTenant
-	if err := db.Conn().First(&tenant, dr.SourceTenantID).Error; err != nil {
-		return nil, fmt.Errorf("tenant id %d not found", dr.SourceTenantID)
-	}
-	return &tenant, nil
 }

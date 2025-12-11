@@ -34,7 +34,7 @@ func UpsertDeliveryRule(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "invalid VersionPattern: expected format X.Y.* (e.g., 5.8.*, 6.2.*)"})
 		return
 	}
-	
+
 	user := service.UserID(ctx)
 	rule.UpdatedBy = user
 	if rule.ID == 0 {
@@ -91,7 +91,7 @@ func GetDeliveryRule(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "invalid id"})
 		return
 	}
-	rule, err := service.GetDeliveryRule(uint(id))
+	rule, err := service.GetDeliveryRuleWithAcc(uint(id))
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
