@@ -53,10 +53,9 @@ func Approve(drID uint, approverID string) (*db.DeliveryRequest, error) {
 		return nil, fmt.Errorf("cannot apprve delivery request %d: current status is %s", drID, dr.AggregateStatus)
 	}
 
-	// TODO: prevent self-approval
-	// if dr.CreatedBy == approverID {
-	// 	return fmt.Errorf("cannot approve your own delivery request")
-	// }
+	if dr.CreatedBy == approverID && !dr.DeliveryRule.SkipApprove {
+		return nil, fmt.Errorf("cannot approve your own delivery request")
+	}
 	now := time.Now()
 	// TODO: send email, update JIRA
 	if err := notify.SendEmail([]string{approverID, dr.CreatedBy, dr.UpdatedBy}); err != nil {

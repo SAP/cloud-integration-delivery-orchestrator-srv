@@ -246,7 +246,7 @@ func HandleInsertOps(c *gin.Context) {
 		return
 	}
 	var ops []db.ArtifactTenantOperation
-	ops, _, err := service.InsertTenantOps(req.DeliveryRequestID, req.Ops, user)
+	ops, err := service.InsertTenantOps(req.DeliveryRequestID, req.Ops, user)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
