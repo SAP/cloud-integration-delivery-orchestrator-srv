@@ -70,6 +70,11 @@ func main() {
 		v1Group.GET("/uaa/search/:email", handler.HandleUaaUserEmailSearch)
 		v1Group.GET("/uaa/id/:id", handler.HandleUaaUserIDSearch)
 
+		// counts
+		v1Group.GET("/deliveryRequest/counts", handler.DeliveryRequestCounts)
+		v1Group.GET("/cpiTenant/counts", handler.CpiTenantCounts)
+		v1Group.GET("/deliveryRule/counts", handler.DeliveryRuleCounts)
+
 	}
 
 	v2Group := router.Group("/api/v2")
