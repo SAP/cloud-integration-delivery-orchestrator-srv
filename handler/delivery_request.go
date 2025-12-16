@@ -165,7 +165,7 @@ func HandleImportOps(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": success})
+	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": success, "msg": "Import triggered"})
 }
 
 func HandleDeployOps(c *gin.Context) {
@@ -184,7 +184,7 @@ func HandleDeployOps(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": success})
+	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": success, "msg": "Deploy triggered"})
 }
 
 func HandleSyncState(ctx *gin.Context) {
@@ -208,7 +208,7 @@ func HandleSyncState(ctx *gin.Context) {
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"status": 200, "result": "sync finished"})
+	ctx.JSON(http.StatusOK, gin.H{"status": 200, "msg": "sync finished"})
 }
 
 type DeleteOpsRequest struct {

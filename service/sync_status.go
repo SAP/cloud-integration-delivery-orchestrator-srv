@@ -17,7 +17,7 @@ func SyncDeployState(deliveryRequestID uint, user string) error {
 	if ops, err = queryOpsInDrWithAcc(deliveryRequestID); err != nil {
 		return err
 	}
-	errOps := make(map[uint]error)
+	conditions := make([]db.Condition, 0)
 	for i := range ops {
 		op := &ops[i]
 		if op.DeployState != lifecycle.DeployInProgress {
@@ -25,20 +25,27 @@ func SyncDeployState(deliveryRequestID uint, user string) error {
 		}
 		cpiCli, err := cpi.NewClient(context.Background(), op.Tenant.CpiEndpoint.Name)
 		if err != nil {
-			errOps[op.ID] = fmt.Errorf("failed to create cpi client for tenant %s: %s", op.Tenant.Name, err)
-			// TODO: add condition
+			conditions = append(conditions, db.Condition{
+				DeliveryRequestID:         deliveryRequestID,
+				ArtifactTenantOperationID: op.ID,
+				State:                     lifecycle.CondError,
+				Message:                   fmt.Sprintf("error occurred during sync deploy state: failed to create cpi client for tenant: %s: %s", op.Tenant.Name, err.Error()),
+			})
 			continue
 		}
 		rt, err := cpiCli.RuntimeArtifact(op.ArtifactTechID)
 		if err != nil {
 			// if api return error, may not deployed yet, just continue
-			errOps[op.ID] = fmt.Errorf("failed to get runtime artifact %s in tenant %s: %s", op.ArtifactTechID, op.Tenant.Name, err)
-			// TODO: add a condition
+			conditions = append(conditions, db.Condition{
+				DeliveryRequestID:         deliveryRequestID,
+				ArtifactTenantOperationID: op.ID,
+				State:                     lifecycle.CondWarn,
+				Message:                   fmt.Sprintf("failed to get runtime artifact %s in tenant %s(may not deployed yet): %s", op.ArtifactTechID, op.Tenant.Name, err.Error()),
+			})
+			continue
 		}
 		var state lifecycle.DeployState
-		if _, ok := errOps[op.ID]; ok {
-			state = lifecycle.DeployFailed
-		} else if rt.Version == op.ArtifactVersion {
+		if rt.Version == op.ArtifactVersion {
 			switch rt.Status {
 			case consts.Artifact_Rt_Started:
 				state = lifecycle.DeployComplete
@@ -54,10 +61,22 @@ func SyncDeployState(deliveryRequestID uint, user string) error {
 			continue
 		}
 		if err := db.Conn().Model(&op).Updates(db.ArtifactTenantOperation{
-			DeployState: state, UpdatedBy: user,
+			DeployState: state, // state sync no need to update other fields, like UpdatedBy
 		}).Error; err != nil {
-			return fmt.Errorf("error when creating new artifact tenant operation for artifact %s in tenant %d: %w", op.ArtifactTechID, op.TenantID, err)
+			conditions = append(conditions, db.Condition{
+				DeliveryRequestID:         deliveryRequestID,
+				ArtifactTenantOperationID: op.ID,
+				State:                     lifecycle.CondError,
+				Message:                   fmt.Sprintf("error occurred during sync deploy state for artifact %s in tenant %s: %s", op.ArtifactTechID, op.Tenant.Name, err.Error()),
+			})
+			continue
 		}
+	}
+	if len(conditions) > 0 {
+		if err := BatchInsertConditions(conditions); err != nil {
+			return err
+		}
+		return fmt.Errorf("some errors occurred during deploy state sync, please check log for details")
 	}
 	return nil
 }

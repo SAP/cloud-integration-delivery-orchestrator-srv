@@ -28,7 +28,7 @@ const (
 )
 
 const (
-	Artifact_Rt_Started  RuntimeState = "STARTED"
+	Artifact_Rt_Started  RuntimeState = "STARTED"  // deployed in runtime
 	Artifact_Rt_Error    RuntimeState = "ERROR"
 	Artifact_Rt_Starting RuntimeState = "STARTING"
 )

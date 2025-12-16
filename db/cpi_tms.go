@@ -78,7 +78,7 @@ type CpiTenant struct {
 	TransportNodeName        string      // TMS Node Name, for easier query
 	TransportNodeDescription string      // TMS Node Description
 	CpiEndpoint              ApiEndpoint `gorm:"serializer:json"`
-	Group                    string // prod(cpi-prod-01, cpi-prod-02, ...), ctest(cpi-ctest, cpi-ctest-01), ep(preprod-ep), ...
+	Group                    string      // prod(cpi-prod-01, cpi-prod-02, ...), ctest(cpi-ctest, cpi-ctest-01), ep(preprod-ep), ...
 }
 
 type UaaClaims struct {

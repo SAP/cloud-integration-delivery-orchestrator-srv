@@ -53,6 +53,23 @@ func BatchTrExist(ops []db.ArtifactTenantOperation, sourceTenant *db.CpiTenant) 
 	return true, nil
 }
 
+func deliveryRuleCheck(op *db.ArtifactTenantOperation, rule *db.DeliveryRule) error {
+	// artifact version matches pattern in delivery rule
+	if err := checkVersionPattern(op, rule); err != nil {
+		return err
+	}
+	for _, tenant := range rule.IncludedTenants {
+		if op.TenantID == tenant.ID {
+			continue
+		}
+		// before deliver, should check if version would cause downgrade in target tenants
+		if err := checkVersionDowngradeInTenant(op, &tenant); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // artifact version matches pattern in delivery rule.
 // 5.2.2 - 5.2.* -> true
 // 6.1.3 - 6.2.* -> false
@@ -64,43 +81,36 @@ func checkVersionPattern(op *db.ArtifactTenantOperation, rule *db.DeliveryRule) 
 	}
 	return nil
 }
-
-// before deliver, should check if version would cause downgrade in target tenants
-func checkVersionDowngrade(op *db.ArtifactTenantOperation, rule *db.DeliveryRule) error {
-	for _, tenant := range rule.IncludedTenants {
-		if op.TenantID == tenant.ID {
-			continue
-		}
-		cli, err := cpi.NewClient(context.Background(), tenant.CpiEndpoint.Name)
+func checkVersionDowngradeInTenant(op *db.ArtifactTenantOperation, tenant *db.CpiTenant) error {
+	cli, err := cpi.NewClient(context.Background(), tenant.CpiEndpoint.Name)
+	if err != nil {
+		return err
+	}
+	sourceVersion := op.ArtifactVersion
+	var targetVersion string
+	switch op.Artifact.Type {
+	case consts.Artifact_Type_Iflow:
+		iflow, err := cli.GetDesignTimeIflow(op.ArtifactTechID, "active")
 		if err != nil {
 			return err
 		}
-		sourceVersion := op.ArtifactVersion
-		var targetVersion string
-		switch op.Artifact.Type {
-		case consts.Artifact_Type_Iflow:
-			iflow, err := cli.GetDesignTimeIflow(op.ArtifactTechID, "active")
-			if err != nil {
-				return err
-			}
-			targetVersion = iflow.Version
-		case consts.Artifact_Type_Sc:
-			sc, err := cli.GetDesignTimeScriptCollection(op.ArtifactTechID, "active")
-			if err != nil {
-				return err
-			}
-			targetVersion = sc.Version
+		targetVersion = iflow.Version
+	case consts.Artifact_Type_Sc:
+		sc, err := cli.GetDesignTimeScriptCollection(op.ArtifactTechID, "active")
+		if err != nil {
+			return err
 		}
-		if !strings.HasPrefix(targetVersion, "v") {
-			targetVersion = "v" + targetVersion
-		}
-		if !strings.HasPrefix(sourceVersion, "v") {
-			sourceVersion = "v" + sourceVersion
-		}
-		if semver.Compare(sourceVersion, targetVersion) < 0 {
-			return fmt.Errorf("artifact %s: delivering version %s to tenant %s would downgrade existing version %s, please confirm",
-				op.ArtifactTechID, sourceVersion, tenant.CpiEndpoint.Name, targetVersion)
-		}
+		targetVersion = sc.Version
+	}
+	if !strings.HasPrefix(targetVersion, "v") {
+		targetVersion = "v" + targetVersion
+	}
+	if !strings.HasPrefix(sourceVersion, "v") {
+		sourceVersion = "v" + sourceVersion
+	}
+	if semver.Compare(sourceVersion, targetVersion) < 0 {
+		return fmt.Errorf("artifact %s: delivering version %s to tenant %s would downgrade existing version %s, please confirm",
+			op.ArtifactTechID, sourceVersion, tenant.CpiEndpoint.Name, targetVersion)
 	}
 	return nil
 }
@@ -376,13 +386,8 @@ func InsertTenantOps(drID uint, ops []db.ArtifactTenantOperation, user string) (
 		if err != nil {
 			return nil, fmt.Errorf("failed to load artifact for operation %d: %s", op.ID, err)
 		}
-		// check if version pattern matches delivery rule
-		if err := checkVersionPattern(op, &rule); err != nil {
-			errOps[op.ID] = err
-			continue
-		}
 
-		if err := checkVersionDowngrade(op, &rule); err != nil {
+		if err := deliveryRuleCheck(op, &rule); err != nil {
 			errOps[op.ID] = err
 			continue
 		}
@@ -456,4 +461,14 @@ func UpdateTenantOps(drID uint, ops []db.ArtifactTenantOperation, user string) (
 		return nil, errors.New(errMsg)
 	}
 	return ops, nil
+}
+
+func BatchInsertConditions(conditions []db.Condition) error {
+	if len(conditions) == 0 {
+		return nil
+	}
+	if err := db.Conn().Create(&conditions).Error; err != nil {
+		return fmt.Errorf("error when inserting conditions: %w", err)
+	}
+	return nil
 }

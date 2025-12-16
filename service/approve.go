@@ -37,6 +37,15 @@ func RequestApproval(drID uint, currentUserID string, approvers []string, commen
 	}).Error; err != nil {
 		return fmt.Errorf("failed to update delivery request status: %s", err.Error())
 	}
+	if err := BatchInsertConditions([]db.Condition{
+		{
+			DeliveryRequestID: drID,
+			State:             lifecycle.CondSuccess,
+			Message:           "Delivery request submitted for approval by " + currentUserID,
+		},
+	}); err != nil {
+		return fmt.Errorf("failed to update condition: %s", err.Error())
+	}
 	return nil
 }
 
@@ -77,7 +86,15 @@ func Approve(drID uint, approverID string) (*db.DeliveryRequest, error) {
 	if err := SyncDeployState(drID, approverID); err != nil {
 		return nil, fmt.Errorf("failed to sync deploy state: %s", err.Error())
 	}
-
+	if err := BatchInsertConditions([]db.Condition{
+		{
+			DeliveryRequestID: drID,
+			State:             lifecycle.CondSuccess,
+			Message:           "Delivery request approved by " + approverID,
+		},
+	}); err != nil {
+		return nil, fmt.Errorf("failed to update condition: %s", err.Error())
+	}
 	return dr, nil
 }
 

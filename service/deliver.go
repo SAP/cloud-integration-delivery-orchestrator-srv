@@ -20,36 +20,39 @@ func BatchImportTenantOps(opIDs []uint, targetTenantID uint, user string) (bool,
 		return false, err
 	}
 
-	var tenant *db.CpiTenant
-	if tenant, err = queryTenant(targetTenantID); err != nil {
+	var targetTenant *db.CpiTenant
+	if targetTenant, err = queryTenant(targetTenantID); err != nil {
 		return false, err
 	}
-	targetNodeID := tenant.TransportNodeID
+	targetNodeID := targetTenant.TransportNodeID
 
 	trs := make([]uint, 0)
 	errOps := make(map[uint]error)
+	// pre-check before import
 	for i := range ops {
 		op := &ops[i]
 		if op.ImportState != lifecycle.ImportQueued || op.Tenant.TransportNodeID != targetNodeID { // only queued(INITIAL) state can be triggered for import
-			// TODO: may create a Condition for these check failures
 			errOps[op.ID] = fmt.Errorf("cannot import artifact operation #%d(at TMS node %d) for target TMS node %d. Import State: %s", op.ID, op.Tenant.TransportNodeID, targetNodeID, op.ImportState)
 			continue
 		}
-		op.ImportState = lifecycle.ImportInProgress
 		trNumber, err := ToUint(op.TransportRequestNumber)
-		// TODO: VERY IMPORTANT! validate if there is version decrease in target tenant before import
-
 		if err != nil {
 			errOps[op.ID] = fmt.Errorf("invalid transport request number %s for artifact operation %d: %s", op.TransportRequestNumber, op.ID, err)
 			continue
 		}
+		// NOTE: VERY IMPORTANT! validate if there is version decrease in target tenant before import
+		if err := checkVersionDowngradeInTenant(op, targetTenant); err != nil {
+			errOps[op.ID] = err
+			continue
+		}
 		trs = append(trs, trNumber)
+		op.ImportState = lifecycle.ImportInProgress
 		op.UpdatedBy = user
 	}
 	if len(errOps) > 0 {
 		errMsg := "errors occurred during preparing import operations:\n"
 		for id, e := range errOps {
-			errMsg += fmt.Sprintf("\t operation #%d: %s\n", id, e)
+			errMsg += fmt.Sprintf("\toperation #%d: %s\n", id, e)
 		}
 		return false, errors.New(errMsg)
 	}
@@ -85,7 +88,6 @@ func BatchDeployTenantOps(opIDs []uint, targetTenantID uint, user string) (bool,
 			continue
 		}
 		if op.Tenant.ID != targetTenantID { // only queued state can be triggered for deploy
-			// TODO: raise error when tenantID not match
 			errOps[op.ID] = fmt.Errorf("artifact operation %d not match target tenant %s#%d", op.ID, tenant.Name, tenant.ID)
 			continue
 		}
