@@ -56,6 +56,8 @@ const (
 	AggUnknown        AggregateStatus = "UNKNOWN"
 	AggPending        AggregateStatus = "PENDING"          // waiting for TR or queued work
 	AggWaitingApprove AggregateStatus = "WAITING_APPROVAL" // waiting for manual approval to import
+	AggInProgress     AggregateStatus = "IN_PROGRESS"
+	AggFailed         AggregateStatus = "FAILED"
 
 	AggAwaitingImport AggregateStatus = "AWAITING_IMPORT" // TR ready, import not started
 	AggImporting      AggregateStatus = "IMPORTING"
@@ -90,4 +92,114 @@ func DeriveImport(state string) ImportState {
 	default:
 		return ImportNotStarted
 	}
+}
+
+func DeriveAggregateStatus(aggStatus AggregateStatus, importStates []ImportState, deployStates []DeployState) AggregateStatus {
+	// Short-circuit for explicit terminal/carry-over states
+	switch aggStatus {
+	case AggCanceled:
+		return AggCanceled
+	}
+
+	// If no ops provided, keep current aggregate status
+	if len(importStates) == 0 && len(deployStates) == 0 {
+		if aggStatus != "" {
+			return aggStatus
+		}
+		return AggUnknown
+	}
+
+	// Helpers
+	anyImport := func(vals []ImportState, targets ...ImportState) bool {
+		for _, v := range vals {
+			for _, t := range targets {
+				if v == t {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	allImport := func(vals []ImportState, allowed ...ImportState) bool {
+		if len(vals) == 0 {
+			return false
+		}
+		for _, v := range vals {
+			ok := false
+			for _, a := range allowed {
+				if v == a {
+					ok = true
+					break
+				}
+			}
+			if !ok {
+				return false
+			}
+		}
+		return true
+	}
+	anyDeploy := func(vals []DeployState, targets ...DeployState) bool {
+		for _, v := range vals {
+			for _, t := range targets {
+				if v == t {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	allDeploy := func(vals []DeployState, allowed ...DeployState) bool {
+		if len(vals) == 0 {
+			return false
+		}
+		for _, v := range vals {
+			ok := false
+			for _, a := range allowed {
+				if v == a {
+					ok = true
+					break
+				}
+			}
+			if !ok {
+				return false
+			}
+		}
+		return true
+	}
+
+	// Import phase precedence
+	if anyImport(importStates, ImportFailed) {
+		return AggImportFailed
+	}
+	if anyImport(importStates, ImportInProgress, ImportQueued) {
+		return AggImporting
+	}
+
+	// Consider ImportDisabled as effectively complete for progressing to deploy
+	importsComplete := allImport(importStates, ImportComplete, ImportDisabled)
+
+	// Deploy phase precedence (only meaningful once imports are complete/disabled)
+	if importsComplete {
+		// Failure first, including rolled back
+		if anyDeploy(deployStates, DeployFailed) || anyDeploy(deployStates, DeployRolledBack) {
+			return AggDeployFailed
+		}
+		if anyDeploy(deployStates, DeployInProgress, DeployQueued, DeployRollbacking) {
+			return AggDeploying
+		}
+		if allDeploy(deployStates, DeployComplete) {
+			return AggDeployed
+		}
+		// Imports done but deploy not yet started
+		return AggWaitingDeploy
+	}
+
+	// If we've been approved and imports haven't started yet, reflect awaiting import
+	switch aggStatus {
+	case AggAwaitingImport, AggWaitingApprove, AggPending:
+		return aggStatus
+	}
+
+	// Fallback if states are mixed but don't hit explicit rules
+	return AggInProgress
 }

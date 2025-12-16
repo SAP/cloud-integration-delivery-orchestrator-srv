@@ -6,23 +6,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"mmt-delivery/consts"
 	"mmt-delivery/db"
-	"mmt-delivery/pkg/cpi"
 	"mmt-delivery/pkg/lifecycle"
 	"mmt-delivery/pkg/tms"
-	"strings"
 	"time"
-
-	"github.com/gobwas/glob"
-	"golang.org/x/mod/semver"
 
 	"gorm.io/gorm"
 )
 
 var nodeTenantCache map[uint]uint
 
-// map tms node ID to cpi tenant ID
+// map tms node ID -> cpi tenant ID
 func init() {
 	nodeTenantCache = make(map[uint]uint)
 	// load all tenants
@@ -33,123 +27,6 @@ func init() {
 	for _, t := range tenants {
 		nodeTenantCache[t.TransportNodeID] = t.ID
 	}
-}
-func BatchTrExist(ops []db.ArtifactTenantOperation, sourceTenant *db.CpiTenant) (bool, error) {
-	errOps := make(map[uint]error)
-	for i := range ops {
-		op := &ops[i]
-		_, err := TrExist(op, sourceTenant)
-		if err != nil {
-			errOps[op.ID] = err
-		}
-	}
-	if len(errOps) > 0 {
-		errMsg := "transport request existence check failed for some artifact tenant operations:\n"
-		for id, err := range errOps {
-			errMsg += fmt.Sprintf("  operation %d: %s\n", id, err)
-		}
-		return false, errors.New(errMsg)
-	}
-	return true, nil
-}
-
-func deliveryRuleCheck(op *db.ArtifactTenantOperation, rule *db.DeliveryRule) error {
-	// artifact version matches pattern in delivery rule
-	if err := checkVersionPattern(op, rule); err != nil {
-		return err
-	}
-	for _, tenant := range rule.IncludedTenants {
-		if op.TenantID == tenant.ID {
-			continue
-		}
-		// before deliver, should check if version would cause downgrade in target tenants
-		if err := checkVersionDowngradeInTenant(op, &tenant); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// artifact version matches pattern in delivery rule.
-// 5.2.2 - 5.2.* -> true
-// 6.1.3 - 6.2.* -> false
-func checkVersionPattern(op *db.ArtifactTenantOperation, rule *db.DeliveryRule) error {
-	version := op.ArtifactVersion
-	g := glob.MustCompile(rule.VersionPattern)
-	if !g.Match(version) {
-		return fmt.Errorf("artifact %s has version %s not match pattern %s(delivery rule: %s)", op.ArtifactTechID, version, rule.VersionPattern, rule.Name)
-	}
-	return nil
-}
-func checkVersionDowngradeInTenant(op *db.ArtifactTenantOperation, tenant *db.CpiTenant) error {
-	cli, err := cpi.NewClient(context.Background(), tenant.CpiEndpoint.Name)
-	if err != nil {
-		return err
-	}
-	sourceVersion := op.ArtifactVersion
-	var targetVersion string
-	switch op.Artifact.Type {
-	case consts.Artifact_Type_Iflow:
-		iflow, err := cli.GetDesignTimeIflow(op.ArtifactTechID, "active")
-		if err != nil {
-			return err
-		}
-		targetVersion = iflow.Version
-	case consts.Artifact_Type_Sc:
-		sc, err := cli.GetDesignTimeScriptCollection(op.ArtifactTechID, "active")
-		if err != nil {
-			return err
-		}
-		targetVersion = sc.Version
-	}
-	if !strings.HasPrefix(targetVersion, "v") {
-		targetVersion = "v" + targetVersion
-	}
-	if !strings.HasPrefix(sourceVersion, "v") {
-		sourceVersion = "v" + sourceVersion
-	}
-	if semver.Compare(sourceVersion, targetVersion) < 0 {
-		return fmt.Errorf("artifact %s: delivering version %s to tenant %s would downgrade existing version %s, please confirm",
-			op.ArtifactTechID, sourceVersion, tenant.CpiEndpoint.Name, targetVersion)
-	}
-	return nil
-}
-
-// check tr Number existence in source tenant, and check state is RELEASED
-func TrExist(op *db.ArtifactTenantOperation, sourceTenant *db.CpiTenant) (bool, error) {
-	trNumber := op.TransportRequestNumber
-	if trNumber == "" {
-		return false, fmt.Errorf("artifact %s has empty transport request number", op.ArtifactTechID)
-	}
-	tmsCli, err := tms.NewClient(context.Background())
-	if err != nil {
-		return false, fmt.Errorf("error when creating tms client: %s", err)
-	}
-	trV1, err := tmsCli.GetTransportRequest(trNumber) // v1 to check state
-	if err != nil {
-		return false, fmt.Errorf("error when getting transport request %s, the tr number may not exist, error message: %s", trNumber, err)
-	}
-	if trV1 == nil || trV1.ID == 0 || trV1.State != "RELEASED" { // only released tr can be imported
-		return false, fmt.Errorf("artifact %s has invalid transport request number %s", op.ArtifactTechID, trNumber)
-	}
-	if trV1.Origin != sourceTenant.TransportNodeName { // check if match source tenant. can only be checked by origin node name, not id.
-		return false, fmt.Errorf("artifact %s has transport request number %s not from source tenant node %s", op.ArtifactTechID, trNumber, sourceTenant.TransportNodeName)
-	}
-	// check Content Field, should match techID, Version, Type
-	index := -1
-	for i, md := range trV1.Content[0].Metadata {
-		// NOTE: tms response use Name, not tech ID
-		if (md.Name == op.Artifact.Name || md.Name == op.ArtifactTechID) && md.Type == op.Artifact.Type && md.Version == op.ArtifactVersion {
-			index = i
-			break
-		}
-	}
-	if index == -1 {
-		return false, fmt.Errorf("artifact %s, trNumber %s: not match. May use a wrong trNumber for this artifact", op.ArtifactTechID, trNumber)
-	}
-
-	// update status of artifact tenant operation
-	return true, nil
 }
 
 // check and load artifact info into db, set ArtifactID in ops
@@ -164,7 +41,7 @@ func LoadArtifact(op db.ArtifactTenantOperation) (atf db.Artifact, err error) {
 }
 
 // query delivery request with all associations
-func QueryDrWithAcc(drID uint) (dr *db.DeliveryRequest, err error) {
+func QueryDrWithAssociations(drID uint) (dr *db.DeliveryRequest, err error) {
 	if err := db.Conn().
 		Preload("SourceTenant").
 		Preload("DeliveryRule").
@@ -370,7 +247,7 @@ func InsertTenantOps(drID uint, ops []db.ArtifactTenantOperation, user string) (
 	if len(ops) == 0 {
 		return nil, nil
 	}
-	dr, err := QueryDrWithAcc(drID)
+	dr, err := QueryDrWithAssociations(drID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query delivery request %d: %s", drID, err)
 	}
@@ -421,7 +298,7 @@ func UpdateTenantOps(drID uint, ops []db.ArtifactTenantOperation, user string) (
 	if len(ops) == 0 {
 		return nil, nil
 	}
-	dr, err := QueryDrWithAcc(drID)
+	dr, err := QueryDrWithAssociations(drID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query delivery request %d: %s", drID, err)
 	}

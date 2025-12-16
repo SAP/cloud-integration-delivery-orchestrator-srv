@@ -112,7 +112,7 @@ func GetDeliveryRequest(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "invalid id"})
 		return
 	}
-	dr, err := service.QueryDrWithAcc(uint(drID))
+	dr, err := service.QueryDrWithAssociations(uint(drID))
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
@@ -199,11 +199,7 @@ func HandleSyncState(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"status": 400, "error": "invalid deliveryRequestId"})
 		return
 	}
-	if err := service.SyncImportState(drID, user); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"status": 500, "error": err.Error()})
-		return
-	}
-	if err := service.SyncDeployState(drID, user); err != nil {
+	if err := service.SyncDeliveryStatus(drID, user); err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"status": 500, "error": err.Error()})
 		return
 	}

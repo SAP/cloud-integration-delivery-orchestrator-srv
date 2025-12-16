@@ -10,14 +10,34 @@ import (
 	"mmt-delivery/pkg/tms"
 )
 
+func SyncDeliveryStatus(deliveryRequestID uint, user string) error {
+	// sync import/deploy state after approval
+	if conditions := syncImportState(deliveryRequestID, user); conditions != nil {
+		BatchInsertConditions(conditions)
+		return fmt.Errorf("failed to sync import state. see conditions for details")
+	}
+	if conditions := syncDeployState(deliveryRequestID, user); conditions != nil {
+		BatchInsertConditions(conditions)
+		return fmt.Errorf("failed to sync deploy state. see conditions for details")
+	}
+	return nil
+}
+
 // do this after sync import state
-func SyncDeployState(deliveryRequestID uint, user string) error {
+func syncDeployState(deliveryRequestID uint, user string) []db.Condition {
 	var ops []db.ArtifactTenantOperation
 	var err error
-	if ops, err = queryOpsInDrWithAcc(deliveryRequestID); err != nil {
-		return err
-	}
 	conditions := make([]db.Condition, 0)
+
+	if ops, err = queryOpsInDrWithAcc(deliveryRequestID); err != nil {
+		return []db.Condition{
+			{
+				DeliveryRequestID: deliveryRequestID,
+				State:             lifecycle.CondError,
+				Message:           fmt.Sprintf("error occurred during sync deploy state: failed to query artifact operations in delivery request %d: %s", deliveryRequestID, err.Error()),
+			},
+		}
+	}
 	for i := range ops {
 		op := &ops[i]
 		if op.DeployState != lifecycle.DeployInProgress {
@@ -72,40 +92,44 @@ func SyncDeployState(deliveryRequestID uint, user string) error {
 			continue
 		}
 	}
-	if len(conditions) > 0 {
-		if err := BatchInsertConditions(conditions); err != nil {
-			return err
-		}
-		return fmt.Errorf("some errors occurred during deploy state sync, please check log for details")
-	}
-	return nil
+	return conditions
 }
 
 // when call this function, make sure all ops have valid tr number
-func SyncImportState(deliveryRequestID uint, user string) error {
+func syncImportState(deliveryRequestID uint, user string) []db.Condition {
 	var artifactOps []db.ArtifactTenantOperation
 	// Adjust the DB accessor (db.DB / db.GetDB()) to match your project setup
 	artifactOps, err := queryOpsInDrWithAcc(deliveryRequestID)
 	if err != nil {
-		return err
+		return []db.Condition{
+			{
+				DeliveryRequestID: deliveryRequestID,
+				State:             lifecycle.CondError,
+				Message:           fmt.Sprintf("error occurred during sync import state: failed to query artifact operations in delivery request %d: %s", deliveryRequestID, err.Error()),
+			},
+		}
 	}
 	// find delivery rule id in delivery request
 	var dr db.DeliveryRequest
 	if err := db.Conn().First(&dr, deliveryRequestID).Error; err != nil {
-		return fmt.Errorf("failed to find delivery request %d: %w", deliveryRequestID, err)
-	}
-	drRuleID := dr.DeliveryRuleID
-	if drRuleID == 0 {
-		return fmt.Errorf("delivery request %d has no delivery rule", deliveryRequestID)
-	}
-	var deliveryRule db.DeliveryRule
-	if err := db.Conn().First(&deliveryRule, drRuleID).Error; err != nil {
-		return fmt.Errorf("failed to find delivery rule %d: %w", drRuleID, err)
+		return []db.Condition{
+			{
+				DeliveryRequestID: deliveryRequestID,
+				State:             lifecycle.CondError,
+				Message:           fmt.Sprintf("failed to find delivery request %d: %s", deliveryRequestID, err.Error()),
+			},
+		}
 	}
 
 	tmsClient, err := tms.NewClient(context.Background())
 	if err != nil {
-		return fmt.Errorf("error creating tms client: %w", err)
+		return []db.Condition{
+			{
+				DeliveryRequestID: deliveryRequestID,
+				State:             lifecycle.CondError,
+				Message:           fmt.Sprintf("error creating tms client: %s", err.Error()),
+			},
+		}
 	}
 	trNodeStatus := make(map[string]map[uint]tms.TrNodeStatus)          // tr number status in all nodes. trNumber - map[nodeID]status
 	tenantToOps := make(map[uint]map[string]db.ArtifactTenantOperation) // arTenantOp record in each node. cpi tenant ID - map[trNumber]ArtifactTenantOperation
@@ -118,7 +142,14 @@ func SyncImportState(deliveryRequestID uint, user string) error {
 		// UpdateArtifactNodeStatus will call GetTransportRequest internally
 		ns, err := tmsClient.TrNodeStatuses(trNumber)
 		if err != nil {
-			return fmt.Errorf("error when getting transport request %s: %w", trNumber, err)
+			return []db.Condition{
+				{
+					DeliveryRequestID:         deliveryRequestID,
+					State:                     lifecycle.CondError,
+					ArtifactTenantOperationID: op.ID,
+					Message:                   fmt.Sprintf("error when getting transport request %s: %s", trNumber, err.Error()),
+				},
+			}
 		}
 		trNodeStatus[trNumber] = ns
 	}
@@ -148,7 +179,14 @@ func SyncImportState(deliveryRequestID uint, user string) error {
 			// TODO: skip node that is not in delivery rule. currently will create op for all nodes, see dr id #20
 
 			if tenantID, ok = nodetoTenantID[nID]; !ok {
-				return fmt.Errorf("no cpi tenant found for tms node %d, please configure Cpi Tenant first", nID)
+				return []db.Condition{
+					{
+						DeliveryRequestID:         deliveryRequestID,
+						State:                     lifecycle.CondError,
+						ArtifactTenantOperationID: op.ID,
+						Message:                   fmt.Sprintf("no cpi tenant found for tms node %d, please configure Cpi Tenant first", nID),
+					},
+				}
 			}
 			if _, ok := tenantToOps[tenantID]; !ok {
 				tenantToOps[tenantID] = make(map[string]db.ArtifactTenantOperation)
@@ -168,20 +206,27 @@ func SyncImportState(deliveryRequestID uint, user string) error {
 				tenantToOps[tenantID][trNumber] = newOp
 			}
 			curOp := tenantToOps[tenantID][trNumber]
+			// NOTE: determine import state
 			state := lifecycle.DeriveImport(nState.Status)
 			if state == curOp.ImportState {
 				continue
 			}
-			// update state if changed
+			// update state only if changed
 			curOp.ImportState, curOp.UpdatedBy = state, user
 			// NOTE: set deploy state if import completed
 			if curOp.ImportState == lifecycle.ImportComplete && curOp.DeployState == lifecycle.DeployNotStarted {
 				curOp.DeployState = lifecycle.DeployQueued
 			}
 			if err := db.Conn().Save(&curOp).Error; err != nil {
-				return fmt.Errorf("error when creating new artifact tenant operation for artifact %s in node %d: %w", curOp.ArtifactTechID, nID, err)
+				return []db.Condition{
+					{
+						DeliveryRequestID:         deliveryRequestID,
+						State:                     lifecycle.CondError,
+						ArtifactTenantOperationID: curOp.ID,
+						Message:                   fmt.Sprintf("error when creating new artifact tenant operation for artifact %s in node %d: %s", curOp.ArtifactTechID, nID, err.Error()),
+					},
+				}
 			}
-
 		}
 
 	}

@@ -41,7 +41,7 @@ func RequestApproval(drID uint, currentUserID string, approvers []string, commen
 		{
 			DeliveryRequestID: drID,
 			State:             lifecycle.CondSuccess,
-			Message:           "Delivery request submitted for approval by " + currentUserID,
+			Message:           fmt.Sprintf("Delivery request submitted for approval by %s", currentUserID),
 		},
 	}); err != nil {
 		return fmt.Errorf("failed to update condition: %s", err.Error())
@@ -51,7 +51,7 @@ func RequestApproval(drID uint, currentUserID string, approvers []string, commen
 
 // approverID: from JWT claim, user_id/subject
 func Approve(drID uint, approverID string) (*db.DeliveryRequest, error) {
-	dr, err := QueryDrWithAcc(drID)
+	dr, err := QueryDrWithAssociations(drID)
 	if err != nil {
 		return nil, err
 	}
@@ -80,17 +80,15 @@ func Approve(drID uint, approverID string) (*db.DeliveryRequest, error) {
 		return nil, fmt.Errorf("failed to update delivery request status: %s", err.Error())
 	}
 	// sync import/deploy state after approval
-	if err := SyncImportState(drID, approverID); err != nil {
-		return nil, fmt.Errorf("failed to sync import state: %s", err.Error())
+	if err := SyncDeliveryStatus(drID, approverID); err != nil {
+		return nil, err
 	}
-	if err := SyncDeployState(drID, approverID); err != nil {
-		return nil, fmt.Errorf("failed to sync deploy state: %s", err.Error())
-	}
+
 	if err := BatchInsertConditions([]db.Condition{
 		{
 			DeliveryRequestID: drID,
 			State:             lifecycle.CondSuccess,
-			Message:           "Delivery request approved by " + approverID,
+			Message:           fmt.Sprintf("Delivery request approved by %s", approverID),
 		},
 	}); err != nil {
 		return nil, fmt.Errorf("failed to update condition: %s", err.Error())
