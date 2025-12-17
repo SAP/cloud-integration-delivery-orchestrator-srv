@@ -56,6 +56,7 @@ func BatchImportTenantOps(opIDs []uint, targetTenantID uint, user string) (bool,
 		}
 		return false, errors.New(errMsg)
 	}
+	// batch import all trs into target node by one API call
 	tmsCli, err := tms.NewClient(context.Background())
 	if err != nil {
 		return false, fmt.Errorf("error when creating tms client: %s", err)

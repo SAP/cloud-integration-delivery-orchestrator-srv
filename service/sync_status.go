@@ -10,13 +10,42 @@ import (
 	"mmt-delivery/pkg/tms"
 )
 
+func DetermineOverallStatus(drID uint) error {
+	dr, err := QueryDrWithAssociations(drID)
+	if err != nil {
+		return fmt.Errorf("failed to query delivery request %d: %s", drID, err.Error())
+	}
+	// derive aggregate status
+	newAggStatus := lifecycle.DeriveAggregateStatus(dr.AggregateStatus, func() []lifecycle.ImportState {
+		states := make([]lifecycle.ImportState, 0)
+		for _, op := range dr.ArtifactTenantOperations {
+			states = append(states, op.ImportState)
+		}
+		return states
+	}(), func() []lifecycle.DeployState {
+		states := make([]lifecycle.DeployState, 0)
+		for _, op := range dr.ArtifactTenantOperations {
+			states = append(states, op.DeployState)
+		}
+		return states
+	}())
+	if newAggStatus != dr.AggregateStatus {
+		if err := db.Conn().Model(&dr).Update("aggregate_status", newAggStatus).Error; err != nil {
+			return fmt.Errorf("failed to update delivery request %d aggregate status: %s", drID, err.Error())
+		}
+	}
+	return nil
+
+}
 func SyncDeliveryStatus(deliveryRequestID uint, user string) error {
+    // Always recompute aggregate status regardless of early returns below
+    defer DetermineOverallStatus(deliveryRequestID)
 	// sync import/deploy state after approval
-	if conditions := syncImportState(deliveryRequestID, user); conditions != nil {
+	if conditions := syncImportState(deliveryRequestID, user); len(conditions) != 0 {
 		BatchInsertConditions(conditions)
 		return fmt.Errorf("failed to sync import state. see conditions for details")
 	}
-	if conditions := syncDeployState(deliveryRequestID, user); conditions != nil {
+	if conditions := syncDeployState(deliveryRequestID, user); len(conditions) != 0 {
 		BatchInsertConditions(conditions)
 		return fmt.Errorf("failed to sync deploy state. see conditions for details")
 	}
@@ -64,6 +93,7 @@ func syncDeployState(deliveryRequestID uint, user string) []db.Condition {
 			})
 			continue
 		}
+		// NOTE: determine deploy state
 		var state lifecycle.DeployState
 		if rt.Version == op.ArtifactVersion {
 			switch rt.Status {
@@ -230,5 +260,5 @@ func syncImportState(deliveryRequestID uint, user string) []db.Condition {
 		}
 
 	}
-	return nil
+	return []db.Condition{}
 }

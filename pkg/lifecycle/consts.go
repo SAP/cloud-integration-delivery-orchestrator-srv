@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"slices"
 	"strings"
 )
 
@@ -112,10 +113,8 @@ func DeriveAggregateStatus(aggStatus AggregateStatus, importStates []ImportState
 	// Helpers
 	anyImport := func(vals []ImportState, targets ...ImportState) bool {
 		for _, v := range vals {
-			for _, t := range targets {
-				if v == t {
-					return true
-				}
+			if slices.Contains(targets, v) {
+				return true
 			}
 		}
 		return false
@@ -125,13 +124,7 @@ func DeriveAggregateStatus(aggStatus AggregateStatus, importStates []ImportState
 			return false
 		}
 		for _, v := range vals {
-			ok := false
-			for _, a := range allowed {
-				if v == a {
-					ok = true
-					break
-				}
-			}
+			ok := slices.Contains(allowed, v)
 			if !ok {
 				return false
 			}
@@ -140,10 +133,8 @@ func DeriveAggregateStatus(aggStatus AggregateStatus, importStates []ImportState
 	}
 	anyDeploy := func(vals []DeployState, targets ...DeployState) bool {
 		for _, v := range vals {
-			for _, t := range targets {
-				if v == t {
-					return true
-				}
+			if slices.Contains(targets, v) {
+				return true
 			}
 		}
 		return false
@@ -153,13 +144,7 @@ func DeriveAggregateStatus(aggStatus AggregateStatus, importStates []ImportState
 			return false
 		}
 		for _, v := range vals {
-			ok := false
-			for _, a := range allowed {
-				if v == a {
-					ok = true
-					break
-				}
-			}
+			ok := slices.Contains(allowed, v)
 			if !ok {
 				return false
 			}
