@@ -10,7 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type DeliverRequest struct {
+type NativeDeliverRequest struct {
 	Artifacts []struct {
 		ArtifactID      string `json:"artifact_id"`
 		ArtifactVersion string `json:"artifact_version"`
@@ -24,7 +24,7 @@ type DeliverRequest struct {
 
 // deliver Artifacts natively, avoid to use transport plan, directly upload artifacts to target tenants
 func NativeDeliver(ctx *gin.Context) {
-	var deliverRequest DeliverRequest
+	var deliverRequest NativeDeliverRequest
 	if err := ctx.BindJSON(&deliverRequest); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"msg": "Failed to bind native deliver request json: " + err.Error()})
 		return
@@ -93,7 +93,7 @@ func NativeDeliver(ctx *gin.Context) {
 
 			// TODO: loop for aroud 5 times to check deploy status
 			for i := 0; i < 5; i++ {
-				runtimeArtifact, err := destClient.GetRuntimeArtifactById(artifact.ArtifactID)
+				runtimeArtifact, err := destClient.RuntimeArtifact(artifact.ArtifactID)
 				if err != nil {
 					ctx.JSON(500, gin.H{"error": "Failed to check deploy status on destination tenant: " + err.Error()})
 					return

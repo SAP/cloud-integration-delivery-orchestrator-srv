@@ -26,6 +26,9 @@
   ```
   docker compose -f docker-compose-db.yml up -d
   ```
+  ```
+  podman compose -f docker-compose-db.yml up -d
+  ```
 3. connect to db, and create required tables from [schema.sql](./sqlc/schema.sql)
 4. add sample data
 4. start application locally, it will listen at `0.0.0.0:9000`

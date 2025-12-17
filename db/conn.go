@@ -25,6 +25,7 @@ func init() {
 			panic("failed to connect to remote database" + err.Error())
 		}
 	} else {
+		env.Logger().Info("Connecting to local database...")
 		conn, err = sql.Open("pgx", "postgres://postgres:passw0rd@127.0.0.1:5432/macodeploy?sslmode=disable")
 		if err != nil {
 			panic("failed to connect to local database" + err.Error())
@@ -36,9 +37,15 @@ func init() {
 		&gorm.Config{Logger: logger},
 	)
 	if err != nil {
-		panic("failed to connect database" + err.Error())
+		panic("failed to connect database: " + err.Error())
 	}
-	db.AutoMigrate(&Job{}, &ImportStep{}, &DeployStep{}, &ExecutionLog{}, &TransportPlan{}, &TransportGroup{})
+	// AutoMigrate core legacy models plus new lifecycle models
+	if err := db.AutoMigrate(
+		&CpiTenant{}, &DeliveryRule{}, &DeliveryRequest{}, &ArtifactTenantOperation{}, &BatchJob{},
+		&Artifact{}, &Condition{},
+	); err != nil {
+		panic("failed to migrate: " + err.Error())
+	}
 }
 
 var db *gorm.DB

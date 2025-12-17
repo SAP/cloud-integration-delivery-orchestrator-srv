@@ -5,9 +5,12 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/gin-gonic/gin"
-	"mmt-delivery/pkg/env"
+	. "mmt-delivery/consts"
+	"mmt-delivery/db"
 	"mmt-delivery/pkg/cpi"
+	"mmt-delivery/pkg/env"
+
+	"github.com/gin-gonic/gin"
 )
 
 var logger = env.Logger()
@@ -51,16 +54,8 @@ func GetPackageIflowsHandler(ctx *gin.Context) {
 	})
 }
 
-type ArtifactResp struct {
-	ID          string `json:"Id"`
-	Version     string `json:"Version"`
-	PackageID   string `json:"PackageId"`
-	Name        string `json:"Name"`
-	Description string `json:"Description"`
-	Type        string `json:"Type"`
-}
-
 // include type: script collection, iflow artifacts
+// TODO: may call cpi-cookie-service to get all artifacts in one call
 func GetPackageArtifactsHandler(ctx *gin.Context) {
 	cpi_tenant := ctx.Query("tenant")
 	packageID := ctx.Query("package")
@@ -69,7 +64,7 @@ func GetPackageArtifactsHandler(ctx *gin.Context) {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"status": http.StatusInternalServerError, "result": fmt.Sprintf("failed to create cpi client: %s", err)})
 		return
 	}
-	artifactResp := make([]ArtifactResp, 0)
+	artifactResp := make([]db.Artifact, 0)
 	iflows, err := client.GetPackageIflows(packageID)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"status": http.StatusInternalServerError, "result": fmt.Sprintf("failed to get iflows: %s", err)})
@@ -81,29 +76,50 @@ func GetPackageArtifactsHandler(ctx *gin.Context) {
 		return
 	}
 	for _, v := range scriptColls {
-		artifactResp = append(artifactResp, ArtifactResp{
-			ID:          v.ID,
-			Version:     v.Version,
-			PackageID:   v.PackageID,
-			Name:        v.Name,
-			Description: v.Description,
-			Type:        "Script Collection",
-		})
+		artifactResp = append(artifactResp, wrapArtifact(Artifact_Type_Sc, v))
 	}
 	for _, v := range iflows {
-		artifactResp = append(artifactResp, ArtifactResp{
-			ID:          v.ID,
-			Version:     v.Version,
-			PackageID:   v.PackageID,
-			Name:        v.Name,
-			Description: v.Description,
-			Type:        "Integration Flow",
-		})
+		artifactResp = append(artifactResp, wrapArtifact("Integration Flow", v))
 	}
 	ctx.JSON(http.StatusOK, gin.H{
 		"result": artifactResp,
 	})
 
+}
+
+// wrapArtifact normalizes CPI items (script collection or iflow) into a db.Artifact DTO (not persisted here).
+// Both ScriptCollectionItem and IflowItem embed ArtifactCommonItem so we only need those fields.
+func wrapArtifact(artifactType ArtifactType, artifact any) db.Artifact {
+	switch v := artifact.(type) {
+	case cpi.ScriptCollectionItem:
+		return db.Artifact{
+			TechID:      v.ID,
+			Version:     v.Version,
+			PackageID:   v.PackageID,
+			Name:        v.Name,
+			Description: v.Description,
+			Type:        artifactType,
+			CreatedBy:   v.CreatedBy,
+			CreatedAt:   v.CreatedAt,
+			ModifiedBy:  v.ModifiedBy,
+			ModifiedAt:  v.ModifiedAt,
+		}
+	case cpi.IflowItem:
+		return db.Artifact{
+			TechID:      v.ID,
+			Version:     v.Version,
+			PackageID:   v.PackageID,
+			Name:        v.Name,
+			Description: v.Description,
+			Type:        artifactType,
+			CreatedBy:   v.CreatedBy,
+			CreatedAt:   v.CreatedAt,
+			ModifiedBy:  v.ModifiedBy,
+			ModifiedAt:  v.ModifiedAt,
+		}
+	default:
+		return db.Artifact{Type: artifactType}
+	}
 }
 
 // do not return entire destination instance, hide credentials

@@ -1,0 +1,31 @@
+_schema-version: "3.1.0"
+ID: maco-mmt-srv-cpi-delivery
+version: 1.0.0
+
+modules:
+  - name: com.sap.maco.devops.cpi.delivery
+    type: go
+    path: .
+    parameters:
+      memory: 1024M
+      disk-quota: 1024M
+      hosts:
+        - com-sap-maco-mmt-srv-devops-cpi-delivery
+      instances: 1
+    requires:
+      - name: mmt-devops-pgsql
+      - name: mmt_devops_destination
+      - name: mmt-tms
+      - name: mmt_devops_connectivity
+    properties:
+      REMOTE: true
+
+resources:
+  - name: mmt-devops-pgsql
+    type: org.cloudfoundry.existing-service
+  - name: mmt_devops_destination
+    type: org.cloudfoundry.existing-service
+  - name: mmt-tms
+    type: org.cloudfoundry.existing-service
+  - name: mmt_devops_connectivity
+    type: org.cloudfoundry.existing-service

@@ -103,7 +103,7 @@ func (c *CpiClient) DownloadArtifact(artifactId, artifactVersion, packageID, art
 		Method: http.MethodGet,
 		ApiURL: fmt.Sprintf("%s/IntegrationDesigntimeArtifacts(Id='%s',Version='%s')/$value", c.ApiURL, artifactId, artifactVersion),
 	}
-	artifactContent, err := c.Do(&request) // zip content
+	artifactContent, _, err := c.Do(&request) // zip content
 	if err != nil {
 		return fmt.Errorf("failed to download artifact: %w", err)
 	}
@@ -204,7 +204,7 @@ func (c *CpiClient) UploadArtifact(artifactId string, artifactName string, artif
 		ApiURL:      fmt.Sprintf("%s/IntegrationDesigntimeArtifacts", c.ApiURL),
 		RequestBody: bytes.NewBuffer(requestBody),
 	}
-	response, err := c.Do(&request)
+	response, _, err := c.Do(&request)
 	if err != nil {
 		return fmt.Errorf("error while uploading artifact: %s", err)
 	}
