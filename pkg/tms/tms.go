@@ -330,7 +330,6 @@ func (t *TmsClient) GetActionResultLog(actionID uint) (ActionLogResp, error) {
 	if errReq != nil {
 		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
 		return ActionLogResp{}, errReq
-
 	}
 	var actionLogResp ActionLogResp
 	jsonUnmarshalError := json.Unmarshal(*respBodyContent, &actionLogResp)
@@ -339,4 +338,75 @@ func (t *TmsClient) GetActionResultLog(actionID uint) (ActionLogResp, error) {
 		return ActionLogResp{}, jsonUnmarshalError
 	}
 	return actionLogResp, nil
+}
+
+type TransportLog struct {
+	Logs []struct {
+		ActionID          int       `json:"actionId"`
+		ActionType        string    `json:"actionType"`
+		Status            string    `json:"status"`
+		ActionStartedAt   time.Time `json:"actionStartedAt"`
+		ActionTriggeredBy string    `json:"actionTriggeredBy"`
+		Messages          []struct {
+			ID        int       `json:"id"`
+			MessageID string    `json:"messageId"`
+			Severity  string    `json:"severity"`
+			Message   string    `json:"message"`
+			CreatedAt time.Time `json:"createdAt"`
+		} `json:"messages"`
+		Entities []struct {
+			ID       int    `json:"id"`
+			URI      string `json:"uri"`
+			Status   string `json:"status"`
+			FileName string `json:"fileName"`
+			Messages []struct {
+				ID        int       `json:"id"`
+				MessageID string    `json:"messageId"`
+				Severity  string    `json:"severity"`
+				Message   string    `json:"message"`
+				CreatedAt time.Time `json:"createdAt"`
+			} `json:"messages"`
+		} `json:"entities"`
+	} `json:"logs"`
+}
+
+func (t *TmsClient) getTransportLogs(trNumber string, nodeID uint) (TransportLog, error) {
+	childCtx, cancel := context.WithCancel(t.Context)
+	defer cancel()
+	fullURL := fmt.Sprintf("%s/v2/nodes/%d/transportRequests/%s/logs", t.ApiURL, nodeID, trNumber)
+	request := env.HttpRequest{
+		Ctx:    childCtx,
+		ApiURL: fullURL,
+		Method: http.MethodGet,
+	}
+	respBodyContent, _, errReq := t.Do(&request)
+	if errReq != nil {
+		logger.Errorf("Error when getting response  content, the error message is %s", errReq)
+		return TransportLog{}, errReq
+	}
+	var transportLogResp TransportLog
+	jsonUnmarshalError := json.Unmarshal(*respBodyContent, &transportLogResp)
+	if jsonUnmarshalError != nil {
+		logger.Errorf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
+		return TransportLog{}, jsonUnmarshalError
+	}
+	return transportLogResp, nil
+}
+
+func (t *TmsClient) ErrLogsInTransportLog(trNumber string, nodeID uint) (errLogs []string, err error) {
+	errLogs = make([]string, 0)
+	transportLogResp, err := t.getTransportLogs(trNumber, nodeID)
+	if err != nil {
+		return
+	}
+	for _, trLog := range transportLogResp.Logs {
+		for _, entity := range trLog.Entities {
+			for _, msg := range entity.Messages {
+				if msg.Severity == "E" {
+					errLogs = append(errLogs, fmt.Sprintf("Transport Request %s failed in Node %d: %s", trNumber, nodeID, msg.Message))
+				}
+			}
+		}
+	}
+	return
 }

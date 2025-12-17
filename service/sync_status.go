@@ -8,6 +8,7 @@ import (
 	"mmt-delivery/pkg/cpi"
 	"mmt-delivery/pkg/lifecycle"
 	"mmt-delivery/pkg/tms"
+	"strings"
 )
 
 func DetermineOverallStatus(drID uint) error {
@@ -38,8 +39,8 @@ func DetermineOverallStatus(drID uint) error {
 
 }
 func SyncDeliveryStatus(deliveryRequestID uint, user string) error {
-    // Always recompute aggregate status regardless of early returns below
-    defer DetermineOverallStatus(deliveryRequestID)
+	// Always recompute aggregate status regardless of early returns below
+	defer DetermineOverallStatus(deliveryRequestID)
 	// sync import/deploy state after approval
 	if conditions := syncImportState(deliveryRequestID, user); len(conditions) != 0 {
 		BatchInsertConditions(conditions)
@@ -196,7 +197,9 @@ func syncImportState(deliveryRequestID uint, user string) []db.Condition {
 	}
 	trUpdated := make(map[string]bool)
 	nodetoTenantID := nodeTenantCache // tms node ID - cpi tenant ID
-	for _, op := range artifactOps {  // check to create new record if new tr status happens in tms
+
+	conditions := make([]db.Condition, 0)
+	for _, op := range artifactOps { // check to create new record if new tr status happens in tms
 		trNumber := op.TransportRequestNumber
 		if _, ok := trUpdated[trNumber]; ok { // prevent duplicate update
 			continue
@@ -247,7 +250,7 @@ func syncImportState(deliveryRequestID uint, user string) []db.Condition {
 			if curOp.ImportState == lifecycle.ImportComplete && curOp.DeployState == lifecycle.DeployNotStarted {
 				curOp.DeployState = lifecycle.DeployQueued
 			}
-			if err := db.Conn().Save(&curOp).Error; err != nil {
+			if err := db.Conn().Save(&curOp).Error; err != nil { // update each op
 				return []db.Condition{
 					{
 						DeliveryRequestID:         deliveryRequestID,
@@ -257,8 +260,24 @@ func syncImportState(deliveryRequestID uint, user string) []db.Condition {
 					},
 				}
 			}
+			// get error logs if import failed
+			if state == lifecycle.ImportFailed {
+				logs, err := tmsClient.ErrLogsInTransportLog(trNumber, nID)
+				var message string
+				if err != nil {
+					message = fmt.Sprintf("error when getting error logs for transport request %s in node %d: %s", trNumber, nID, err.Error())
+				} else {
+					message = strings.Join(logs, "\n")
+				}
+				conditions = append(conditions, db.Condition{
+					DeliveryRequestID:         deliveryRequestID,
+					State:                     lifecycle.CondError,
+					ArtifactTenantOperationID: curOp.ID,
+					Message:                   message,
+				})
+			}
 		}
 
 	}
-	return []db.Condition{}
+	return conditions
 }

@@ -145,8 +145,24 @@ func checkJIRA(jira string) bool {
 
 // used for both import and deploy
 type DeliverOpRequest struct {
-	OpIDs        []uint `json:"opIDs"`
-	TargetTenant uint   `json:"targetTenant"`
+	OpIDs             []uint `json:"opIDs"`
+	TargetTenant      uint   `json:"targetTenant"`
+	DeliveryRequestID uint   `json:"deliveryRequestID"`
+}
+
+// check before deliver(import/deploy) ops
+func preDeliverCheck(req DeliverOpRequest) error {
+	if len(req.OpIDs) == 0 || req.TargetTenant == 0 || req.DeliveryRequestID == 0 {
+		return fmt.Errorf("missing opIDs, targetNode or deliveryRequestID")
+	}
+	var dr db.DeliveryRequest
+	if err := db.Conn().First(&dr, req.DeliveryRequestID).Error; err != nil {
+		return fmt.Errorf("delivery request id %d not found", req.DeliveryRequestID)
+	}
+	if dr.ApprovedBy == "" {
+		return fmt.Errorf("delivery request not approved yet")
+	}
+	return nil
 }
 
 func HandleImportOps(c *gin.Context) {
@@ -155,8 +171,8 @@ func HandleImportOps(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
 		return
 	}
-	if len(req.OpIDs) == 0 || req.TargetTenant == 0 {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "missing opIDs or targetNode"})
+	if err := preDeliverCheck(req); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
 		return
 	}
 	user := service.UserID(c)
@@ -174,8 +190,8 @@ func HandleDeployOps(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
 		return
 	}
-	if len(req.OpIDs) == 0 || req.TargetTenant == 0 {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "missing opIDs or targetNode"})
+	if err := preDeliverCheck(req); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
 		return
 	}
 	user := service.UserID(c)
