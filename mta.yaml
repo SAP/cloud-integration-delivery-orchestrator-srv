@@ -17,6 +17,7 @@ modules:
       - name: mmt_devops_destination
       - name: mmt-tms
       - name: mmt_devops_connectivity
+      - name: uaa-api
     properties:
       REMOTE: true
 
@@ -28,4 +29,6 @@ resources:
   - name: mmt-tms
     type: org.cloudfoundry.existing-service
   - name: mmt_devops_connectivity
+    type: org.cloudfoundry.existing-service
+  - name: uaa-api
     type: org.cloudfoundry.existing-service
