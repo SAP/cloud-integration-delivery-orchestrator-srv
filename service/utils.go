@@ -17,6 +17,11 @@ func UserID(ctx *gin.Context) string {
 	return uid
 }
 
+func UaaOrigin(ctx *gin.Context) string {
+	origin, _ := ctx.Get("origin")
+	return origin.(string)
+}
+
 func UaaClaim(ctx *gin.Context) db.UaaClaims {
 	claim, _ := ctx.Get("uaa_claim")
 	return claim.(db.UaaClaims)

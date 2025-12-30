@@ -124,6 +124,7 @@ func AuthMiddleware() gin.HandlerFunc {
 		claims := token.Claims.(*db.UaaClaims)
 		c.Set("user_name", claims.UserName)
 		c.Set("scope", claims.Scope)
+		c.Set("origin", claims.Origin)
 		c.Set("uaa_claim", *claims)
 		c.Next()
 	}

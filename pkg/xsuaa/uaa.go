@@ -54,7 +54,7 @@ func (uaa *UaaClient) UserInfo(userID string) (*db.UserInfo, error) {
 }
 
 // search uaa user by email, 'co' operator(https://simplecloud.info/specs/draft-scim-api-01.html#query-resources)
-func (uaa *UaaClient) SearchByEmail(email string) ([]db.UserInfo, error) {
+func (uaa *UaaClient) SearchByEmail(email string, curUserOrigin string) ([]db.UserInfo, error) {
 	childCtx, cancel := context.WithCancel(uaa.Context)
 	defer cancel()
 	q := url.Values{}
@@ -80,11 +80,15 @@ func (uaa *UaaClient) SearchByEmail(email string) ([]db.UserInfo, error) {
 	logger.Infof("Successfully retrieved uaa users: %+v", document)
 	users := make([]db.UserInfo, 0)
 	for _, u := range document.Resources {
+		if u.Origin != curUserOrigin {
+			continue
+		}
 		for _, em := range u.Emails {
 			users = append(users, db.UserInfo{
 				ID:       u.ID,
 				Email:    em.Value,
 				UserName: u.UserName,
+				Origin:   u.Origin,
 			})
 			break
 		}

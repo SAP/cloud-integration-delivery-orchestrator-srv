@@ -114,6 +114,7 @@ type UserInfo struct {
 	ID       string `json:"id"`
 	Email    string `json:"email"`
 	UserName string `json:"userName"`
+	Origin   string `json:"origin"`
 }
 
 // Condition models a discrete boolean fact about an artifact or operation, inspired by Kubernetes conditions.

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"mmt-delivery/pkg/xsuaa"
+	"mmt-delivery/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -13,7 +14,8 @@ func HandleUaaUserEmailSearch(c *gin.Context) {
 		c.JSON(500, gin.H{"status": 500, "error": err.Error()})
 		return
 	}
-	document, err := uaaClient.SearchByEmail(email)
+	origin := service.UaaOrigin(c)
+	document, err := uaaClient.SearchByEmail(email, origin)
 	if err != nil {
 		c.JSON(500, gin.H{"status": 500, "error": err.Error()})
 		return
