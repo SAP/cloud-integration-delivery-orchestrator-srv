@@ -40,7 +40,18 @@ func DetermineOverallStatus(drID uint) error {
 }
 func SyncDeliveryStatus(deliveryRequestID uint, user string) error {
 	// Always recompute aggregate status regardless of early returns below
+
 	defer DetermineOverallStatus(deliveryRequestID)
+
+	// Check if delivery request is approved before syncing status
+	var dr db.DeliveryRequest
+	if err := db.Conn().First(&dr, deliveryRequestID).Error; err != nil {
+		return fmt.Errorf("failed to find delivery request %d: %s", deliveryRequestID, err.Error())
+	}
+	if dr.ApprovedAt == nil || dr.ApprovedBy == "" {
+		return fmt.Errorf("delivery request %d has not been approved yet", deliveryRequestID)
+	}
+
 	// sync import/deploy state after approval
 	if conditions := syncImportState(deliveryRequestID, user); len(conditions) != 0 {
 		BatchInsertConditions(conditions)
