@@ -51,11 +51,11 @@ cf-login:
 cf-build:
 	@echo ">> Building MTA archive with MBT"
 	@which mbt > /dev/null || (echo "Error: mbt not found. Please install SAP Multi-Target Cloud Foundry CLI (MBT)" && exit 1)
-	mbt build --mtar=mta_archives/$(shell grep '^ID:' mta.yaml | awk '{print $$2}')_$(shell grep '^version:' mta.yaml | awk '{print $$2}').mtar
+	mbt build
 
 cf-deploy: cf-login cf-build
 	@echo ">> Deploying to Cloud Foundry"
-	cf deploy mta_archives/*.mtar --mtar
+	cf deploy mta_archives/*.mtar
 
 # Deploy without rebuilding (assumes .mtar already exists)
 cf-deploy-only: cf-login
@@ -65,7 +65,7 @@ cf-deploy-only: cf-login
 		echo "Run 'make cf-build' first to build the archive"; \
 		exit 1; \
 	fi
-	cf deploy mta_archives/*.mtar --mtar
+	cf deploy mta_archives/*.mtar
 
 # Quick deploy command (login + build + deploy in one)
 deploy: cf-deploy
