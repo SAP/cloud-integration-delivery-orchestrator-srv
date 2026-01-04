@@ -122,6 +122,13 @@ func AuthMiddleware() gin.HandlerFunc {
 			return
 		}
 		claims := token.Claims.(*db.UaaClaims)
+
+		// Check token expiration
+		if claims.ExpiresAt != nil && claims.ExpiresAt.Before(time.Now()) {
+			c.AbortWithStatusJSON(401, gin.H{"error": "token has expired"})
+			return
+		}
+
 		c.Set("user_name", claims.UserName)
 		c.Set("scope", claims.Scope)
 		c.Set("origin", claims.Origin)
