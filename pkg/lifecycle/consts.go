@@ -34,7 +34,6 @@ const (
 	ImportQueued     ImportState = "QUEUED" // INITIAL
 	ImportDisabled   ImportState = "IMPORT_DISABLED"
 	ImportInProgress ImportState = "IN_PROGRESS"
-	ImportPartial    ImportState = "PARTIAL" // TODO: not a right situation, remove later
 	ImportFailed     ImportState = "FAILED"
 	ImportComplete   ImportState = "COMPLETE"
 )
@@ -45,11 +44,8 @@ const (
 	DeployQueued      DeployState = "QUEUED"
 	DeployDisabled    DeployState = "DEPLOY_DISABLED"
 	DeployInProgress  DeployState = "IN_PROGRESS"
-	DeployPartial     DeployState = "PARTIAL" // TODO: not a right situation, remove later
 	DeployFailed      DeployState = "FAILED"
 	DeployComplete    DeployState = "COMPLETE"
-	DeployRollbacking DeployState = "ROLLBACKING"
-	DeployRolledBack  DeployState = "ROLLED_BACK"
 )
 
 // Aggregate statuses (public surface).
@@ -88,13 +84,12 @@ func DeriveImport(state string) ImportState {
 		return ImportComplete
 	case "FATAL", "FAILED", "ERROR":
 		return ImportFailed
-	case "PARTIAL":
-		return ImportPartial
 	default:
 		return ImportNotStarted
 	}
 }
 
+// NOTE: should remove ops that is in source tenant before calling this function!
 func DeriveAggregateStatus(aggStatus AggregateStatus, importStates []ImportState, deployStates []DeployState) AggregateStatus {
 	// Short-circuit for explicit terminal/carry-over states
 	switch aggStatus {
@@ -156,7 +151,10 @@ func DeriveAggregateStatus(aggStatus AggregateStatus, importStates []ImportState
 	if anyImport(importStates, ImportFailed) {
 		return AggImportFailed
 	}
-	if anyImport(importStates, ImportInProgress, ImportQueued) {
+	if anyImport(importStates, ImportQueued) {
+		return AggAwaitingImport
+	}
+	if anyImport(importStates, ImportInProgress) {
 		return AggImporting
 	}
 
@@ -166,10 +164,10 @@ func DeriveAggregateStatus(aggStatus AggregateStatus, importStates []ImportState
 	// Deploy phase precedence (only meaningful once imports are complete/disabled)
 	if importsComplete {
 		// Failure first, including rolled back
-		if anyDeploy(deployStates, DeployFailed) || anyDeploy(deployStates, DeployRolledBack) {
+		if anyDeploy(deployStates, DeployFailed) || anyDeploy(deployStates) {
 			return AggDeployFailed
 		}
-		if anyDeploy(deployStates, DeployInProgress, DeployQueued, DeployRollbacking) {
+		if anyDeploy(deployStates, DeployInProgress) {
 			return AggDeploying
 		}
 		if allDeploy(deployStates, DeployComplete) {

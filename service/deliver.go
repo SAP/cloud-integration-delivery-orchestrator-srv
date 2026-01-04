@@ -86,6 +86,7 @@ func BatchDeployTenantOps(opIDs []uint, targetTenantID uint, user string) (bool,
 	for i := range ops {
 		op := &ops[i]
 		if op.DeployState != lifecycle.DeployQueued { // deploy should be QUEUED. i.e.,
+			errOps[op.ID] = fmt.Errorf("artifact operation %d is not in QUEUED state for deploy, current state: %s", op.ID, op.DeployState)
 			continue
 		}
 		if op.Tenant.ID != targetTenantID { // only queued state can be triggered for deploy

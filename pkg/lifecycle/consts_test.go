@@ -68,6 +68,17 @@ func TestDeriveAggregateStatus_Deployed(t *testing.T) {
 	}
 }
 
+func TestDeriveAggregateStatus_Deployed1(t *testing.T) {
+	agg := DeriveAggregateStatus(
+		AggDeploying,
+		[]ImportState{ImportComplete, ImportComplete},
+		[]DeployState{DeployComplete, DeployComplete},
+	)
+	if agg != AggDeployed {
+		t.Fatalf("expected DEPLOYED, got %s", agg)
+	}
+}
+
 func TestDeriveAggregateStatus_FallbackKeepingAgg(t *testing.T) {
 	agg := DeriveAggregateStatus(
 		AggWaitingApprove,

@@ -16,16 +16,26 @@ func DetermineOverallStatus(drID uint) error {
 	if err != nil {
 		return fmt.Errorf("failed to query delivery request %d: %s", drID, err.Error())
 	}
-	// derive aggregate status
+	sourceTenantID := dr.SourceTenantID
+
+	// derive aggregate status (exclude source tenant operations)
 	newAggStatus := lifecycle.DeriveAggregateStatus(dr.AggregateStatus, func() []lifecycle.ImportState {
 		states := make([]lifecycle.ImportState, 0)
 		for _, op := range dr.ArtifactTenantOperations {
+			// Skip source tenant - aggregate status should only reflect target tenants
+			if op.TenantID == sourceTenantID {
+				continue
+			}
 			states = append(states, op.ImportState)
 		}
 		return states
 	}(), func() []lifecycle.DeployState {
 		states := make([]lifecycle.DeployState, 0)
 		for _, op := range dr.ArtifactTenantOperations {
+			// Skip source tenant - aggregate status should only reflect target tenants
+			if op.TenantID == sourceTenantID {
+				continue
+			}
 			states = append(states, op.DeployState)
 		}
 		return states
@@ -36,8 +46,8 @@ func DetermineOverallStatus(drID uint) error {
 		}
 	}
 	return nil
-
 }
+
 func SyncDeliveryStatus(deliveryRequestID uint, user string) error {
 	// Always recompute aggregate status regardless of early returns below
 
@@ -117,6 +127,12 @@ func syncDeployState(deliveryRequestID uint, user string) []db.Condition {
 				state = lifecycle.DeployFailed
 			}
 		} else {
+			conditions = append(conditions, db.Condition{
+				DeliveryRequestID:         deliveryRequestID,
+				ArtifactTenantOperationID: op.ID,
+				State:                     lifecycle.CondWarn,
+				Message:                   fmt.Sprintf("runtime artifact %s version %s in tenant %s does not match expected version %s. May not triggered by this operation", op.ArtifactTechID, rt.Version, op.Tenant.Name, op.ArtifactVersion),
+			})
 			continue // not triggered by this operation
 		}
 		if state == op.DeployState { // only need update if deploy state changed
