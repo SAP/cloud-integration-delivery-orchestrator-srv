@@ -312,5 +312,5 @@ func HandleCheckTr(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": "valid"})
+	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "msg": "valid TR: "+ req.Op.TransportRequestNumber})
 }
