@@ -12,7 +12,7 @@ CF_API ?= https://api.cf.sap.hana.ondemand.com
 CF_ORG ?= MaCo-devops
 CF_SPACE ?= DEVOPS
 CF_USER ?=
-CF_PASSWORD ?=
+CF_PASS ?=
 
 # MTA configuration
 MTA_JAR_MERGE ?= true
@@ -41,12 +41,12 @@ prepare:
 # Cloud Foundry deployment commands
 cf-login:
 	@echo ">> Logging into Cloud Foundry"
-	@if [ -z "$(CF_USER)" ] || [ -z "$(CF_PASSWORD)" ]; then \
-		echo "Error: CF_USER and CF_PASSWORD must be set"; \
-		echo "Usage: make cf-login CF_USER=username CF_PASSWORD=password"; \
+	@if [ -z "$(CF_USER)" ] || [ -z "$(CF_PASS)" ]; then \
+		echo "Error: CF_USER and CF_PASS must be set"; \
+		echo "Usage: make cf-login CF_USER=username CF_PASS=password"; \
 		exit 1; \
 	fi
-	cf login -a $(CF_API) -o $(CF_ORG) -s $(CF_SPACE) -u $(CF_USER) -p "$(CF_PASSWORD)"
+	cf login -a $(CF_API) -o $(CF_ORG) -s $(CF_SPACE) -u $(CF_USER) -p "$(CF_PASS)"
 
 cf-build:
 	@echo ">> Building MTA archive with MBT"
