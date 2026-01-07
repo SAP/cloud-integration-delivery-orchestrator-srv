@@ -6,22 +6,54 @@ import (
 	"fmt"
 	"mmt-delivery/db"
 	"mmt-delivery/pkg/env"
+	"time"
 
 	"net/http"
 	"net/url"
-	"time"
 )
 
 type UaaClient struct {
 	env.HttpClient
+	emailCache map[string]*cacheEntry
+}
+
+type cacheEntry struct {
+	email     string
+	expiresAt time.Time
 }
 
 var logger = env.Logger()
 
+const cacheTTL = 30 * time.Hour
+
+var globalClient *UaaClient
+
 func NewClient(c context.Context) (*UaaClient, error) {
+	if globalClient != nil {
+		return globalClient, nil
+	}
+
 	v := env.UaaCredential()
 	client, err := env.NewClient(c, v.Clientid, v.Clientsecret, v.AuthUrl, v.ApiUrl)
-	return &UaaClient{*client}, err
+	if err != nil {
+		return nil, err
+	}
+
+	globalClient = &UaaClient{
+		HttpClient:  *client,
+		emailCache:  make(map[string]*cacheEntry),
+	}
+	return globalClient, nil
+}
+
+func GetUserEmail(userID string) (string, error) {
+	if globalClient == nil {
+		_, err := NewClient(context.Background())
+		if err != nil {
+			return "", err
+		}
+	}
+	return globalClient.userEmail(userID)
 }
 
 // get user by sub/user_id from JWT claim body
@@ -51,6 +83,23 @@ func (uaa *UaaClient) UserInfo(userID string) (*db.UserInfo, error) {
 		UserName: resource.UserName,
 	}
 	return &user, nil
+}
+
+func (uaa *UaaClient) userEmail(userID string) (string, error) {
+	if entry, exists := uaa.emailCache[userID]; exists {
+		if time.Now().Before(entry.expiresAt) {
+			return entry.email, nil
+		}
+	}
+	userInfo, err := uaa.UserInfo(userID)
+	if err != nil {
+		return "", err
+	}
+	uaa.emailCache[userID] = &cacheEntry{
+		email:     userInfo.Email,
+		expiresAt: time.Now().Add(cacheTTL),
+	}
+	return userInfo.Email, nil
 }
 
 // search uaa user by email, 'co' operator(https://simplecloud.info/specs/draft-scim-api-01.html#query-resources)

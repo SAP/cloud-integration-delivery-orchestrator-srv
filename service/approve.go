@@ -6,6 +6,7 @@ import (
 	"mmt-delivery/db"
 	"mmt-delivery/pkg/lifecycle"
 	"mmt-delivery/pkg/notify"
+	"mmt-delivery/pkg/xsuaa"
 	"time"
 )
 
@@ -37,11 +38,15 @@ func RequestApproval(drID uint, currentUserID string, approvers []string, commen
 	}).Error; err != nil {
 		return fmt.Errorf("failed to update delivery request status: %s", err.Error())
 	}
+	userEmail, err := xsuaa.GetUserEmail(currentUserID)
+	if err != nil {
+		return err
+	}
 	if err := BatchInsertConditions([]db.Condition{
 		{
 			DeliveryRequestID: drID,
 			State:             lifecycle.CondSuccess,
-			Message:           fmt.Sprintf("Delivery request submitted for approval by %s", currentUserID),
+			Message:           fmt.Sprintf("Delivery request submitted for approval by %s", userEmail),
 		},
 	}); err != nil {
 		return fmt.Errorf("failed to update condition: %s", err.Error())
@@ -83,12 +88,15 @@ func Approve(drID uint, approverID string) (*db.DeliveryRequest, error) {
 	if err := SyncDeliveryStatus(drID, approverID); err != nil {
 		return nil, err
 	}
-
+	approverEmail, err := xsuaa.GetUserEmail(approverID)
+	if err != nil {
+		return nil, err
+	}
 	if err := BatchInsertConditions([]db.Condition{
 		{
 			DeliveryRequestID: drID,
 			State:             lifecycle.CondSuccess,
-			Message:           fmt.Sprintf("Delivery request approved by %s", approverID),
+			Message:           fmt.Sprintf("Delivery request approved by %s", approverEmail),
 		},
 	}); err != nil {
 		return nil, fmt.Errorf("failed to update condition: %s", err.Error())
