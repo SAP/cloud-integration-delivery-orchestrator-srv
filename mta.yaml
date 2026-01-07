@@ -3,7 +3,7 @@ ID: maco-mmt-srv-cpi-delivery
 version: 1.0.0
 
 modules:
-  - name: com.sap.maco.devops.cpi.delivery
+  - name: mmt.devops.srv.cpi.delivery
     type: go
     path: .
     parameters:
