@@ -8,12 +8,13 @@ import (
 	"mmt-delivery/pkg/cpi"
 	"mmt-delivery/pkg/lifecycle"
 	"mmt-delivery/pkg/tms"
+	"strings"
 
 	"gorm.io/gorm"
 )
 
 // import INITIAL artifact operations under target node
-func BatchImportTenantOps(opIDs []uint, targetTenantID uint, user string) (bool, error) {
+func BatchImportTenantOps(drID uint, opIDs []uint, targetTenantID uint, user string) (bool, error) {
 	var ops []db.ArtifactTenantOperation
 	var err error
 	if ops, err = queryOpsWithAcco(opIDs); err != nil {
@@ -61,18 +62,38 @@ func BatchImportTenantOps(opIDs []uint, targetTenantID uint, user string) (bool,
 	if err != nil {
 		return false, fmt.Errorf("error when creating tms client: %s", err)
 	}
-	if _, err := tmsCli.ImportTransportRequest(targetNodeID, trs); err != nil {
+	actionID, err := tmsCli.ImportTransportRequest(targetNodeID, trs)
+	if err != nil {
+		condition := db.Condition{
+			DeliveryRequestID: drID,
+			State:             lifecycle.CondError,
+			Message:           fmt.Sprintf("batch import failed to trigger in tenant %s (node %d). Error: %s", targetTenant.Name, targetNodeID, err.Error()),
+		}
+		BatchInsertConditions([]db.Condition{condition})
 		return false, err
 	}
 	err = batchUpdateOps(ops)
 	if err != nil {
 		return false, err
 	}
+	// save condition if triggered successfully
+	artifactList := make([]string, 0, len(ops))
+	for _, op := range ops {
+		artifactList = append(artifactList, fmt.Sprintf("  - %s (version %s)", op.ArtifactTechID, op.ArtifactVersion))
+	}
+	condition := db.Condition{
+		DeliveryRequestID: drID,
+		State:             lifecycle.CondSuccess,
+		Message:           fmt.Sprintf("batch import triggered in tenant %s (node %d) by %s. Action ID: %d.\nArtifacts:\n%s", targetTenant.Name, targetNodeID, user, actionID, strings.Join(artifactList, "\n")),
+	}
+	if err := BatchInsertConditions([]db.Condition{condition}); err != nil {
+		return false, fmt.Errorf("failed to save import trigger condition: %s", err)
+	}
 	return true, nil
 }
 
 // when trggered deploy, the artifact operation will be set to DeployInProgress
-func BatchDeployTenantOps(opIDs []uint, targetTenantID uint, user string) (bool, error) {
+func BatchDeployTenantOps(drID uint, opIDs []uint, targetTenantID uint, user string) (bool, error) {
 	var ops []db.ArtifactTenantOperation
 	var err error
 	if ops, err = queryOpsWithAcco(opIDs); err != nil {
@@ -83,13 +104,14 @@ func BatchDeployTenantOps(opIDs []uint, targetTenantID uint, user string) (bool,
 		return false, err
 	}
 	errOps := make(map[uint]error)
+	successOps := make([]db.ArtifactTenantOperation, 0)
 	for i := range ops {
 		op := &ops[i]
-		if op.DeployState != lifecycle.DeployQueued { // deploy should be QUEUED. i.e.,
-			errOps[op.ID] = fmt.Errorf("artifact operation %d is not in QUEUED state for deploy, current state: %s", op.ID, op.DeployState)
+		if op.DeployState != lifecycle.DeployQueued && op.DeployState != lifecycle.DeployFailed { // deploy should be QUEUED. i.e.,
+			errOps[op.ID] = fmt.Errorf("artifact operation %d is not in QUEUED/FAILED state for deploy, current state: %s", op.ID, op.DeployState)
 			continue
 		}
-		if op.Tenant.ID != targetTenantID { // only queued state can be triggered for deploy
+		if op.Tenant.ID != targetTenantID {
 			errOps[op.ID] = fmt.Errorf("artifact operation %d not match target tenant %s#%d", op.ID, tenant.Name, tenant.ID)
 			continue
 		}
@@ -109,13 +131,34 @@ func BatchDeployTenantOps(opIDs []uint, targetTenantID uint, user string) (bool,
 			errOps[op.ID] = fmt.Errorf("failed to update artifact operation %d: %s", op.ID, err)
 			continue
 		}
+		successOps = append(successOps, *op)
 	}
 	if len(errOps) > 0 {
 		errMsg := "errors occurred during deploy operations:\n"
 		for id, e := range errOps {
 			errMsg += fmt.Sprintf("\t operation %d: %s\n", id, e)
 		}
+		// record condition even if deploy trigger failed
+		condition := db.Condition{
+			DeliveryRequestID: drID,
+			State:             lifecycle.CondError,
+			Message:           fmt.Sprintf("batch deploy failed to trigger in tenant %s. Error: %s", tenant.Name, errMsg),
+		}
+		BatchInsertConditions([]db.Condition{condition})
 		return false, errors.New(errMsg)
+	}
+	// save condition if triggered successfully
+	artifactList := make([]string, 0, len(successOps))
+	for _, op := range successOps {
+		artifactList = append(artifactList, fmt.Sprintf("  - %s (version %s)", op.ArtifactTechID, op.ArtifactVersion))
+	}
+	condition := db.Condition{
+		DeliveryRequestID: successOps[0].DeliveryRequestID,
+		State:             lifecycle.CondSuccess,
+		Message:           fmt.Sprintf("batch deploy triggered in tenant %s by %s.\nArtifacts:\n%s", tenant.Name, user, strings.Join(artifactList, "\n")),
+	}
+	if err := BatchInsertConditions([]db.Condition{condition}); err != nil {
+		return false, fmt.Errorf("failed to save deploy trigger condition: %s", err)
 	}
 	return true, nil
 }

@@ -176,7 +176,7 @@ func HandleImportOps(c *gin.Context) {
 		return
 	}
 	user := service.UserID(c)
-	success, err := service.BatchImportTenantOps(req.OpIDs, req.TargetTenant, user)
+	success, err := service.BatchImportTenantOps(req.DeliveryRequestID, req.OpIDs, req.TargetTenant, user)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
@@ -195,7 +195,7 @@ func HandleDeployOps(c *gin.Context) {
 		return
 	}
 	user := service.UserID(c)
-	success, err := service.BatchDeployTenantOps(req.OpIDs, req.TargetTenant, user)
+	success, err := service.BatchDeployTenantOps(req.DeliveryRequestID, req.OpIDs, req.TargetTenant, user)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
@@ -312,5 +312,5 @@ func HandleCheckTr(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "msg": "valid TR: "+ req.Op.TransportRequestNumber})
+	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "msg": "valid TR: " + req.Op.TransportRequestNumber})
 }
