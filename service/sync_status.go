@@ -149,6 +149,24 @@ func syncDeployState(deliveryRequestID uint, user string) []db.Condition {
 			})
 			continue
 		}
+		// if error, also save to condition
+		if state == lifecycle.DeployFailed {
+			conditions = append(conditions, db.Condition{
+				DeliveryRequestID:         deliveryRequestID,
+				ArtifactTenantOperationID: op.ID,
+				State:                     lifecycle.CondError,
+				Message:                   fmt.Sprintf("artifact %s (version %s) deploy failed in tenant %s. please check in CPI tenant %s", op.ArtifactTechID, op.ArtifactVersion, op.Tenant.Name, op.Tenant.CpiEndpoint.Name),
+			})
+		}
+		// if deployed, save to condition
+		if state == lifecycle.DeployComplete {
+			conditions = append(conditions, db.Condition{
+				DeliveryRequestID:         deliveryRequestID,
+				ArtifactTenantOperationID: op.ID,
+				State:                     lifecycle.CondSuccess,
+				Message:                   fmt.Sprintf("artifact %s (version %s), deployed in %s. deployed by: %s, at: %s", op.ArtifactTechID, op.ArtifactVersion, op.Tenant.Name, rt.DeployedBy, rt.DeployedOn),
+			})
+		}
 	}
 	return conditions
 }
@@ -236,8 +254,8 @@ func syncImportState(deliveryRequestID uint, user string) []db.Condition {
 		for nID, nState := range trNodeStatus[trNumber] {
 			var tenantID uint
 			var ok bool
-			// TODO: skip node that is not in delivery rule. currently will create op for all nodes, see dr id #20
-
+			// TODO: skip node that is not in delivery rule.
+			// currently will create op for all nodes.
 			if tenantID, ok = nodetoTenantID[nID]; !ok {
 				return []db.Condition{
 					{
@@ -266,11 +284,13 @@ func syncImportState(deliveryRequestID uint, user string) []db.Condition {
 				tenantToOps[tenantID][trNumber] = newOp
 			}
 			curOp := tenantToOps[tenantID][trNumber]
+
 			// NOTE: determine import state
 			state := lifecycle.DeriveImport(nState.Status)
-			if state == curOp.ImportState {
+			if state == curOp.ImportState { // skip if state no change
 				continue
 			}
+
 			// update state only if changed
 			curOp.ImportState, curOp.UpdatedBy = state, user
 			// NOTE: set deploy state if import completed
@@ -286,6 +306,15 @@ func syncImportState(deliveryRequestID uint, user string) []db.Condition {
 						Message:                   fmt.Sprintf("error when creating new artifact tenant operation for artifact %s in node %d: %s", curOp.ArtifactTechID, nID, err.Error()),
 					},
 				}
+			}
+			// if imported, save to condition
+			if state == lifecycle.ImportComplete {
+				conditions = append(conditions, db.Condition{
+					DeliveryRequestID:         deliveryRequestID,
+					ArtifactTenantOperationID: curOp.ID,
+					State:                     lifecycle.CondSuccess,
+					Message:                   fmt.Sprintf("artifact %s (version %s) has been successfully imported in tenant %d (node %d), at %s", curOp.ArtifactTechID, curOp.ArtifactVersion, tenantID, nID, nState.UpdatedAt),
+				})
 			}
 			// get error logs if import failed
 			if state == lifecycle.ImportFailed {
