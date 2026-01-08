@@ -8,6 +8,7 @@ import (
 	"mmt-delivery/pkg/cpi"
 	"mmt-delivery/pkg/lifecycle"
 	"mmt-delivery/pkg/tms"
+	"mmt-delivery/pkg/xsuaa"
 	"strings"
 
 	"gorm.io/gorm"
@@ -81,10 +82,11 @@ func BatchImportTenantOps(drID uint, opIDs []uint, targetTenantID uint, user str
 	for _, op := range ops {
 		artifactList = append(artifactList, fmt.Sprintf("  - %s (version %s)", op.ArtifactTechID, op.ArtifactVersion))
 	}
+	userEmail, _ := xsuaa.GetUserEmail(user)
 	condition := db.Condition{
 		DeliveryRequestID: drID,
 		State:             lifecycle.CondSuccess,
-		Message:           fmt.Sprintf("batch import triggered in tenant %s (node %d) by %s. Action ID: %d.\nArtifacts:\n%s", targetTenant.Name, targetNodeID, user, actionID, strings.Join(artifactList, "\n")),
+		Message:           fmt.Sprintf("batch import triggered in tenant %s (node %d) by %s. Action ID: %d.\nArtifacts:\n%s", targetTenant.Name, targetNodeID, userEmail, actionID, strings.Join(artifactList, "\n")),
 	}
 	if err := BatchInsertConditions([]db.Condition{condition}); err != nil {
 		return false, fmt.Errorf("failed to save import trigger condition: %s", err)
@@ -152,10 +154,11 @@ func BatchDeployTenantOps(drID uint, opIDs []uint, targetTenantID uint, user str
 	for _, op := range successOps {
 		artifactList = append(artifactList, fmt.Sprintf("  - %s (version %s)", op.ArtifactTechID, op.ArtifactVersion))
 	}
+	userEmail, _ := xsuaa.GetUserEmail(user)
 	condition := db.Condition{
-		DeliveryRequestID: successOps[0].DeliveryRequestID,
+		DeliveryRequestID: drID,
 		State:             lifecycle.CondSuccess,
-		Message:           fmt.Sprintf("batch deploy triggered in tenant %s by %s.\nArtifacts:\n%s", tenant.Name, user, strings.Join(artifactList, "\n")),
+		Message:           fmt.Sprintf("batch deploy triggered in tenant %s by %s.\nArtifacts:\n%s", tenant.Name, userEmail, strings.Join(artifactList, "\n")),
 	}
 	if err := BatchInsertConditions([]db.Condition{condition}); err != nil {
 		return false, fmt.Errorf("failed to save deploy trigger condition: %s", err)
