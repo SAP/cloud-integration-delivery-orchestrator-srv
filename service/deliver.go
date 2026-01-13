@@ -158,7 +158,7 @@ func BatchDeployTenantOps(drID uint, opIDs []uint, targetTenantID uint, user str
 	condition := db.Condition{
 		DeliveryRequestID: drID,
 		State:             lifecycle.CondSuccess,
-		Message:           fmt.Sprintf("batch deploy triggered in tenant %s by %s.\nArtifacts:\n%s", tenant.Name, userEmail, strings.Join(artifactList, "\n")),
+		Message:           fmt.Sprintf("batch deploy triggered in tenant %s by %s. Artifacts:\n%s", tenant.Name, userEmail, strings.Join(artifactList, "\n")),
 	}
 	if err := BatchInsertConditions([]db.Condition{condition}); err != nil {
 		return false, fmt.Errorf("failed to save deploy trigger condition: %s", err)

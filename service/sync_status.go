@@ -69,7 +69,7 @@ func SyncDeliveryStatus(deliveryRequestID uint, user string) error {
 	}
 	if conditions := syncDeployState(deliveryRequestID, user); len(conditions) != 0 {
 		BatchInsertConditions(conditions)
-		return fmt.Errorf("failed to sync deploy state. see conditions for details")
+		return fmt.Errorf("failed to sync deploy state. see logs for detail")
 	}
 	return nil
 }

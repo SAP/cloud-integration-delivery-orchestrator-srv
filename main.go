@@ -49,6 +49,7 @@ func main() {
 		v1Group.GET("/deliveryRule/:id", handler.GetDeliveryRule)
 		v1Group.POST("/deliveryRule", handler.UpsertDeliveryRule)
 		v1Group.DELETE("/deliveryRule/:id", handler.DeleteDeliveryRule)
+		v1Group.POST("/deliveryRule/ruleCheck", handler.RuleCheck)
 		// delivery request
 		v1Group.GET("/deliveryRequest", handler.GetAllDr)
 		v1Group.GET("/deliveryRequest/:id", handler.GetDeliveryRequest)

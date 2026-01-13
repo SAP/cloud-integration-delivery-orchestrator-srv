@@ -14,7 +14,7 @@ import (
 	"golang.org/x/mod/semver"
 )
 
-func deliveryRuleCheck(op *db.ArtifactTenantOperation, rule *db.DeliveryRule) error {
+func DeliveryRuleCheck(op *db.ArtifactTenantOperation, rule *db.DeliveryRule) error {
 	// artifact version matches pattern in delivery rule
 	if err := checkVersionPattern(op, rule); err != nil {
 		return err
@@ -42,8 +42,8 @@ func checkVersionPattern(op *db.ArtifactTenantOperation, rule *db.DeliveryRule) 
 	}
 	return nil
 }
-func checkVersionDowngradeInTenant(op *db.ArtifactTenantOperation, tenant *db.CpiTenant) error {
-	cli, err := cpi.NewClient(context.Background(), tenant.CpiEndpoint.Name)
+func checkVersionDowngradeInTenant(op *db.ArtifactTenantOperation, targetTenant *db.CpiTenant) error {
+	cli, err := cpi.NewClient(context.Background(), targetTenant.CpiEndpoint.Name)
 	if err != nil {
 		return err
 	}
@@ -71,7 +71,7 @@ func checkVersionDowngradeInTenant(op *db.ArtifactTenantOperation, tenant *db.Cp
 	}
 	if semver.Compare(sourceVersion, targetVersion) < 0 {
 		return fmt.Errorf("artifact %s: delivering version %s to tenant %s would downgrade existing version %s, please confirm",
-			op.ArtifactTechID, sourceVersion, tenant.CpiEndpoint.Name, targetVersion)
+			op.ArtifactTechID, sourceVersion, targetTenant.CpiEndpoint.Name, targetVersion)
 	}
 	return nil
 }

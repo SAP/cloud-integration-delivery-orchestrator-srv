@@ -13,6 +13,36 @@ import (
 	"mmt-delivery/service"
 )
 
+func RuleCheck(c *gin.Context) {
+	var req OpsRequest
+	if err := c.ShouldBindBodyWithJSON(&req); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
+		return
+	}
+	if req.DeliveryRequestID == 0 {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "missing deliveryRequestID"})
+		return
+	}
+	dr, err := service.QueryDrWithAssociations(req.DeliveryRequestID)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
+		return
+	}
+	rule, err := service.GetDeliveryRuleWithAcc(dr.DeliveryRuleID)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
+		return
+	}
+	for i := range req.Ops {
+		op := &req.Ops[i]
+		if err := service.DeliveryRuleCheck(op, &rule); err != nil {
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
+			return
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": "delivery rule check passed"})
+}
+
 // Create or update (upsert)
 func UpsertDeliveryRule(ctx *gin.Context) {
 	var rule db.DeliveryRule

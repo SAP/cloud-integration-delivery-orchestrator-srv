@@ -264,7 +264,7 @@ func InsertTenantOps(drID uint, ops []db.ArtifactTenantOperation, user string) (
 			return nil, fmt.Errorf("failed to load artifact for operation %d: %s", op.ID, err)
 		}
 
-		if err := deliveryRuleCheck(op, &rule); err != nil {
+		if err := DeliveryRuleCheck(op, &rule); err != nil {
 			errOps[op.ID] = err
 			continue
 		}
