@@ -38,6 +38,15 @@ func Destinations() map[string]Destination {
 	return destinationMap
 }
 
+// GetJiraDestination retrieves the JIRA service destination named "JIRA_Service"
+func GetJiraDestination() (*Destination, error) {
+	dest, ok := destinationMap["JIRA_Service"]
+	if !ok {
+		return nil, fmt.Errorf("JIRA destination 'JIRA_Service' not found")
+	}
+	return &dest, nil
+}
+
 func TmsCredential() Credentials {
 	service, err := appEnv.Services.WithName("mmt-tms")
 	if err != nil {
