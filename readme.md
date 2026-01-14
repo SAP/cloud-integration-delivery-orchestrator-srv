@@ -1,22 +1,3 @@
-# maco-deploy
-
-## Progress
-- [x] tms backend
-- [x] cpi backend
-- [x] config api
-- [ ] job api
-- [ ] step api
-- [ ] execution api
-- [ ] user/group api
-- [ ] encrypt password
-- [ ] oauth integration
-- [ ] data checking before stored in db
-- [ ] add retry when failed
-
-## issues
-- how to store iflows with version
-- how to associate execution with job
-
 ## Local Development
 1. prerequisites
     - make sure golang and make are installed
@@ -69,8 +50,8 @@ put the file in root directory of the repo
 
 ## TODO List
 Frontend:
-- status check display in step Component(success, failed, running).
-- datatable should support search.
+[x] status check display in step Component(success, failed, running).
+[x] datatable should support search.
 
 Backend:
 - maco400 authentications

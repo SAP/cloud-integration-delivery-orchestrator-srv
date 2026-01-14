@@ -15,7 +15,7 @@ import (
 )
 
 // import INITIAL artifact operations under target node
-func BatchImportTenantOps(drID uint, opIDs []uint, targetTenantID uint, user string) (bool, error) {
+func BatchImportTenantOps(drID uint, opIDs []uint, targetTenantID uint, userID string) (bool, error) {
 	var ops []db.ArtifactTenantOperation
 	var err error
 	if ops, err = queryOpsWithAcco(opIDs); err != nil {
@@ -49,7 +49,7 @@ func BatchImportTenantOps(drID uint, opIDs []uint, targetTenantID uint, user str
 		}
 		trs = append(trs, trNumber)
 		op.ImportState = lifecycle.ImportInProgress
-		op.UpdatedBy = user
+		op.UpdatedBy = userID
 	}
 	if len(errOps) > 0 {
 		errMsg := "errors occurred during preparing import operations:\n"
@@ -58,35 +58,60 @@ func BatchImportTenantOps(drID uint, opIDs []uint, targetTenantID uint, user str
 		}
 		return false, errors.New(errMsg)
 	}
-	// batch import all trs into target node by one API call
-	tmsCli, err := tms.NewClient(context.Background())
-	if err != nil {
-		return false, fmt.Errorf("error when creating tms client: %s", err)
-	}
-	actionID, err := tmsCli.ImportTransportRequest(targetNodeID, trs)
-	if err != nil {
-		condition := db.Condition{
-			DeliveryRequestID: drID,
-			State:             lifecycle.CondError,
-			Message:           fmt.Sprintf("batch import failed to trigger in tenant %s (node %d). Error: %s", targetTenant.Name, targetNodeID, err.Error()),
-		}
-		BatchInsertConditions([]db.Condition{condition})
-		return false, err
-	}
+	// update ops state to InProgress first
 	err = batchUpdateOps(ops)
 	if err != nil {
 		return false, err
 	}
-	// save condition if triggered successfully
+
+	// trigger async import in goroutine to avoid blocking
+	go func(drID uint, targetNodeID uint, targetTenantName string, trs []uint, ops []db.ArtifactTenantOperation, user string) {
+		tmsCli, err := tms.NewClient(context.Background())
+		if err != nil {
+			condition := db.Condition{
+				DeliveryRequestID: drID,
+				State:             lifecycle.CondError,
+				Message:           fmt.Sprintf("batch import failed to create TMS client for tenant %s (node %d). Error: %s", targetTenantName, targetNodeID, err.Error()),
+			}
+			BatchInsertConditions([]db.Condition{condition})
+			return
+		}
+
+		actionID, err := tmsCli.ImportTransportRequest(targetNodeID, trs)
+		if err != nil {
+			condition := db.Condition{
+				DeliveryRequestID: drID,
+				State:             lifecycle.CondError,
+				Message:           fmt.Sprintf("batch import failed in tenant %s (node %d). Error: %s", targetTenantName, targetNodeID, err.Error()),
+			}
+			BatchInsertConditions([]db.Condition{condition})
+			return
+		}
+
+		// save condition if import succeeded
+		artifactList := make([]string, 0, len(ops))
+		for _, op := range ops {
+			artifactList = append(artifactList, fmt.Sprintf("  - %s (version %s)", op.ArtifactTechID, op.ArtifactVersion))
+		}
+		userEmail, _ := xsuaa.GetUserEmail(user)
+		condition := db.Condition{
+			DeliveryRequestID: drID,
+			State:             lifecycle.CondSuccess,
+			Message:           fmt.Sprintf("batch import completed in tenant %s (node %d) by %s. Action ID: %d.\nArtifacts:\n%s", targetTenantName, targetNodeID, userEmail, actionID, strings.Join(artifactList, "\n")),
+		}
+		BatchInsertConditions([]db.Condition{condition})
+	}(drID, targetNodeID, targetTenant.Name, trs, ops, userID)
+
+	// save condition for async trigger
 	artifactList := make([]string, 0, len(ops))
 	for _, op := range ops {
 		artifactList = append(artifactList, fmt.Sprintf("  - %s (version %s)", op.ArtifactTechID, op.ArtifactVersion))
 	}
-	userEmail, _ := xsuaa.GetUserEmail(user)
+	userEmail, _ := xsuaa.GetUserEmail(userID)
 	condition := db.Condition{
 		DeliveryRequestID: drID,
 		State:             lifecycle.CondSuccess,
-		Message:           fmt.Sprintf("batch import triggered in tenant %s (node %d) by %s. Action ID: %d.\nArtifacts:\n%s", targetTenant.Name, targetNodeID, userEmail, actionID, strings.Join(artifactList, "\n")),
+		Message:           fmt.Sprintf("batch import async triggered in tenant %s (node %d) by %s. Artifacts:\n%s", targetTenant.Name, targetNodeID, userEmail, strings.Join(artifactList, "\n")),
 	}
 	if err := BatchInsertConditions([]db.Condition{condition}); err != nil {
 		return false, fmt.Errorf("failed to save import trigger condition: %s", err)
@@ -95,7 +120,7 @@ func BatchImportTenantOps(drID uint, opIDs []uint, targetTenantID uint, user str
 }
 
 // when trggered deploy, the artifact operation will be set to DeployInProgress
-func BatchDeployTenantOps(drID uint, opIDs []uint, targetTenantID uint, user string) (bool, error) {
+func BatchDeployTenantOps(drID uint, opIDs []uint, targetTenantID uint, userID string) (bool, error) {
 	var ops []db.ArtifactTenantOperation
 	var err error
 	if ops, err = queryOpsWithAcco(opIDs); err != nil {
@@ -106,7 +131,8 @@ func BatchDeployTenantOps(drID uint, opIDs []uint, targetTenantID uint, user str
 		return false, err
 	}
 	errOps := make(map[uint]error)
-	successOps := make([]db.ArtifactTenantOperation, 0)
+	validOps := make([]db.ArtifactTenantOperation, 0)
+	// pre-check before deploy
 	for i := range ops {
 		op := &ops[i]
 		if op.DeployState != lifecycle.DeployQueued && op.DeployState != lifecycle.DeployFailed { // deploy should be QUEUED. i.e.,
@@ -117,48 +143,84 @@ func BatchDeployTenantOps(drID uint, opIDs []uint, targetTenantID uint, user str
 			errOps[op.ID] = fmt.Errorf("artifact operation %d not match target tenant %s#%d", op.ID, tenant.Name, tenant.ID)
 			continue
 		}
-		cpiCli, err := cpi.NewClient(context.Background(), op.Tenant.CpiEndpoint.Name)
-		if err != nil {
-			errOps[op.ID] = fmt.Errorf("failed to create cpi client for tenant %s: %s", op.Tenant.Name, err)
-			continue
-		}
-		_, err = cpiCli.DeployArtifact(op.ArtifactTechID, op.ArtifactVersion, op.Artifact.Type)
-		if err != nil {
-			errOps[op.ID] = fmt.Errorf("failed to deploy artifact %s:%s to tenant %s: %s", op.ArtifactTechID, op.ArtifactVersion, op.Tenant.Name, err)
-			continue
-		}
 		op.DeployState = lifecycle.DeployInProgress
-		op.UpdatedBy = user
-		if err := db.Conn().Model(op).Updates(op).Error; err != nil {
-			errOps[op.ID] = fmt.Errorf("failed to update artifact operation %d: %s", op.ID, err)
-			continue
-		}
-		successOps = append(successOps, *op)
+		op.UpdatedBy = userID
+		validOps = append(validOps, *op)
 	}
 	if len(errOps) > 0 {
-		errMsg := "errors occurred during deploy operations:\n"
+		errMsg := "errors occurred during preparing deploy operations:\n"
 		for id, e := range errOps {
-			errMsg += fmt.Sprintf("\t operation %d: %s\n", id, e)
+			errMsg += fmt.Sprintf("\toperation #%d: %s\n", id, e)
 		}
-		// record condition even if deploy trigger failed
-		condition := db.Condition{
-			DeliveryRequestID: drID,
-			State:             lifecycle.CondError,
-			Message:           fmt.Sprintf("batch deploy failed to trigger in tenant %s. Error: %s", tenant.Name, errMsg),
-		}
-		BatchInsertConditions([]db.Condition{condition})
 		return false, errors.New(errMsg)
 	}
-	// save condition if triggered successfully
-	artifactList := make([]string, 0, len(successOps))
-	for _, op := range successOps {
+
+	// update ops state to InProgress
+	err = batchUpdateOps(validOps)
+	if err != nil {
+		return false, err
+	}
+
+	// trigger async deploy in goroutine to avoid blocking
+	go func(drID uint, tenant *db.CpiTenant, ops []db.ArtifactTenantOperation, user string) {
+		errOps := make(map[uint]error)
+		successOps := make([]db.ArtifactTenantOperation, 0)
+
+		for i := range ops {
+			op := &ops[i]
+			cpiCli, err := cpi.NewClient(context.Background(), op.Tenant.CpiEndpoint.Name)
+			if err != nil {
+				errOps[op.ID] = fmt.Errorf("failed to create cpi client for tenant %s: %s", op.Tenant.Name, err)
+				continue
+			}
+			_, err = cpiCli.DeployArtifact(op.ArtifactTechID, op.ArtifactVersion, op.Artifact.Type)
+			if err != nil {
+				errOps[op.ID] = fmt.Errorf("failed to deploy artifact %s:%s to tenant %s: %s", op.ArtifactTechID, op.ArtifactVersion, op.Tenant.Name, err)
+				continue
+			}
+			successOps = append(successOps, *op)
+		}
+
+		// record conditions based on results
+		if len(errOps) > 0 {
+			errMsg := "errors occurred during async deploy operations:\n"
+			for id, e := range errOps {
+				errMsg += fmt.Sprintf("\toperation %d: %s\n", id, e)
+			}
+			condition := db.Condition{
+				DeliveryRequestID: drID,
+				State:             lifecycle.CondError,
+				Message:           fmt.Sprintf("batch deploy failed in tenant %s. Error: %s", tenant.Name, errMsg),
+			}
+			BatchInsertConditions([]db.Condition{condition})
+		}
+
+		// save condition for successful deployments
+		if len(successOps) > 0 {
+			artifactList := make([]string, 0, len(successOps))
+			for _, op := range successOps {
+				artifactList = append(artifactList, fmt.Sprintf("  - %s (version %s)", op.ArtifactTechID, op.ArtifactVersion))
+			}
+			userEmail, _ := xsuaa.GetUserEmail(user)
+			condition := db.Condition{
+				DeliveryRequestID: drID,
+				State:             lifecycle.CondSuccess,
+				Message:           fmt.Sprintf("batch deploy completed in tenant %s by %s. Artifacts:\n%s", tenant.Name, userEmail, strings.Join(artifactList, "\n")),
+			}
+			BatchInsertConditions([]db.Condition{condition})
+		}
+	}(drID, tenant, validOps, userID)
+
+	// save condition for async trigger
+	artifactList := make([]string, 0, len(validOps))
+	for _, op := range validOps {
 		artifactList = append(artifactList, fmt.Sprintf("  - %s (version %s)", op.ArtifactTechID, op.ArtifactVersion))
 	}
-	userEmail, _ := xsuaa.GetUserEmail(user)
+	userEmail, _ := xsuaa.GetUserEmail(userID)
 	condition := db.Condition{
 		DeliveryRequestID: drID,
 		State:             lifecycle.CondSuccess,
-		Message:           fmt.Sprintf("batch deploy triggered in tenant %s by %s. Artifacts:\n%s", tenant.Name, userEmail, strings.Join(artifactList, "\n")),
+		Message:           fmt.Sprintf("batch deploy async triggered in tenant %s by %s. Artifacts:\n%s", tenant.Name, userEmail, strings.Join(artifactList, "\n")),
 	}
 	if err := BatchInsertConditions([]db.Condition{condition}); err != nil {
 		return false, fmt.Errorf("failed to save deploy trigger condition: %s", err)

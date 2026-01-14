@@ -150,7 +150,7 @@ type DeliverOpRequest struct {
 	DeliveryRequestID uint   `json:"deliveryRequestID"`
 }
 
-// check before deliver(import/deploy) ops
+// General checks of dr before deliver(import/deploy) ops, like a hook
 func preDeliverCheck(req DeliverOpRequest) error {
 	if len(req.OpIDs) == 0 || req.TargetTenant == 0 || req.DeliveryRequestID == 0 {
 		return fmt.Errorf("missing opIDs, targetNode or deliveryRequestID")

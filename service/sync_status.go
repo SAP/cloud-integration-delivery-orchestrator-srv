@@ -65,11 +65,9 @@ func SyncDeliveryStatus(deliveryRequestID uint, user string) error {
 	// sync import/deploy state after approval
 	if conditions := syncImportState(deliveryRequestID, user); len(conditions) != 0 {
 		BatchInsertConditions(conditions)
-		return fmt.Errorf("failed to sync import state. see conditions for details")
 	}
 	if conditions := syncDeployState(deliveryRequestID, user); len(conditions) != 0 {
 		BatchInsertConditions(conditions)
-		return fmt.Errorf("failed to sync deploy state. see logs for detail")
 	}
 	return nil
 }

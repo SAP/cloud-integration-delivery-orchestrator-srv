@@ -328,6 +328,7 @@ func (c *CpiClient) DeployScriptCollection(scriptCollectionID string, scriptColl
 }
 
 // NOTE: currently only support iflow and script collection deployment
+// return taskID for checking deploy status	
 func (c *CpiClient) DeployArtifact(artifactID, artifactVersion string, artifactType consts.ArtifactType) (string, error) {
 	switch artifactType {
 	case consts.Artifact_Type_Iflow:
