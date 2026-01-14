@@ -104,6 +104,7 @@ type DeliveryRule struct {
 	SourceTenantID uint
 	SourceTenant   CpiTenant `gorm:"foreignKey:SourceTenantID"`
 	SkipApprove    bool      // enable skip approval, directly process delivery
+	RequireJira    bool      // require jira link when creating delivery request
 
 	Active    bool
 	CreatedBy string

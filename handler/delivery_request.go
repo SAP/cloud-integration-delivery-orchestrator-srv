@@ -28,8 +28,8 @@ func CreateDr(c *gin.Context) {
 		return
 	}
 
-	if !checkJIRA(dr.JiraLink) {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "invalid jira link"})
+	if err := checkJIRA(dr.JiraLink, dr.DeliveryRule); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
 		return
 	}
 	var rule db.DeliveryRule
@@ -68,11 +68,16 @@ func UpdateDr(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "only pending or waiting approval delivery request can be updated"})
 		return
 	}
+	rule, err := service.GetDeliveryRuleWithAcc(dr.DeliveryRule.ID)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
+		return
+	}
 	user := service.UserID(c)
 	// check and update JIRA
 	if existing.JiraLink != dr.JiraLink {
-		if !checkJIRA(dr.JiraLink) {
-			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "invalid jira link"})
+		if err := checkJIRA(dr.JiraLink, rule); err != nil {
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
 			return
 		}
 		existing.JiraLink = dr.JiraLink
@@ -136,11 +141,11 @@ func DeleteDr(c *gin.Context) {
 }
 
 // TODO: finish this
-func checkJIRA(jira string) bool {
-	if jira == "" {
-		return false
+func checkJIRA(jira string, rule db.DeliveryRule) error {
+	if jira == "" && rule.RequireJira {
+		return fmt.Errorf("jira link is required")
 	}
-	return true
+	return nil
 }
 
 // used for both import and deploy
