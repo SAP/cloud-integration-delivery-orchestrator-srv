@@ -3,7 +3,9 @@ package handler
 import (
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -140,11 +142,35 @@ func DeleteDr(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": id})
 }
 
-// TODO: finish this
+// checkJIRA validates JIRA link format
+// Expected format: https://jira.tools.sap/browse/<ISSUE-KEY>
 func checkJIRA(jira string, rule db.DeliveryRule) error {
+	// Check if JIRA is required but not provided
 	if jira == "" && rule.RequireJira {
-		return fmt.Errorf("jira link is required")
+		return fmt.Errorf("jira link is required when delivery rule requires JIRA. Example: https://jira.tools.sap/browse/<ISSUE-KEY>")
 	}
+
+	// If JIRA is provided, validate its format
+	if jira != "" {
+		// Check if it's a valid URL
+		if !strings.HasPrefix(jira, "http://") && !strings.HasPrefix(jira, "https://") {
+			return fmt.Errorf("jira link must start with http:// or https://. Example: https://jira.tools.sap/browse/<ISSUE-KEY>")
+		}
+
+		// Validate JIRA URL format using regex
+		// Pattern: https://<domain>/browse/<PROJECT-ID>
+		// PROJECT-ID format: one or more uppercase letters, hyphen, one or more digits
+		pattern := `^https?://[^/]+/browse/[A-Z]+-\d+$`
+		matched, err := regexp.MatchString(pattern, jira)
+		if err != nil {
+			return fmt.Errorf("failed to validate jira link format")
+		}
+
+		if !matched {
+			return fmt.Errorf("invalid jira link format. Expected format: https://jira.tools.sap/browse/<ISSUE-KEY>)")
+		}
+	}
+
 	return nil
 }
 

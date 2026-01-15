@@ -6,8 +6,11 @@ import (
 	"mmt-delivery/consts"
 	"mmt-delivery/db"
 	"mmt-delivery/pkg/cpi"
+	"mmt-delivery/pkg/env"
 	"mmt-delivery/pkg/lifecycle"
+	"mmt-delivery/pkg/notify"
 	"mmt-delivery/pkg/tms"
+	"regexp"
 	"strings"
 )
 
@@ -307,12 +310,27 @@ func syncImportState(deliveryRequestID uint, user string) []db.Condition {
 			}
 			// if imported, save to condition
 			if state == lifecycle.ImportComplete {
+				conditionMsg := fmt.Sprintf("artifact %s (version %s) has been successfully imported in tenant %d (node %d), at %s", curOp.ArtifactTechID, curOp.ArtifactVersion, tenantID, nID, nState.UpdatedAt)
 				conditions = append(conditions, db.Condition{
 					DeliveryRequestID:         deliveryRequestID,
 					ArtifactTenantOperationID: curOp.ID,
 					State:                     lifecycle.CondSuccess,
-					Message:                   fmt.Sprintf("artifact %s (version %s) has been successfully imported in tenant %d (node %d), at %s", curOp.ArtifactTechID, curOp.ArtifactVersion, tenantID, nID, nState.UpdatedAt),
+					Message:                   conditionMsg,
 				})
+
+				// Send notification to JIRA if configured
+				if dr.JiraLink != "" {
+					go func(jiraLink string, drID uint, message string) {
+						issueKey := extractJiraIssueKey(jiraLink)
+						if issueKey == "" {
+							env.Logger().Warn("Failed to extract JIRA issue key from link: %s", jiraLink)
+							return
+						}
+						if err := notify.AddDeliveryComment(issueKey, drID, message, "Imported"); err != nil {
+							env.Logger().Error("Failed to add JIRA comment for import success: %s", err)
+						}
+					}(dr.JiraLink, deliveryRequestID, conditionMsg)
+				}
 			}
 			// get error logs if import failed
 			if state == lifecycle.ImportFailed {
@@ -334,4 +352,21 @@ func syncImportState(deliveryRequestID uint, user string) []db.Condition {
 
 	}
 	return conditions
+}
+
+// extractJiraIssueKey extracts JIRA issue key from JIRA URL
+// Example: https://jira.tools.sap/browse/MACOMMT-32980 -> MACOMMT-32980
+func extractJiraIssueKey(jiraURL string) string {
+	// Pattern to match JIRA URLs like:
+	// https://jira.tools.sap/browse/MACOMMT-32980
+	// https://domain.atlassian.net/browse/PROJ-123
+	// Extract issue key in format: PROJECT-ID (uppercase letters, hyphen, digits)
+	re := regexp.MustCompile(`/browse/([A-Z]+-\d+)`)
+	matches := re.FindStringSubmatch(jiraURL)
+	if len(matches) > 1 {
+		return matches[1]
+	}
+
+	env.Logger().Warn("Failed to extract JIRA issue key from URL: %s", jiraURL)
+	return ""
 }
