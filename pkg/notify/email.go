@@ -1,19 +1,21 @@
 package notify
 
 import (
+	"crypto/tls"
 	"fmt"
 	"mmt-delivery/pkg/env"
-	"net/smtp"
 	"strings"
+
+	"gopkg.in/gomail.v2"
 )
 
 // EmailClient represents an email client
 type EmailClient struct {
-	smtpHost     string
-	smtpPort     string
-	username     string
-	password     string
-	fromAddress  string
+	smtpHost    string
+	smtpPort    string
+	username    string
+	password    string
+	fromAddress string
 }
 
 // EmailMessage represents an email message
@@ -80,35 +82,41 @@ func (c *EmailClient) Send(msg *EmailMessage) error {
 		return fmt.Errorf("no recipients specified")
 	}
 
-	// Construct email headers
-	var headers []string
-	headers = append(headers, fmt.Sprintf("From: %s", c.fromAddress))
-	headers = append(headers, fmt.Sprintf("To: %s", strings.Join(msg.To, ";")))
-	if len(msg.Cc) > 0 {
-		headers = append(headers, fmt.Sprintf("Cc: %s", strings.Join(msg.Cc, ";")))
-	}
-	headers = append(headers, fmt.Sprintf("Subject: %s", msg.Subject))
-
-	// Set content type
-	if msg.IsHTML {
-		headers = append(headers, "MIME-version: 1.0")
-		headers = append(headers, "Content-Type: text/html; charset=\"UTF-8\"")
-	} else {
-		headers = append(headers, "MIME-version: 1.0")
-		headers = append(headers, "Content-Type: text/plain; charset=\"UTF-8\"")
-	}
-
-	// Combine headers and body
-	message := strings.Join(headers, "\r\n") + "\r\n\r\n" + msg.Body
-
-	// SMTP authentication
-	auth := smtp.PlainAuth("", c.username, c.password, c.smtpHost)
-
-	// Send email
+	// Log connection details for debugging
 	smtpAddr := fmt.Sprintf("%s:%s", c.smtpHost, c.smtpPort)
-	err := smtp.SendMail(smtpAddr, auth, c.fromAddress, msg.To, []byte(message))
-	if err != nil {
-		env.Logger().Error("Failed to send email: %s", err)
+	env.Logger().Info("Attempting to send email via SMTP: %s, from: %s, to: %v", smtpAddr, c.fromAddress, msg.To)
+
+	// Create a new message
+	m := gomail.NewMessage()
+	m.SetHeader("From", c.fromAddress)
+	m.SetHeader("To", msg.To...)
+	if len(msg.Cc) > 0 {
+		m.SetHeader("Cc", msg.Cc...)
+	}
+	m.SetHeader("Subject", msg.Subject)
+
+	// Set body
+	if msg.IsHTML {
+		m.SetBody("text/html", msg.Body)
+	} else {
+		m.SetBody("text/plain", msg.Body)
+	}
+
+	// Create SMTP dialer with TLS support
+	port := 587
+	if _, err := fmt.Sscanf(c.smtpPort, "%d", &port); err != nil {
+		env.Logger().Warn("Failed to parse port %s, using default 587", c.smtpPort)
+	}
+
+	dialer := gomail.NewDialer(c.smtpHost, port, c.username, c.password)
+	dialer.TLSConfig = &tls.Config{
+		InsecureSkipVerify: false,
+		ServerName:         c.smtpHost,
+	}
+
+	// Send email with timeout
+	if err := dialer.DialAndSend(m); err != nil {
+		env.Logger().Error("Failed to send email via %s: %s", smtpAddr, err)
 		return fmt.Errorf("failed to send email: %s", err)
 	}
 
