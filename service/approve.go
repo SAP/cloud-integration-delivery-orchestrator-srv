@@ -31,20 +31,22 @@ func RequestApproval(drID uint, currentUserID string, approvers []string, commen
 	if err != nil {
 		return err
 	}
-	// send email to approver, update JIRA
+	// send email to approver asynchronously
 	sendMailto := sendMailto(dr.Approvers, approvers)
 	if len(sendMailto) > 0 {
-		if err := notify.SendApprovalRequest(sendMailto, drID, requesterEmail, comment); err != nil {
-			// Log email error as condition, but don't fail the request
-			env.Logger().Error("Failed to send approval request email: %s", err)
-			_ = BatchInsertConditions([]db.Condition{
-				{
-					DeliveryRequestID: drID,
-					State:             lifecycle.CondWarn,
-					Message:           fmt.Sprintf("Failed to send approval request email to approvers: %s", err.Error()),
-				},
-			})
-		}
+		go func() {
+			if err := notify.SendApprovalRequest(sendMailto, drID, requesterEmail, comment); err != nil {
+				// Log email error as condition
+				env.Logger().Error("Failed to send approval request email: %s", err)
+				_ = BatchInsertConditions([]db.Condition{
+					{
+						DeliveryRequestID: drID,
+						State:             lifecycle.CondWarn,
+						Message:           fmt.Sprintf("Failed to send approval request email to approvers: %s", err.Error()),
+					},
+				})
+			}
+		}()
 	}
 	if err := db.Conn().Model(&dr).Updates(db.DeliveryRequest{
 		AggregateStatus: lifecycle.AggWaitingApprove,
@@ -83,23 +85,23 @@ func Approve(drID uint, approverID string) (*db.DeliveryRequest, error) {
 		return nil, fmt.Errorf("cannot approve your own delivery request")
 	}
 	now := time.Now()
-	// send email notification
-	if err := notify.SendDeliveryNotification(
-		[]string{approverID, dr.CreatedBy, dr.UpdatedBy},
-		drID,
-		"Approved",
-		fmt.Sprintf("Delivery request #%d has been approved by %s", drID, approverID),
-	); err != nil {
-		// Log email error as condition, but don't fail the approval
-		env.Logger().Error("Failed to send approval notification email: %s", err)
-		_ = BatchInsertConditions([]db.Condition{
-			{
-				DeliveryRequestID: drID,
-				State:             lifecycle.CondWarn,
-				Message:           fmt.Sprintf("Failed to send approval notification email: %s", err.Error()),
-			},
-		})
-	}
+	// send email notification asynchronously
+	go func() {
+		message := fmt.Sprintf("Delivery request #%d has been approved by %s", drID, approverID)
+		if err := notify.SendDeliveryNotification(
+			[]string{approverID, dr.CreatedBy, dr.UpdatedBy}, drID, "Approved", message,
+		); err != nil {
+			// Log email error as condition
+			env.Logger().Error("Failed to send approval notification email: %s", err)
+			_ = BatchInsertConditions([]db.Condition{
+				{
+					DeliveryRequestID: drID,
+					State:             lifecycle.CondWarn,
+					Message:           fmt.Sprintf("Failed to send approval notification email: %s", err.Error()),
+				},
+			})
+		}
+	}()
 	// no need to call TrExist, for it will be done in update/insert ops.
 	if err := db.Conn().Model(&dr).Updates(db.DeliveryRequest{
 		AggregateStatus: lifecycle.AggAwaitingImport,
