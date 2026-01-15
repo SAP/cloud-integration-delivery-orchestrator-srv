@@ -33,7 +33,8 @@ func BatchImportTenantOps(drID uint, opIDs []uint, targetTenantID uint, userID s
 	// pre-check before import
 	for i := range ops {
 		op := &ops[i]
-		if op.ImportState != lifecycle.ImportQueued || op.Tenant.TransportNodeID != targetNodeID { // only queued(INITIAL) state can be triggered for import
+		// only queued(INITIAL), Failed(enable re-import) state can be triggered for import
+		if (op.ImportState != lifecycle.ImportQueued && op.ImportState != lifecycle.ImportFailed) || op.Tenant.TransportNodeID != targetNodeID { 
 			errOps[op.ID] = fmt.Errorf("cannot import artifact operation #%d(at TMS node %d) for target TMS node %d. Import State: %s", op.ID, op.Tenant.TransportNodeID, targetNodeID, op.ImportState)
 			continue
 		}

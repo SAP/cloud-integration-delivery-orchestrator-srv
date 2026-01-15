@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"mmt-delivery/db"
+	"mmt-delivery/pkg/env"
 	"mmt-delivery/pkg/lifecycle"
 	"mmt-delivery/pkg/notify"
 	"mmt-delivery/pkg/xsuaa"
@@ -26,10 +27,24 @@ func RequestApproval(drID uint, currentUserID string, approvers []string, commen
 	if dr.AggregateStatus != lifecycle.AggPending && dr.AggregateStatus != lifecycle.AggWaitingApprove {
 		return fmt.Errorf("only pending delivery request can be submitted for approval, current status: %s", dr.AggregateStatus)
 	}
-	// TODO: send email to approver, update JIRA
+	requesterEmail, err := xsuaa.GetUserEmail(currentUserID)
+	if err != nil {
+		return err
+	}
+	// send email to approver, update JIRA
 	sendMailto := sendMailto(dr.Approvers, approvers)
-	if err := notify.SendEmail(sendMailto); err != nil {
-		return fmt.Errorf("failed to nofity approvers via email: %s", err.Error())
+	if len(sendMailto) > 0 {
+		if err := notify.SendApprovalRequest(sendMailto, drID, requesterEmail, comment); err != nil {
+			// Log email error as condition, but don't fail the request
+			env.Logger().Error("Failed to send approval request email: %s", err)
+			_ = BatchInsertConditions([]db.Condition{
+				{
+					DeliveryRequestID: drID,
+					State:             lifecycle.CondWarn,
+					Message:           fmt.Sprintf("Failed to send approval request email to approvers: %s", err.Error()),
+				},
+			})
+		}
 	}
 	if err := db.Conn().Model(&dr).Updates(db.DeliveryRequest{
 		AggregateStatus: lifecycle.AggWaitingApprove,
@@ -38,15 +53,12 @@ func RequestApproval(drID uint, currentUserID string, approvers []string, commen
 	}).Error; err != nil {
 		return fmt.Errorf("failed to update delivery request status: %s", err.Error())
 	}
-	userEmail, err := xsuaa.GetUserEmail(currentUserID)
-	if err != nil {
-		return err
-	}
+
 	if err := BatchInsertConditions([]db.Condition{
 		{
 			DeliveryRequestID: drID,
 			State:             lifecycle.CondSuccess,
-			Message:           fmt.Sprintf("Delivery request submitted for approval by %s", userEmail),
+			Message:           fmt.Sprintf("Delivery request submitted for approval by %s", requesterEmail),
 		},
 	}); err != nil {
 		return fmt.Errorf("failed to update condition: %s", err.Error())
@@ -71,9 +83,22 @@ func Approve(drID uint, approverID string) (*db.DeliveryRequest, error) {
 		return nil, fmt.Errorf("cannot approve your own delivery request")
 	}
 	now := time.Now()
-	// TODO: send email, update JIRA
-	if err := notify.SendEmail([]string{approverID, dr.CreatedBy, dr.UpdatedBy}); err != nil {
-		return nil, fmt.Errorf("failed to nofity approvers via email: %s", err.Error())
+	// send email notification
+	if err := notify.SendDeliveryNotification(
+		[]string{approverID, dr.CreatedBy, dr.UpdatedBy},
+		drID,
+		"Approved",
+		fmt.Sprintf("Delivery request #%d has been approved by %s", drID, approverID),
+	); err != nil {
+		// Log email error as condition, but don't fail the approval
+		env.Logger().Error("Failed to send approval notification email: %s", err)
+		_ = BatchInsertConditions([]db.Condition{
+			{
+				DeliveryRequestID: drID,
+				State:             lifecycle.CondWarn,
+				Message:           fmt.Sprintf("Failed to send approval notification email: %s", err.Error()),
+			},
+		})
 	}
 	// no need to call TrExist, for it will be done in update/insert ops.
 	if err := db.Conn().Model(&dr).Updates(db.DeliveryRequest{
@@ -113,7 +138,13 @@ func sendMailto(existAppr []string, newAppr []string) []string {
 	sendMailto := make([]string, 0)
 	for _, appr := range newAppr {
 		if _, ok := markSent[appr]; !ok {
-			sendMailto = append(sendMailto, appr)
+			// Convert XSUAA user ID to email address
+			email, err := xsuaa.GetUserEmail(appr)
+			if err != nil {
+				env.Logger().Error("Failed to get email for user %s: %s", appr, err)
+				continue // skip if failed to get email
+			}
+			sendMailto = append(sendMailto, email)
 		}
 	}
 	return sendMailto

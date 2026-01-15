@@ -38,13 +38,18 @@ func Destinations() map[string]Destination {
 	return destinationMap
 }
 
-// GetJiraDestination retrieves the JIRA service destination named "JIRA_Service"
-func GetJiraDestination() (*Destination, error) {
-	dest, ok := destinationMap["JIRA_Service"]
+// GetDestination retrieves a destination by name
+func GetDestination(name string) (*Destination, error) {
+	dest, ok := destinationMap[name]
 	if !ok {
-		return nil, fmt.Errorf("JIRA destination 'JIRA_Service' not found")
+		return nil, fmt.Errorf("destination '%s' not found", name)
 	}
 	return &dest, nil
+}
+
+// GetJiraDestination retrieves the JIRA service destination named "JIRA_Service"
+func GetJiraDestination() (*Destination, error) {
+	return GetDestination("JIRA_Service")
 }
 
 func TmsCredential() Credentials {
@@ -123,6 +128,7 @@ type Destination struct {
 	TokenServiceURL     string `json:"tokenServiceURL"`
 	User                string `json:"user"`
 	Password            string `json:"password"`
+	Port                string `json:"port"` // SMTP port, etc.
 }
 
 // Get Destinations(including credentials)

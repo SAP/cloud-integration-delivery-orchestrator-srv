@@ -47,7 +47,9 @@ func QueryDrWithAssociations(drID uint) (dr *db.DeliveryRequest, err error) {
 		Preload("DeliveryRule").
 		Preload("ArtifactTenantOperations.Artifact").
 		Preload("ArtifactTenantOperations.Tenant").
-		Preload("Conditions").
+		Preload("Conditions", func(db *gorm.DB) *gorm.DB {
+			return db.Order("created_at asc")
+		}).
 		First(&dr, drID).Error; err != nil {
 		return nil, fmt.Errorf("failed to query delivery request %d: %w", drID, err)
 	}
