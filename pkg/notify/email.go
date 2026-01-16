@@ -84,7 +84,8 @@ func (c *EmailClient) Send(msg *EmailMessage) error {
 
 	// Log connection details for debugging
 	smtpAddr := fmt.Sprintf("%s:%s", c.smtpHost, c.smtpPort)
-	env.Logger().Info("Attempting to send email via SMTP: %s, from: %s, to: %v", smtpAddr, c.fromAddress, msg.To)
+	env.Logger().Info("Attempting to send email via SMTP: %s", smtpAddr)
+	env.Logger().Info("SMTP auth user: %s (password length: %d)", c.username, len(c.password))
 
 	// Create a new message
 	m := gomail.NewMessage()
