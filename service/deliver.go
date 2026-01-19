@@ -34,7 +34,7 @@ func BatchImportTenantOps(drID uint, opIDs []uint, targetTenantID uint, userID s
 	for i := range ops {
 		op := &ops[i]
 		// only queued(INITIAL), Failed(enable re-import) state can be triggered for import
-		if (op.ImportState != lifecycle.ImportQueued && op.ImportState != lifecycle.ImportFailed) || op.Tenant.TransportNodeID != targetNodeID { 
+		if (op.ImportState != lifecycle.ImportQueued && op.ImportState != lifecycle.ImportFailed) || op.Tenant.TransportNodeID != targetNodeID {
 			errOps[op.ID] = fmt.Errorf("cannot import artifact operation #%d(at TMS node %d) for target TMS node %d. Import State: %s", op.ID, op.Tenant.TransportNodeID, targetNodeID, op.ImportState)
 			continue
 		}
@@ -103,20 +103,6 @@ func BatchImportTenantOps(drID uint, opIDs []uint, targetTenantID uint, userID s
 		BatchInsertConditions([]db.Condition{condition})
 	}(drID, targetNodeID, targetTenant.Name, trs, ops, userID)
 
-	// save condition for async trigger
-	artifactList := make([]string, 0, len(ops))
-	for _, op := range ops {
-		artifactList = append(artifactList, fmt.Sprintf("  - %s (version %s)", op.ArtifactTechID, op.ArtifactVersion))
-	}
-	userEmail, _ := xsuaa.GetUserEmail(userID)
-	condition := db.Condition{
-		DeliveryRequestID: drID,
-		State:             lifecycle.CondSuccess,
-		Message:           fmt.Sprintf("batch import async triggered in tenant %s (node %d) by %s. Artifacts:\n%s", targetTenant.Name, targetNodeID, userEmail, strings.Join(artifactList, "\n")),
-	}
-	if err := BatchInsertConditions([]db.Condition{condition}); err != nil {
-		return false, fmt.Errorf("failed to save import trigger condition: %s", err)
-	}
 	return true, nil
 }
 
@@ -206,26 +192,12 @@ func BatchDeployTenantOps(drID uint, opIDs []uint, targetTenantID uint, userID s
 			condition := db.Condition{
 				DeliveryRequestID: drID,
 				State:             lifecycle.CondSuccess,
-				Message:           fmt.Sprintf("batch deploy completed in tenant %s by %s. Artifacts:\n%s", tenant.Name, userEmail, strings.Join(artifactList, "\n")),
+				Message:           fmt.Sprintf("batch deploy triggered in tenant %s by %s. Artifacts:\n%s", tenant.Name, userEmail, strings.Join(artifactList, "\n")),
 			}
 			BatchInsertConditions([]db.Condition{condition})
 		}
 	}(drID, tenant, validOps, userID)
 
-	// save condition for async trigger
-	artifactList := make([]string, 0, len(validOps))
-	for _, op := range validOps {
-		artifactList = append(artifactList, fmt.Sprintf("  - %s (version %s)", op.ArtifactTechID, op.ArtifactVersion))
-	}
-	userEmail, _ := xsuaa.GetUserEmail(userID)
-	condition := db.Condition{
-		DeliveryRequestID: drID,
-		State:             lifecycle.CondSuccess,
-		Message:           fmt.Sprintf("batch deploy async triggered in tenant %s by %s. Artifacts:\n%s", tenant.Name, userEmail, strings.Join(artifactList, "\n")),
-	}
-	if err := BatchInsertConditions([]db.Condition{condition}); err != nil {
-		return false, fmt.Errorf("failed to save deploy trigger condition: %s", err)
-	}
 	return true, nil
 }
 
