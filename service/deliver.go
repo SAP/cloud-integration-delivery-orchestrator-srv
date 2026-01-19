@@ -98,7 +98,7 @@ func BatchImportTenantOps(drID uint, opIDs []uint, targetTenantID uint, userID s
 		condition := db.Condition{
 			DeliveryRequestID: drID,
 			State:             lifecycle.CondSuccess,
-			Message:           fmt.Sprintf("batch import completed in tenant %s (node %d) by %s. Action ID: %d.\nArtifacts:\n%s", targetTenantName, targetNodeID, userEmail, actionID, strings.Join(artifactList, "\n")),
+			Message:           fmt.Sprintf("batch import triggered in tenant %s (node %d) by %s. Action ID: %d.\nArtifacts:\n%s", targetTenantName, targetNodeID, userEmail, actionID, strings.Join(artifactList, "\n")),
 		}
 		BatchInsertConditions([]db.Condition{condition})
 	}(drID, targetNodeID, targetTenant.Name, trs, ops, userID)
