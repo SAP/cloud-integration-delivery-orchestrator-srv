@@ -251,7 +251,7 @@ func syncImportState(deliveryRequestID uint, user string) []db.Condition {
 			continue
 		}
 		trUpdated[trNumber] = true
-		// same artifactOp equals same trNumber, but in diffrent tms nods
+		// same artifactOp equals same trNumber, but in diffrent tms nodes
 		for nID, nState := range trNodeStatus[trNumber] {
 			var tenantID uint
 			var ok bool
@@ -289,6 +289,7 @@ func syncImportState(deliveryRequestID uint, user string) []db.Condition {
 			// NOTE: determine import state
 			state := lifecycle.DeriveImport(nState.Status)
 			if state == curOp.ImportState { // skip if state no change
+				env.Logger().Infof("no import state change for artifact %s(#%d) in node %d, current state: %s", curOp.ArtifactTechID, curOp.ID, nID, state)
 				continue
 			}
 
@@ -323,11 +324,11 @@ func syncImportState(deliveryRequestID uint, user string) []db.Condition {
 					go func(jiraLink string, drID uint, message string) {
 						issueKey := extractJiraIssueKey(jiraLink)
 						if issueKey == "" {
-							env.Logger().Warn("Failed to extract JIRA issue key from link: %s", jiraLink)
+							env.Logger().Warnf("Failed to extract JIRA issue key from link: %s", jiraLink)
 							return
 						}
 						if err := notify.AddDeliveryComment(issueKey, drID, message, "Imported"); err != nil {
-							env.Logger().Error("Failed to add JIRA comment for import success: %s", err)
+							env.Logger().Errorf("Failed to add JIRA comment for import success: %s", err)
 						}
 					}(dr.JiraLink, deliveryRequestID, conditionMsg)
 				}
