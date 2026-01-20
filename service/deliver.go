@@ -69,6 +69,12 @@ func BatchImportTenantOps(drID uint, opIDs []uint, targetTenantID uint, userID s
 	go func(drID uint, targetNodeID uint, targetTenantName string, trs []uint, ops []db.ArtifactTenantOperation, user string) {
 		tmsCli, err := tms.NewClient(context.Background())
 		if err != nil {
+			// revert ops state to ImportFailed on TMS client creation error
+			for i := range ops {
+				ops[i].ImportState = lifecycle.ImportFailed
+			}
+			_ = batchUpdateOps(ops)
+
 			condition := db.Condition{
 				DeliveryRequestID: drID,
 				State:             lifecycle.CondError,
@@ -80,6 +86,12 @@ func BatchImportTenantOps(drID uint, opIDs []uint, targetTenantID uint, userID s
 
 		actionID, err := tmsCli.ImportTransportRequest(targetNodeID, trs)
 		if err != nil {
+			// revert ops state to ImportFailed on import error
+			for i := range ops {
+				ops[i].ImportState = lifecycle.ImportFailed
+			}
+			_ = batchUpdateOps(ops)
+
 			condition := db.Condition{
 				DeliveryRequestID: drID,
 				State:             lifecycle.CondError,
@@ -152,20 +164,32 @@ func BatchDeployTenantOps(drID uint, opIDs []uint, targetTenantID uint, userID s
 	go func(drID uint, tenant *db.CpiTenant, ops []db.ArtifactTenantOperation, user string) {
 		errOps := make(map[uint]error)
 		successOps := make([]db.ArtifactTenantOperation, 0)
+		failedOps := make([]db.ArtifactTenantOperation, 0)
 
 		for i := range ops {
 			op := &ops[i]
 			cpiCli, err := cpi.NewClient(context.Background(), op.Tenant.CpiEndpoint.Name)
 			if err != nil {
 				errOps[op.ID] = fmt.Errorf("failed to create cpi client for tenant %s: %s", op.Tenant.Name, err)
+				// mark as failed and continue
+				op.DeployState = lifecycle.DeployFailed
+				failedOps = append(failedOps, *op)
 				continue
 			}
 			_, err = cpiCli.DeployArtifact(op.ArtifactTechID, op.ArtifactVersion, op.Artifact.Type)
 			if err != nil {
 				errOps[op.ID] = fmt.Errorf("failed to deploy artifact %s:%s to tenant %s: %s", op.ArtifactTechID, op.ArtifactVersion, op.Tenant.Name, err)
+				// mark as failed and continue
+				op.DeployState = lifecycle.DeployFailed
+				failedOps = append(failedOps, *op)
 				continue
 			}
 			successOps = append(successOps, *op)
+		}
+
+		// update failed ops state to DeployFailed in database
+		if len(failedOps) > 0 {
+			_ = batchUpdateOps(failedOps)
 		}
 
 		// record conditions based on results

@@ -299,7 +299,19 @@ func syncImportState(deliveryRequestID uint, user string) []db.Condition {
 			if curOp.ImportState == lifecycle.ImportComplete && curOp.DeployState == lifecycle.DeployNotStarted {
 				curOp.DeployState = lifecycle.DeployQueued
 			}
+
 			if err := db.Conn().Save(&curOp).Error; err != nil { // update each op
+				// Check if error is duplicate key error (concurrent creation by another request)
+				if isDuplicateKeyError(err) {
+					// Record a warning for monitoring, but don't fail the operation
+					conditions = append(conditions, db.Condition{
+						DeliveryRequestID:         deliveryRequestID,
+						ArtifactTenantOperationID: curOp.ID,
+						State:                     lifecycle.CondWarn,
+						Message:                   fmt.Sprintf("artifact tenant operation already exists for artifact %s in tenant %d (concurrent creation), skipped", curOp.ArtifactTechID, tenantID),
+					})
+					continue
+				}
 				return []db.Condition{
 					{
 						DeliveryRequestID:         deliveryRequestID,
@@ -370,4 +382,21 @@ func extractJiraIssueKey(jiraURL string) string {
 
 	env.Logger().Warn("Failed to extract JIRA issue key from URL: %s", jiraURL)
 	return ""
+}
+
+// isDuplicateKeyError checks if the error is a duplicate key violation
+// This can happen when concurrent requests try to create the same record
+// Works across different databases (PostgreSQL, HANA, MySQL, etc.)
+func isDuplicateKeyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Use generic error message patterns that work across databases
+	// PostgreSQL: "duplicate key value violates unique constraint"
+	// HANA: "unique constraint violated"
+	// MySQL: "Duplicate entry"
+	errMsg := strings.ToLower(err.Error())
+	return strings.Contains(errMsg, "duplicate") ||
+		strings.Contains(errMsg, "unique constraint") ||
+		strings.Contains(errMsg, "unique_violation")
 }

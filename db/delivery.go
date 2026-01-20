@@ -49,10 +49,10 @@ type ArtifactTenantOperation struct {
 	ArtifactTechID  string
 	ArtifactVersion string
 
-	TenantID uint
+	TenantID uint `gorm:"index:idx_tenant_tr,unique"`
 	Tenant   CpiTenant `gorm:"foreignKey:TenantID"`
 
-	TransportRequestNumber string // associated transport request number
+	TransportRequestNumber string `gorm:"index:idx_tenant_tr,unique"` // associated transport request number
 
 	// All 3 Phases
 	RequestState lifecycle.RequestState
