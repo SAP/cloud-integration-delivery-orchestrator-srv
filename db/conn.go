@@ -26,7 +26,11 @@ func init() {
 		}
 	} else {
 		env.Logger().Info("Connecting to local database...")
-		conn, err = sql.Open("pgx", "postgres://postgres:passw0rd@127.0.0.1:5432/macodeploy?sslmode=disable")
+		localDbUri := os.Getenv("LOCAL_POSTGRES_URI")
+		if localDbUri == "" {
+			panic("LOCAL_POSTGRES_URI environment variable is not set")
+		}
+		conn, err = sql.Open("pgx", localDbUri)
 		if err != nil {
 			panic("failed to connect to local database" + err.Error())
 		}
