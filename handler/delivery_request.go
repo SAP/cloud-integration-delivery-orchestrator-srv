@@ -129,6 +129,7 @@ func GetDeliveryRequest(c *gin.Context) {
 
 // DeleteDr DeliveryRequest by id
 func DeleteDr(c *gin.Context) {
+	// TODO: check if dr can be deleted. if approved, cannot delete
 	raw := c.Param("id")
 	id, err := strconv.Atoi(raw)
 	if err != nil || id <= 0 {

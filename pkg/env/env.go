@@ -53,10 +53,11 @@ func GetJiraDestination() (*Destination, error) {
 }
 
 func TmsCredential() Credentials {
-	service, err := appEnv.Services.WithName("mmt-tms")
-	if err != nil {
-		Logger().Panic("Failed to get service instance mmt-tms")
+	services, err := appEnv.Services.WithLabel("transport")
+	if err != nil || len(services) == 0 {
+		Logger().Panic("Failed to get service with label 'transport'")
 	}
+	service := services[0]
 	apiUrl, _ := service.CredentialString("uri")
 	uaa, _ := service.Credentials["uaa"].(map[string]interface{})
 
@@ -69,10 +70,11 @@ func TmsCredential() Credentials {
 }
 
 func UaaCredential() Credentials {
-	service, err := appEnv.Services.WithName("uaa-api")
-	if err != nil {
-		Logger().Panic("Failed to get service instance uaa-api")
+	services, err := appEnv.Services.WithLabel("xsuaa")
+	if err != nil || len(services) == 0 {
+		Logger().Panic("Failed to get service with label 'xsuaa'")
 	}
+	service := services[0]
 	apiUrl, _ := service.CredentialString("apiurl")
 	uaa := service.Credentials
 
@@ -85,11 +87,11 @@ func UaaCredential() Credentials {
 }
 
 func PostgreUri() string {
-	dbService, err := appEnv.Services.WithName("mmt-devops-pgsql")
-	if err != nil {
-		panic("Failed to get service mmt-devops-pgsql: " + err.Error())
+	services, err := appEnv.Services.WithLabel("postgresql-db")
+	if err != nil || len(services) == 0 {
+		panic("Failed to get service with label 'postgresql-db'")
 	}
-	uri, _ := dbService.CredentialString("uri")
+	uri, _ := services[0].CredentialString("uri")
 	return uri
 
 }
@@ -134,10 +136,11 @@ type Destination struct {
 // Get Destinations(including credentials)
 func initDestinations() {
 	ctx := context.Background()
-	service, err := appEnv.Services.WithName("mmt_devops_destination")
-	if err != nil {
-		logger.Panic("Failed to get service mmt_devops_destination")
+	services, err := appEnv.Services.WithLabel("destination")
+	if err != nil || len(services) == 0 {
+		logger.Panic("Failed to get service with label 'destination'")
 	}
+	service := services[0]
 	authUrl, _ := service.CredentialString("url")
 	if !strings.HasSuffix(authUrl, "/oauth/token") {
 		authUrl = fmt.Sprintf("%s/oauth/token", authUrl)

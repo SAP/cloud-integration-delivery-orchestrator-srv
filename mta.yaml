@@ -23,12 +23,27 @@ modules:
 
 resources:
   - name: mmt-devops-pgsql
-    type: org.cloudfoundry.existing-service
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: postgresql-db
+      plan: development
   - name: mmt_devops_destination
-    type: org.cloudfoundry.existing-service
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: destination
+      plan: lite
   - name: mmt-tms
-    type: org.cloudfoundry.existing-service
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: transport
+      plan: standard
   - name: mmt_devops_connectivity
-    type: org.cloudfoundry.existing-service
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: connectivity
+      plan: lite
   - name: uaa-api
-    type: org.cloudfoundry.existing-service
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: xsuaa
+      plan: apiaccess
