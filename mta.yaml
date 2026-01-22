@@ -26,24 +26,24 @@ resources:
     type: org.cloudfoundry.managed-service
     parameters:
       service: postgresql-db
-      plan: development
+      service-plan: development
   - name: mmt_devops_destination
     type: org.cloudfoundry.managed-service
     parameters:
       service: destination
-      plan: lite
+      service-plan: lite
   - name: mmt-tms
     type: org.cloudfoundry.managed-service
     parameters:
       service: transport
-      plan: standard
+      service-plan: standard
   - name: mmt_devops_connectivity
     type: org.cloudfoundry.managed-service
     parameters:
       service: connectivity
-      plan: lite
+      service-plan: lite
   - name: uaa-api
     type: org.cloudfoundry.managed-service
     parameters:
       service: xsuaa
-      plan: apiaccess
+      service-plan: apiaccess
