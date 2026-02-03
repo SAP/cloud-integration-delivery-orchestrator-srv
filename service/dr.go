@@ -14,21 +14,6 @@ import (
 	"gorm.io/gorm"
 )
 
-var nodeTenantCache map[uint]uint
-
-// map tms node ID -> cpi tenant ID
-func init() {
-	nodeTenantCache = make(map[uint]uint)
-	// load all tenants
-	var tenants []db.CpiTenant
-	if err := db.Conn().Find(&tenants).Error; err != nil {
-		panic("failed to load cpi tenants: " + err.Error())
-	}
-	for _, t := range tenants {
-		nodeTenantCache[t.TransportNodeID] = t.ID
-	}
-}
-
 // check and load artifact info into db, set ArtifactID in ops
 func LoadArtifact(op db.ArtifactTenantOperation) (atf db.Artifact, err error) {
 	a := &op.Artifact
@@ -38,6 +23,18 @@ func LoadArtifact(op db.ArtifactTenantOperation) (atf db.Artifact, err error) {
 	}
 	atf = *a
 	return
+}
+
+// queryTenantByNodeID queries a CPI tenant by its TMS transport node ID
+func queryTenantByNodeID(nodeID uint) (*db.CpiTenant, error) {
+	var tenant db.CpiTenant
+	if err := db.Conn().Where(&db.CpiTenant{TransportNodeID: nodeID}).First(&tenant).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("no cpi tenant found for tms node %d", nodeID)
+		}
+		return nil, fmt.Errorf("failed to query tenant by node ID %d: %s", nodeID, err)
+	}
+	return &tenant, nil
 }
 
 // query delivery request with all associations

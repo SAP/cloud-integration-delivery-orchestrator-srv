@@ -188,7 +188,7 @@ func syncImportState(deliveryRequestID uint, user string) []db.Condition {
 	}
 	// find delivery rule id in delivery request
 	var dr db.DeliveryRequest
-	if err := db.Conn().First(&dr, deliveryRequestID).Error; err != nil {
+	if err := db.Conn().Preload("DeliveryRule").First(&dr, deliveryRequestID).Error; err != nil {
 		return []db.Condition{
 			{
 				DeliveryRequestID: deliveryRequestID,
@@ -196,6 +196,12 @@ func syncImportState(deliveryRequestID uint, user string) []db.Condition {
 				Message:           fmt.Sprintf("failed to find delivery request %d: %s", deliveryRequestID, err.Error()),
 			},
 		}
+	}
+
+	// Build a set of valid node IDs from delivery rule's target nodes
+	validNodeIDs := make(map[uint]bool)
+	for _, node := range dr.DeliveryRule.TargetNodes {
+		validNodeIDs[node.ID] = true
 	}
 
 	tmsClient, err := tms.NewClient(context.Background())
@@ -242,7 +248,6 @@ func syncImportState(deliveryRequestID uint, user string) []db.Condition {
 		tenantToOps[tenantID][trNumber] = op
 	}
 	trUpdated := make(map[string]bool)
-	nodetoTenantID := nodeTenantCache // tms node ID - cpi tenant ID
 
 	conditions := make([]db.Condition, 0)
 	for _, op := range artifactOps { // check to create new record if new tr status happens in tms
@@ -253,20 +258,25 @@ func syncImportState(deliveryRequestID uint, user string) []db.Condition {
 		trUpdated[trNumber] = true
 		// same artifactOp equals same trNumber, but in diffrent tms nodes
 		for nID, nState := range trNodeStatus[trNumber] {
-			var tenantID uint
-			var ok bool
-			// TODO: skip node that is not in delivery rule.
-			// currently will create op for all nodes.
-			if tenantID, ok = nodetoTenantID[nID]; !ok {
-				return []db.Condition{
-					{
-						DeliveryRequestID:         deliveryRequestID,
-						State:                     lifecycle.CondError,
-						ArtifactTenantOperationID: op.ID,
-						Message:                   fmt.Sprintf("no cpi tenant found for tms node %d, please configure Cpi Tenant first", nID),
-					},
-				}
+			// Skip node that is not in delivery rule
+			if _, ok := validNodeIDs[nID]; !ok {
+				env.Logger().Infof("skipping node %d for transport request %s: not in delivery rule target nodes", nID, trNumber)
+				continue
 			}
+
+			// Query tenant by node ID from database
+			tenant, err := queryTenantByNodeID(nID)
+			if err != nil {
+				conditions = append(conditions, db.Condition{
+					DeliveryRequestID:         deliveryRequestID,
+					ArtifactTenantOperationID: op.ID,
+					State:                     lifecycle.CondWarn,
+					Message:                   fmt.Sprintf("no cpi tenant configured for tms node %d: %s", nID, err.Error()),
+				})
+				continue
+			}
+			tenantID := tenant.ID
+
 			if _, ok := tenantToOps[tenantID]; !ok {
 				tenantToOps[tenantID] = make(map[string]db.ArtifactTenantOperation)
 			}
