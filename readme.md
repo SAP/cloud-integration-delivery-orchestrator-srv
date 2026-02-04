@@ -69,3 +69,10 @@ PORT = 9000
 cf login -a https://api.cf.sap.hana.ondemand.com/ -o MaCo-devops -s DEVOPS
 cf push
 ```
+
+## connect to remote DB locally
+Since pgsql cannot directly be connected locally, can only connect via cf runtime.
+So firstly run cf application that binds pgsql service instance, then use this command to start a proxy via cf app runtime:
+```
+cf ssh -L localhost:8866:postgres-d8fb591a-f9bb-4cfc-9314-4e1dda274f27.cxxzc36no8yr.eu-central-1.rds.amazonaws.com:8828 mmt.devops.srv.cpi.delivery -N
+```

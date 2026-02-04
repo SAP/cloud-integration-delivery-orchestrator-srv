@@ -40,12 +40,12 @@ const (
 
 // Canonical deploy states.
 const (
-	DeployNotStarted  DeployState = "NOT_STARTED"
-	DeployQueued      DeployState = "QUEUED"
-	DeployDisabled    DeployState = "DEPLOY_DISABLED"
-	DeployInProgress  DeployState = "IN_PROGRESS"
-	DeployFailed      DeployState = "FAILED"
-	DeployComplete    DeployState = "COMPLETE"
+	DeployNotStarted DeployState = "NOT_STARTED"
+	DeployQueued     DeployState = "QUEUED"
+	DeployDisabled   DeployState = "DEPLOY_DISABLED"
+	DeployInProgress DeployState = "IN_PROGRESS"
+	DeployFailed     DeployState = "FAILED"
+	DeployComplete   DeployState = "COMPLETE"
 )
 
 // Aggregate statuses (public surface).
@@ -163,14 +163,15 @@ func DeriveAggregateStatus(aggStatus AggregateStatus, importStates []ImportState
 
 	// Deploy phase precedence (only meaningful once imports are complete/disabled)
 	if importsComplete {
-		// Failure first, including rolled back
-		if anyDeploy(deployStates, DeployFailed) || anyDeploy(deployStates) {
+		// Check for deployment failures
+		if anyDeploy(deployStates, DeployFailed) {
 			return AggDeployFailed
 		}
 		if anyDeploy(deployStates, DeployInProgress) {
 			return AggDeploying
 		}
-		if allDeploy(deployStates, DeployComplete) {
+		// Consider DeployDisabled as effectively complete
+		if allDeploy(deployStates, DeployComplete, DeployDisabled) {
 			return AggDeployed
 		}
 		// Imports done but deploy not yet started
