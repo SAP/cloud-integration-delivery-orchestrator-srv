@@ -64,9 +64,9 @@ func SyncDeliveryStatus(deliveryRequestID uint, user string) error {
 	if dr.ApprovedAt == nil || dr.ApprovedBy == "" {
 		return fmt.Errorf("delivery request %d has not been approved yet", deliveryRequestID)
 	}
-	// Skip sync for canceled delivery requests
+	// Return error for canceled delivery requests
 	if dr.AggregateStatus == lifecycle.AggCanceled {
-		return nil
+		return fmt.Errorf("delivery request %d is already canceled", deliveryRequestID)
 	}
 
 	// sync import/deploy state after approval

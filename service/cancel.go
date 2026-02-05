@@ -7,6 +7,7 @@ import (
 	"mmt-delivery/pkg/lifecycle"
 	"mmt-delivery/pkg/notify"
 	"mmt-delivery/pkg/xsuaa"
+	"strings"
 )
 
 // Statuses that allow cancellation
@@ -22,22 +23,27 @@ var cancellableStatuses = map[lifecycle.AggregateStatus]bool{
 // CancelDeliveryRequest cancels a delivery request with a reason.
 // Cancellation is permanent and prevents any further import/deploy operations.
 func CancelDeliveryRequest(drID uint, userID string, reason string) error {
+	// 1. Sync status first to get latest state from TMS/CPI
+	if err := SyncDeliveryStatus(drID, userID); err != nil {
+		// Ignore "not approved yet" error - PENDING/WAITING_APPROVAL are cancellable
+		// For these statuses, no operations have started yet, so DB status is accurate
+		if !strings.Contains(err.Error(), "has not been approved yet") {
+			return fmt.Errorf("failed to sync delivery status before cancel: %s", err.Error())
+		}
+	}
+
+	// 2. Re-query DR to get updated aggregate status (after sync)
 	var dr db.DeliveryRequest
 	if err := db.Conn().First(&dr, drID).Error; err != nil {
 		return fmt.Errorf("delivery request #%d not found: %s", drID, err.Error())
 	}
 
-	// Check if already canceled
-	if dr.AggregateStatus == lifecycle.AggCanceled {
-		return fmt.Errorf("delivery request #%d is already canceled", drID)
-	}
-
-	// Validate current aggregate status
+	// 3. Validate current aggregate status
 	if !cancellableStatuses[dr.AggregateStatus] {
 		return fmt.Errorf("cannot cancel delivery request #%d with status %s", drID, dr.AggregateStatus)
 	}
 
-	// Update delivery request status to CANCELED
+	// 4. Update delivery request status to CANCELED
 	if err := db.Conn().Model(&dr).Updates(db.DeliveryRequest{
 		AggregateStatus: lifecycle.AggCanceled,
 		UpdatedBy:       userID,
@@ -45,7 +51,7 @@ func CancelDeliveryRequest(drID uint, userID string, reason string) error {
 		return fmt.Errorf("failed to update delivery request status: %s", err.Error())
 	}
 
-	// Create cancellation condition
+	// 5. Create cancellation condition
 	userEmail, _ := xsuaa.GetUserEmail(userID)
 	conditionMsg := fmt.Sprintf("Delivery request canceled by %s. Reason: %s", userEmail, reason)
 	_ = BatchInsertConditions([]db.Condition{
@@ -56,7 +62,7 @@ func CancelDeliveryRequest(drID uint, userID string, reason string) error {
 		},
 	})
 
-	// Send JIRA notification if configured (async)
+	// 6. Send JIRA notification if configured (async)
 	if dr.JiraLink != "" {
 		go func(jiraLink string, drID uint, message string) {
 			issueKey := extractJiraIssueKey(jiraLink)
@@ -69,7 +75,7 @@ func CancelDeliveryRequest(drID uint, userID string, reason string) error {
 		}(dr.JiraLink, drID, conditionMsg)
 	}
 
-	// Send email notification to related users (async)
+	// 7. Send email notification to related users (async)
 	go func() {
 		message := fmt.Sprintf("Delivery request #%d has been canceled by %s. Reason: %s", drID, userEmail, reason)
 		recipients := []string{dr.CreatedBy, dr.UpdatedBy}
