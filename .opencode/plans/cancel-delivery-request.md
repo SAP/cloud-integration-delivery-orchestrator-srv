@@ -1,5 +1,7 @@
 # Implementation Plan: Cancel Delivery Request Feature
 
+## Status: ✅ IMPLEMENTED
+
 ## Overview
 Add the ability to cancel a delivery request, which will permanently terminate and forbid any import/deploy operations for that request. The cancellation status should be persistent and prevent any future operations.
 
@@ -8,359 +10,274 @@ Add the ability to cancel a delivery request, which will permanently terminate a
 - ❌ Cancellation is **blocked** for: `IMPORTING`, `DEPLOYING`, `DEPLOYED`, `CANCELED`
 - 🔄 Before canceling, sync status first to ensure latest state
 - 🔒 Cancellation is **permanent** (cannot be un-canceled)
-- 💬 Frontend dialog with cancellation reason
+- 💬 Frontend dialog with cancellation reason (optional)
 - 📝 Backend stores cancellation reason in Conditions table
 
 ---
 
-## Implementation Tasks
+## Implementation Summary
 
-### 1. Backend - Service Layer
+### Files Created
+| File | Description |
+|------|-------------|
+| `service/cancel.go` | Core cancellation logic with `CancelDeliveryRequest()` function |
 
-#### 1.1 Add Cancellation Service Function
-**File:** `service/cancel.go` (new file)
-
-**Function:** `CancelDeliveryRequest(drID uint, userID string, reason string) error`
-
-**Logic:**
-```go
-1. Sync latest status first: call SyncDeliveryStatus(drID, userID)
-   - This ensures we have the most current import/deploy states
-   
-2. Query delivery request with associations
-   
-3. Validate current aggregate status:
-   - ALLOWED: AggPending, AggWaitingApprove, AggAwaitingImport, 
-              AggImportFailed, AggWaitingDeploy, AggDeployFailed
-   - BLOCKED: AggImporting, AggDeploying, AggDeployed, AggCanceled
-   - If blocked, return error with clear message
-   
-4. Check for any in-progress operations:
-   - Query all operations for this delivery request
-   - Check if any operation has ImportState = ImportInProgress 
-     OR DeployState = DeployInProgress
-   - If found, return error: "Cannot cancel: operations in progress"
-   
-5. Update delivery request:
-   - Set aggregate_status = "CANCELED"
-   - Set updated_by = userID
-   
-6. Create cancellation condition:
-   - State: CondWarn (or new CondCanceled type)
-   - Message: "Delivery request canceled by {userID}. Reason: {reason}"
-   - Insert into conditions table
-   
-7. (Optional) Send JIRA notification if JiraLink exists
-```
-
-**Error Handling:**
-- Invalid status transitions
-- Operations in progress
-- Database errors
+### Files Modified
+| File | Changes |
+|------|---------|
+| `handler/delivery_request.go` | Added `preDeliverCheck()` cancellation check, `HandleCancelDr` handler, `CancelDrRequest` struct |
+| `service/sync_status.go` | Changed `return nil` to `return error` for canceled DRs (line 67-69) |
+| `main.go` | Added route `POST /api/v1/deliveryRequest/cancel` |
+| `pkg/lifecycle/consts_test.go` | Added unit tests for cancellation logic |
 
 ---
 
-#### 1.2 Add Cancellation Checks in Import/Deploy Operations
+## Final Implementation Details
+
+### 1. Backend - Service Layer
+
+#### 1.1 Cancellation Service Function
+**File:** `service/cancel.go`
+
+**Function:** `CancelDeliveryRequest(drID uint, userID string, reason string) error`
+
+**Final Logic:**
+```go
+1. Sync status first: call SyncDeliveryStatus(drID, userID)
+   - Ignore "not approved yet" error (PENDING/WAITING_APPROVAL are cancellable)
+   - Return all other sync errors to caller
+   
+2. Re-query delivery request to get updated aggregate status (after sync)
+   
+3. Validate current aggregate status against cancellableStatuses map:
+   - ALLOWED: AggPending, AggWaitingApprove, AggAwaitingImport, 
+              AggImportFailed, AggWaitingDeploy, AggDeployFailed
+   - BLOCKED: AggImporting, AggDeploying, AggDeployed, AggCanceled
+   
+4. Update delivery request:
+   - Set aggregate_status = "CANCELED"
+   - Set updated_by = userID
+   
+5. Create cancellation condition:
+   - State: CondWarn
+   - Message: "Delivery request canceled by {userEmail}. Reason: {reason}"
+   
+6. Send JIRA notification if JiraLink exists (async)
+
+7. Send email notification to related users (async)
+```
+
+---
+
+#### 1.2 Cancellation Checks in Import/Deploy Operations
 **File:** `handler/delivery_request.go`
 
-**Location:** `preDeliverCheck` function (line ~186)
+**Location:** `preDeliverCheck` function (line ~194)
 
-**Add check after delivery request is found:**
 ```go
 if dr.AggregateStatus == lifecycle.AggCanceled {
     return fmt.Errorf("delivery request #%d has been canceled, no operations allowed", req.DeliveryRequestID)
 }
 ```
 
-This check is placed in the handler layer's `preDeliverCheck` function which is called before both `HandleImportOps` and `HandleDeployOps`.
-
 ---
 
-#### 1.3 Skip Status Sync for Canceled Delivery Requests
-**File:** `service/sync_status.go`
+#### 1.3 Status Sync Returns Error for Canceled Delivery Requests
+**File:** `service/sync_status.go` (line 67-69)
 
-**Function:** `SyncDeliveryStatus` (line 54)
-
-**Add check after line 63:**
 ```go
-if dr.ApprovedAt == nil || dr.ApprovedBy == "" {
-    return fmt.Errorf("delivery request %d has not been approved yet", deliveryRequestID)
-}
-
-// Add this check:
+// Return error for canceled delivery requests
 if dr.AggregateStatus == lifecycle.AggCanceled {
-    return nil // Skip sync for canceled delivery requests
+    return fmt.Errorf("delivery request %d is already canceled", deliveryRequestID)
 }
 ```
+
+**Note:** Changed from `return nil` to return error for consistency.
 
 ---
 
 ### 2. Backend - Handler Layer
 
-#### 2.1 Add Cancellation Handler
-**File:** `handler/delivery_request.go` (added to existing file)
+#### 2.1 Cancellation Handler
+**File:** `handler/delivery_request.go`
 
 **Handler:** `HandleCancelDr(ctx *gin.Context)`
 
 **Request Body:**
 ```json
 {
+  "deliveryRequestID": 123,
   "reason": "No longer needed due to rollback of feature X"
 }
 ```
 
-**URL Parameter:** `:id` - delivery request ID
-
 **Response:**
 - Success (200): `{"status": "success", "code": 200, "message": "Delivery request canceled successfully"}`
 - Error (400): Invalid request or not allowed to cancel
-- Error (500): Internal server error
-
-**Implementation:**
-```go
-1. Parse delivery request ID from URL parameter
-2. Bind JSON request body
-3. Validate reason (required, min length 10)
-4. Get user ID from context: service.UserID(ctx)
-5. Call service.CancelDeliveryRequest(drID, userID, reason)
-6. Return appropriate HTTP response
-```
 
 ---
 
-#### 2.2 Add Route
+#### 2.2 Route
 **File:** `main.go`
 
-**Route:** `POST /api/v1/deliveryRequest/:id/cancel`
+**Route:** `POST /api/v1/deliveryRequest/cancel`
 
 **Middleware:** Authentication required (existing AuthMiddleware)
 
 ---
 
-### 3. Frontend
+### 3. Unit Tests
 
-#### 3.1 Add Cancel Button
-**Location:** Delivery Request detail page
+**File:** `pkg/lifecycle/consts_test.go`
 
-**Conditions:**
-- Only show if aggregate status allows cancellation
-- Disabled/hidden for: IMPORTING, DEPLOYING, DEPLOYED, CANCELED
-
----
-
-#### 3.2 Add Confirmation Dialog
-**Component:** `CancelDeliveryRequestDialog`
-
-**Fields:**
-- Title: "Cancel Delivery Request"
-- Warning message: "This action is permanent and cannot be undone. All pending import/deploy operations will be terminated."
-- Reason textarea (required, min 10 chars)
-- Cancel/Confirm buttons
-
-**Validation:**
-- Reason is required
-- Minimum 10 characters
-- Show character count
+**Test Cases Added:**
+| Test | Description |
+|------|-------------|
+| `TestDeriveAggregateStatus_CanceledIsTerminal` | Verifies CANCELED is preserved regardless of import/deploy states (8 sub-tests) |
+| `TestCancellableStatuses_Definition` | Documents and validates 6 cancellable statuses |
+| `TestCancelStatusTransitions` | Tests each status for cancellation eligibility (10 sub-tests) |
+| `TestDeriveAggregateStatus_DeployedWithDisabled` | Verifies DeployDisabled is treated as complete |
+| `TestDeriveAggregateStatus_ImportDisabledProgressesToDeploy` | Verifies ImportDisabled allows progression |
 
 ---
 
-#### 3.3 API Call
-**Endpoint:** `POST /api/v1/delivery-request/{id}/cancel`
+## API Documentation
 
-**Payload:**
-```typescript
-{
-  deliveryRequestId: number;
-  reason: string;
-}
-```
-
-**Success Handling:**
-- Show success notification
-- Refresh delivery request data
-- Update UI to show CANCELED status
-
-**Error Handling:**
-- Display error message from API
-- Common errors:
-  - "Cannot cancel: operations in progress"
-  - "Cannot cancel delivery request with status DEPLOYED"
-  - "Delivery request already canceled"
-
----
-
-### 4. Testing
-
-#### 4.1 Unit Tests
-**File:** `service/cancel_test.go`
-
-**Test Cases:**
-```
-✓ Cancel delivery request in AWAITING_IMPORT status
-✓ Cancel delivery request in IMPORT_FAILED status  
-✓ Cancel delivery request in AWAITING_DEPLOY status
-✓ Cancel delivery request in DEPLOY_FAILED status
-✗ Reject cancellation for IMPORTING status
-✗ Reject cancellation for DEPLOYING status
-✗ Reject cancellation for DEPLOYED status
-✗ Reject cancellation for already CANCELED status
-✗ Reject cancellation with operations in progress
-✓ Store cancellation reason in conditions
-```
-
----
-
-#### 4.2 Integration Tests
-```
-✓ Import operation blocked for canceled delivery request
-✓ Deploy operation blocked for canceled delivery request
-✓ Status sync skipped for canceled delivery request
-✓ Cancellation creates proper condition record
-✓ Cancellation is permanent (cannot change status after cancel)
-```
-
----
-
-### 5. Database Changes
-
-**No schema changes required** - the `CANCELED` status already exists in `pkg/lifecycle/consts.go` as `AggCanceled`.
-
----
-
-### 6. Documentation Updates
-
-#### 6.1 Update README.md
-- ~~Remove from TODO list~~ (already added)
-- Add to features list
-
-#### 6.2 API Documentation
-Document the new endpoint:
-```markdown
 ### Cancel Delivery Request
-- **Endpoint:** `POST /api/v1/deliveryRequest/:id/cancel`
+- **Endpoint:** `POST /api/v1/deliveryRequest/cancel`
 - **Method:** POST
 - **Auth:** Required
-- **URL Param:** `:id` - delivery request ID
 - **Body:**
   ```json
   {
-    "reason": "Cancellation reason (min 10 chars)"
+    "deliveryRequestID": 123,
+    "reason": "Cancellation reason (optional)"
   }
   ```
-- **Success Response:** 200 OK
+- **Success Response:** 
+  ```json
+  {
+    "status": "success",
+    "code": 200,
+    "message": "Delivery request canceled successfully"
+  }
+  ```
 - **Error Responses:** 
-  - 400: Invalid status or operations in progress
-  - 500: Server error
+  - 400: `{"status": "fail", "code": 400, "error": "cannot cancel delivery request #123 with status IMPORTING"}`
+  - 400: `{"status": "fail", "code": 400, "error": "delivery request #123 is already canceled"}`
+  - 400: `{"status": "fail", "code": 400, "error": "failed to sync delivery status before cancel: ..."}`
+
+---
+
+## Cancellation Flow
+
+```
+POST /api/v1/deliveryRequest/cancel
+    │
+    └─► HandleCancelDr (handler)
+            │
+            └─► CancelDeliveryRequest (service)
+                    │
+                    ├─► SyncDeliveryStatus(drID, userID)
+                    │       │
+                    │       ├─► If not approved: "not approved yet" error
+                    │       │       └─► Ignored ✓ (PENDING/WAITING_APPROVAL cancellable)
+                    │       │
+                    │       ├─► If already canceled: "already canceled" error
+                    │       │       └─► Propagated to caller ✗
+                    │       │
+                    │       ├─► If TMS/CPI sync fails
+                    │       │       └─► Propagated to caller ✗
+                    │       │
+                    │       └─► Success: updates operations & aggregate status
+                    │
+                    ├─► Re-query DR (get fresh status after sync)
+                    │
+                    ├─► Validate status is cancellable
+                    │       └─► If IMPORTING/DEPLOYING/DEPLOYED: error ✗
+                    │
+                    ├─► Update aggregate_status = CANCELED
+                    │
+                    ├─► Insert cancellation condition
+                    │
+                    ├─► Send JIRA notification (async)
+                    │
+                    └─► Send email notification (async)
 ```
 
 ---
 
-## Implementation Order
+## Implementation Checklist
 
-### Phase 1: Backend Core (Critical Path)
-1. ✅ Create `service/cancel.go` with `CancelDeliveryRequest` function
-2. ✅ Add cancellation checks in `service/deliver.go`
-3. ✅ Add skip logic in `service/sync_status.go`
-4. ✅ Write unit tests for service layer
+### Phase 1: Backend Core ✅
+- [x] Create `service/cancel.go` with `CancelDeliveryRequest` function
+- [x] Add cancellation check in `handler/delivery_request.go` `preDeliverCheck()`
+- [x] Change `return nil` to `return error` in `service/sync_status.go` for canceled DRs
 
-### Phase 2: Backend API
-5. ✅ Create `handler/cancel_dr.go` with handler
-6. ✅ Add route in router configuration
-7. ✅ Test API endpoint with curl/Postman
+### Phase 2: Backend API ✅
+- [x] Add `HandleCancelDr` handler in `handler/delivery_request.go`
+- [x] Add `CancelDrRequest` struct
+- [x] Add route in `main.go`
 
-### Phase 3: Frontend
-8. ✅ Add cancel button to UI
-9. ✅ Create confirmation dialog component
-10. ✅ Implement API call and error handling
-11. ✅ Add UI indicators for CANCELED status
+### Phase 3: Unit Tests ✅
+- [x] Add cancellation tests in `pkg/lifecycle/consts_test.go`
+- [x] Test CANCELED is terminal state
+- [x] Test cancellable vs non-cancellable statuses
 
-### Phase 4: Testing & Documentation
-12. ✅ Integration tests
-13. ✅ Update documentation
-14. ✅ Manual end-to-end testing
-
----
-
-## Edge Cases & Considerations
-
-### 1. Race Conditions
-**Scenario:** User cancels while an import/deploy is starting
-**Solution:** The pre-check in import/deploy operations will catch this and reject the operation
-
-### 2. Partial Operations
-**Scenario:** Some operations completed before cancellation
-**Solution:** Those operations keep their completed status. Cancellation only prevents new operations.
-
-### 3. JIRA Integration
-**Question:** Should cancellation be posted to JIRA?
-**Recommendation:** Yes, similar to import success notifications
-
-### 4. Audit Trail
-**Covered:** Cancellation reason stored in Conditions table with timestamp and user ID
-
-### 5. UI State Management
-**Important:** Ensure UI refreshes after cancellation to reflect CANCELED status and disable all action buttons
+### Phase 4: Frontend (TODO)
+- [ ] Add cancel button to UI
+- [ ] Create confirmation dialog component
+- [ ] Implement API call and error handling
+- [ ] Add UI indicators for CANCELED status
 
 ---
 
-## Code Quality Checklist
+## Design Decisions
 
-- [ ] Error messages are clear and actionable
-- [ ] All database operations use transactions where appropriate
-- [ ] Logging added for cancellation events
-- [ ] Input validation (reason length, valid drID)
-- [ ] Consistent error handling patterns
-- [ ] Code follows existing service/handler patterns
-- [ ] Comments explain business logic
-- [ ] No hardcoded values
+### 1. Sync Before Cancel
+**Decision:** Always call `SyncDeliveryStatus()` before cancellation to get real-time status from TMS/CPI.
 
----
+**Rationale:** Prevents canceling a DR that appears as `AWAITING_IMPORT` in DB but is actually `IMPORTING` in TMS.
 
-## Risk Assessment
+### 2. Ignore "Not Approved Yet" Error
+**Decision:** Ignore this specific sync error to allow PENDING/WAITING_APPROVAL cancellation.
 
-| Risk | Severity | Mitigation |
-|------|----------|------------|
-| Cancel during active operation | Medium | Pre-check operations before cancel |
-| Race condition on status check | Low | Database transaction isolation |
-| User cancels by mistake | Medium | Confirmation dialog + reason required |
-| Cannot undo cancellation | Low | Clear warning in UI, permanent by design |
+**Rationale:** These statuses have no operations started yet, so DB status is accurate. Sync is not needed but calling it simplifies the code (no status pre-check in cancel.go).
 
----
+### 3. Return Error for Canceled DRs in Sync
+**Decision:** Changed `SyncDeliveryStatus()` to return error instead of `nil` for canceled DRs.
 
-## Success Criteria
+**Rationale:** Consistent error handling. "Already canceled" error should propagate and block repeat cancellation.
 
-✅ Users can cancel delivery requests in appropriate statuses  
-✅ Canceled delivery requests cannot trigger new import/deploy operations  
-✅ Cancellation reason is recorded and visible  
-✅ Status sync is skipped for canceled requests  
-✅ UI clearly indicates canceled status  
-✅ No breaking changes to existing functionality  
+### 4. Handler in Existing File
+**Decision:** Add handler to `handler/delivery_request.go` instead of creating new file.
+
+**Rationale:** Follows existing patterns. Cancel is a delivery request operation.
+
+### 5. No Reason Length Limit
+**Decision:** Reason field has no minimum length validation.
+
+**Rationale:** Per user request. Reason is optional - empty string is allowed.
 
 ---
 
-## Estimated Effort
+## Edge Cases Handled
 
-- **Backend:** 4-6 hours
-  - Service layer: 2 hours
-  - Handler + route: 1 hour
-  - Unit tests: 1-2 hours
-  - Integration tests: 1 hour
-
-- **Frontend:** 3-4 hours
-  - Cancel button: 0.5 hour
-  - Dialog component: 1.5 hours
-  - API integration: 1 hour
-  - Testing: 1 hour
-
-- **Documentation:** 1 hour
-
-**Total:** 8-11 hours
+| Edge Case | Solution |
+|-----------|----------|
+| Repeat cancellation | Returns "already canceled" error |
+| Cancel during import/deploy | Sync first gets real-time status, blocks if in-progress |
+| Cancel unapproved DR | Ignores "not approved yet" sync error, allows cancellation |
+| Sync failure | Blocks cancellation, returns error to caller |
+| Concurrent cancellation | Second request gets "already canceled" error |
 
 ---
 
-## Future Enhancements (Out of Scope)
+## Success Criteria ✅
 
-- Partial cancellation (cancel specific operations, not entire DR)
-- Scheduled cancellation (cancel at specific time)
-- Bulk cancellation (cancel multiple DRs)
-- Cancel and create new DR (clone and cancel old one)
+- [x] Users can cancel delivery requests in appropriate statuses  
+- [x] Canceled delivery requests cannot trigger new import/deploy operations  
+- [x] Cancellation reason is recorded in Conditions table  
+- [x] Status sync returns error for canceled requests  
+- [x] Unit tests verify cancellation logic  
+- [x] No breaking changes to existing functionality
