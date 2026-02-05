@@ -59,6 +59,7 @@ Backend:
 - undeploy artifacts
 - cache for oauth tokens
 - ppms and blackduck change request(further feature)
+- disable status for a delivery request: this status will terminate and forbid any import/deploy operations in this delivery request
 
 
 ## user provided environment variables

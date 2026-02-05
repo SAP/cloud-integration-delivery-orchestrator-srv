@@ -66,6 +66,8 @@ func main() {
 		// approve
 		v1Group.POST("/deliveryRequest/requestApproval", handler.HandleRequestApproval)
 		v1Group.POST("/deliveryRequest/approve", handler.HandleApproveDeliveryRequest)
+		// cancel
+		v1Group.POST("/deliveryRequest/cancel", handler.HandleCancelDr)
 
 		// uaa
 		v1Group.GET("/uaa/search/:email", handler.HandleUaaUserEmailSearch)

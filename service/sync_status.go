@@ -64,6 +64,10 @@ func SyncDeliveryStatus(deliveryRequestID uint, user string) error {
 	if dr.ApprovedAt == nil || dr.ApprovedBy == "" {
 		return fmt.Errorf("delivery request %d has not been approved yet", deliveryRequestID)
 	}
+	// Skip sync for canceled delivery requests
+	if dr.AggregateStatus == lifecycle.AggCanceled {
+		return nil
+	}
 
 	// sync import/deploy state after approval
 	if conditions := syncImportState(deliveryRequestID, user); len(conditions) != 0 {
@@ -198,10 +202,11 @@ func syncImportState(deliveryRequestID uint, user string) []db.Condition {
 		}
 	}
 
-	// Build a set of valid node IDs from delivery rule's target nodes
-	validNodeIDs := make(map[uint]bool)
+	// Build a set of target node IDs from delivery rule.
+	// Only create/update operations for nodes included in the delivery rule.
+	ruleTargetNodeIDs := make(map[uint]bool)
 	for _, node := range dr.DeliveryRule.TargetNodes {
-		validNodeIDs[node.ID] = true
+		ruleTargetNodeIDs[node.ID] = true
 	}
 
 	tmsClient, err := tms.NewClient(context.Background())
@@ -258,8 +263,8 @@ func syncImportState(deliveryRequestID uint, user string) []db.Condition {
 		trUpdated[trNumber] = true
 		// same artifactOp equals same trNumber, but in diffrent tms nodes
 		for nID, nState := range trNodeStatus[trNumber] {
-			// Skip node that is not in delivery rule
-			if _, ok := validNodeIDs[nID]; !ok {
+			// Skip nodes not in delivery rule - only process target nodes defined in the rule
+			if _, ok := ruleTargetNodeIDs[nID]; !ok {
 				env.Logger().Infof("skipping node %d for transport request %s: not in delivery rule target nodes", nID, trNumber)
 				continue
 			}

@@ -191,6 +191,9 @@ func preDeliverCheck(req DeliverOpRequest) error {
 	if err := db.Conn().First(&dr, req.DeliveryRequestID).Error; err != nil {
 		return fmt.Errorf("delivery request id %d not found", req.DeliveryRequestID)
 	}
+	if dr.AggregateStatus == lifecycle.AggCanceled {
+		return fmt.Errorf("delivery request #%d has been canceled, no operations allowed", req.DeliveryRequestID)
+	}
 	if dr.ApprovedBy == "" {
 		return fmt.Errorf("delivery request not approved yet")
 	}
@@ -345,4 +348,31 @@ func HandleCheckTr(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "msg": "valid TR: " + req.Op.TransportRequestNumber})
+}
+
+// CancelDrRequest is the request body for canceling a delivery request
+type CancelDrRequest struct {
+	DeliveryRequestID uint   `json:"deliveryRequestID"`
+	Reason            string `json:"reason"`
+}
+
+// HandleCancelDr cancels a delivery request with a reason.
+func HandleCancelDr(c *gin.Context) {
+	var req CancelDrRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
+		return
+	}
+	if req.DeliveryRequestID == 0 {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "missing deliveryRequestID"})
+		return
+	}
+
+	user := service.UserID(c)
+	if err := service.CancelDeliveryRequest(req.DeliveryRequestID, user, req.Reason); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "message": "Delivery request canceled successfully"})
 }
