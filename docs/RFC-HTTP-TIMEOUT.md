@@ -16,7 +16,7 @@
   - [阶段二：推广超时到所有 TMS 方法](#阶段二推广超时到所有-tms-方法-已完成)
   - [阶段三：重构 HttpClient](#阶段三重构-httpclient--context-作为参数--修复-cacheclient-已完成)
   - [阶段四：Service 层 + Handler 层 DI](#阶段四service-层--handler-层-di-已完成)
-  - [阶段五：移除 init() 副作用](#阶段五移除-init-副作用)
+  - [阶段五：移除 init() 副作用](#阶段五移除-init-副作用-已完成)
   - [阶段六：推广超时到 CPI 包 + 完善测试](#阶段六推广超时到-cpi-包--完善测试)
 - [4. 超时时间设计](#4-超时时间设计)
 - [5. 单元测试设计](#5-单元测试设计)
@@ -429,53 +429,116 @@ func main() {
 | `pkg/xsuaa/uaa.go` | `userEmail` → `UserEmail`（导出） |
 | `main.go` | 重写：显式创建所有依赖 → Service → Handler → SetupRoutes |
 
-### 阶段五：移除 init() 副作用
+### 阶段五：移除 init() 副作用（✅ 已完成）
 
 **目标**：`init()` 无副作用；所有有副作用的初始化在 `main()` 中显式执行
 
 > 注：原阶段五中的 Handler 层重构已合并到阶段四完成。此阶段仅处理 `init()` 移除。
 
-**5.1 移除 init() 副作用**
+**5.1 `pkg/env/env.go` 重构**
+
+| 改动 | 说明 |
+|------|------|
+| 移除 `init()` | 不再在 import 时执行 CF 环境读取和 HTTP 调用 |
+| 新增 `Init() error` | 导出函数，在 `main()` 中显式调用，可返回 error |
+| `Logger()` 加 nil 保护 | 调用前若未 `Init()`，自动创建 fallback logger |
+| `initDestinations()` 返回 error | 不再 panic，错误向上传递 |
 
 ```go
-// ❌ 当前 pkg/env/env.go
+// ❌ 重构前
 func init() {
+    appEnv, _ = cfenv.Current()   // panic on failure
+    logger = NewLogger()
+    initDestinations()            // HTTP call, panic on failure
+}
+
+// ✅ 重构后
+func Init() error {
     appEnv, err = cfenv.Current()
-    if err != nil { panic(...) }
-    initDestinations()  // HTTP 调用
+    if err != nil { return fmt.Errorf("failed to load app env: %w", err) }
+    logger = NewLogger()
+    return initDestinations()     // returns error instead of panic
 }
-
-// ❌ 当前 db/conn.go
-func init() {
-    conn, err = sql.Open("pgx", dbUri)
-    db, err = gorm.Open(...)
-    db.AutoMigrate(...)
-}
-
-// ✅ 重构后 main.go
-func main() {
-    // 显式、可错误处理的初始化
-    cfg, err := config.Load()       // 读取 CF env / 环境变量
-    if err != nil { log.Fatal(err) }
-
-    logger := logging.New(cfg)
-
-    db, err := database.Connect(cfg)
-    if err != nil { log.Fatal(err) }
-
-    svc := service.New(db, logger, ...)
-    h := handler.New(svc, logger)
-    // ...
+func Logger() *zap.SugaredLogger {
+    if logger == nil { logger = NewLogger() }  // fallback for pre-Init() usage
+    return logger
 }
 ```
 
-**5.2 涉及的文件**
+**5.2 `db/conn.go` 重构**
 
-| 文件 | 改动 |
+| 改动 | 说明 |
 |------|------|
-| `pkg/env/env.go` | 移除 `init()`，改为导出构造函数 |
-| `db/conn.go` | 移除 `init()`，改为导出构造函数 |
-| `main.go` | 显式调用 env/db 初始化函数 |
+| 移除 `init()` | 不再在 import 时连接数据库 |
+| 移除 `var logger = zapgorm2.New(env.Logger().Desugar())` | 包级别变量不再依赖 env |
+| 新增 `Connect() (*gorm.DB, error)` | 导出函数，在 `main()` 中显式调用 |
+| logger 移入 `Connect()` 内部 | 延迟创建，确保 `env.Init()` 已先执行 |
+
+```go
+// ❌ 重构前
+var logger = zapgorm2.New(env.Logger().Desugar())  // package-level, triggers env.init()
+func init() { /* connect DB, AutoMigrate, panic on failure */ }
+
+// ✅ 重构后
+func Connect() (*gorm.DB, error) {
+    logger := zapgorm2.New(env.Logger().Desugar())  // local var, safe after env.Init()
+    // connect DB, AutoMigrate, return error instead of panic
+}
+```
+
+**5.3 包级别 `var logger = env.Logger()` 消除**
+
+四个包有 `var logger = env.Logger()`，会在 import 时触发 env 初始化。改为 lazy function：
+
+| 包 | 重构方式 |
+|----|---------|
+| `pkg/tms/tms.go` | `var logger = env.Logger()` → `func logger() *zap.SugaredLogger { return env.Logger() }` |
+| `pkg/cpi/cpi.go` | 同上 |
+| `pkg/xsuaa/uaa.go` | 同上 |
+| `db/conn.go` | 移入 `Connect()` 内部作为局部变量 |
+
+所有调用点 `logger.XXX` 改为 `logger().XXX`。
+
+**5.4 `pkg/cpi/sync_github.go` 包级别变量修复**
+
+```go
+// ❌ 重构前 — import 时触发 env.Destinations()
+var gitAuth = &auth.BasicAuth{
+    Username: env.Destinations()["API_GIT_MMT_SCC"].User,
+    Password: env.Destinations()["API_GIT_MMT_SCC"].Password,
+}
+
+// ✅ 重构后 — 延迟到运行时
+func gitAuth() *auth.BasicAuth {
+    return &auth.BasicAuth{
+        Username: env.Destinations()["API_GIT_MMT_SCC"].User,
+        Password: env.Destinations()["API_GIT_MMT_SCC"].Password,
+    }
+}
+```
+
+**5.5 `main.go` 显式初始化**
+
+```go
+func main() {
+    if err := env.Init(); err != nil {
+        panic("failed to initialize env: " + err.Error())
+    }
+    database, err := db.Connect()
+    if err != nil {
+        panic("failed to connect database: " + err.Error())
+    }
+    // ... create clients, service, handler ...
+}
+```
+
+**5.6 测试验证**
+
+`go test -v ./pkg/tms/...` 现在无需 `SKIP_DB_INIT=true` 即可运行，全部 10 个测试通过。import 任何包不再触发 panic。
+
+**5.7 不需要修改的文件**
+
+`pkg/notify/email.go` 和 `pkg/notify/jira.go` 中的 `env.Logger()` 和 `env.GetDestination()` 调用发生在运行时（方法内部），此时 `env.Init()` 已在 `main()` 中完成，无需修改。
 
 ### 阶段六：推广超时到 CPI 包 + 完善测试
 
@@ -827,10 +890,10 @@ WithTimeout(parent, 30s)
 
 **运行命令**：
 ```bash
-SKIP_DB_INIT=true go test -v ./pkg/tms/...
+go test -v ./pkg/tms/...
 ```
 
-> 注：测试仍需 `SKIP_DB_INIT` 是因为 `pkg/tms/tms.go` import 了 `db` 包，触发 `db/conn.go` 的 `init()`。阶段四完成后将不再需要。
+> 阶段五完成后，测试不再需要 `SKIP_DB_INIT=true`。import 任何包不再触发 `init()` panic。
 
 ### 5.2 阶段四后的测试（目标状态）
 
@@ -890,6 +953,14 @@ go test ./...   # 不需要任何环境变量
   - **main.go**：重写为显式依赖创建 + 注入。Client 在启动时创建一次成为长生命周期对象，解决了阶段三遗留的"每次 NewClient 都 fetchToken"问题
   - **CPI 多 tenant**：`cpi.Manager` 通过 `sync.RWMutex` + double-checked locking 延迟创建并缓存 client
   - **`pkg/xsuaa/uaa.go`**：`userEmail` → `UserEmail`（导出供 Service 注入）
+  - **构建验证**：`go build ./...` 零错误通过
+- [x] 阶段五：移除 init() 副作用
+  - **`pkg/env/env.go`**：移除 `init()`，新增 `Init() error`；`Logger()` 加 nil 保护（未初始化时返回 nop logger）；`initDestinations()` 改为返回 error
+  - **`db/conn.go`**：移除 `init()` 和包级别 `var logger`，新增 `Connect() (*gorm.DB, error)` 显式初始化函数
+  - **包级别 `var logger` 消除**：`pkg/tms/tms.go`、`pkg/cpi/cpi.go`、`pkg/xsuaa/uaa.go` 中 `var logger = env.Logger()` 改为 `func logger() *zap.SugaredLogger`，所有 `logger.XXX` → `logger().XXX`
+  - **`pkg/cpi/sync_github.go`**：`var gitAuth = ...` 改为 `func gitAuth()` 延迟获取，避免 import 时触发 env 初始化
+  - **`main.go`**：添加 `env.Init()` 和 `db.Connect()` 显式调用，移除 `var logger = env.Logger().Desugar()`
+  - **测试验证**：`go test -v ./pkg/tms/...` 全部 10 个测试通过，无需 `SKIP_DB_INIT=true`
   - **构建验证**：`go build ./...` 零错误通过
 
 ---
@@ -960,6 +1031,16 @@ go test ./...   # 不需要任何环境变量
 - `pkg/xsuaa/uaa.go` — `userEmail` → `UserEmail`（导出）
 - `main.go` — 重写：显式依赖创建 → Service → Handler → SetupRoutes
 
+**阶段五**：
+- `pkg/env/env.go` — 移除 `init()`，新增 `Init() error`；`Logger()` 加 nil 保护；`initDestinations()` 返回 error
+- `db/conn.go` — 移除 `init()` 和 `var logger`，新增 `Connect() (*gorm.DB, error)`
+- `pkg/tms/tms.go` — `var logger = env.Logger()` → `func logger() *zap.SugaredLogger`；所有 `logger.XXX` → `logger().XXX`
+- `pkg/tms/v1.go` — `logger.XXX` → `logger().XXX`
+- `pkg/cpi/cpi.go` — `var logger = env.Logger()` → `func logger() *zap.SugaredLogger`；所有 `logger.XXX` → `logger().XXX`
+- `pkg/cpi/sync_github.go` — `var gitAuth = ...` → `func gitAuth()`；`logger.Infof` → `logger().Infof`
+- `pkg/xsuaa/uaa.go` — `var logger = env.Logger()` → `func logger() *zap.SugaredLogger`；所有 `logger.XXX` → `logger().XXX`
+- `main.go` — 添加 `env.Init()` + `db.Connect()` 显式调用；移除 `var logger = env.Logger().Desugar()`
+
 ### 10.2 各阶段待修改的文件
 
 **阶段四**（Service 层 + Handler 层 DI）— ✅ 已完成：
@@ -993,10 +1074,15 @@ Handler 层重构：
 - `pkg/xsuaa/uaa.go` — `userEmail` → `UserEmail`（导出）
 - `main.go` — 重写：显式创建所有依赖 → Service → Handler → SetupRoutes
 
-**阶段五**（移除 init 副作用）：
-- `pkg/env/env.go` — 移除 init()，改为导出构造函数
-- `db/conn.go` — 移除 init()，改为导出构造函数
-- `main.go` — 显式调用 env/db 初始化函数
+**阶段五**（移除 init 副作用）— ✅ 已完成：
+- `pkg/env/env.go` — 移除 `init()`，新增 `Init() error`；`Logger()` 加 nil 保护（未初始化时返回 nop logger）；`initDestinations()` 改为返回 error
+- `db/conn.go` — 移除 `init()` 和包级别 `var logger`，新增 `Connect() (*gorm.DB, error)` 显式初始化函数
+- `pkg/tms/tms.go` — `var logger = env.Logger()` → `func logger() *zap.SugaredLogger`；所有 `logger.XXX` → `logger().XXX`
+- `pkg/tms/v1.go` — `logger.XXX` → `logger().XXX`
+- `pkg/cpi/cpi.go` — `var logger = env.Logger()` → `func logger() *zap.SugaredLogger`；所有 `logger.XXX` → `logger().XXX`
+- `pkg/cpi/sync_github.go` — `var gitAuth = ...` → `func gitAuth()` 延迟获取；`logger.Infof` → `logger().Infof`
+- `pkg/xsuaa/uaa.go` — `var logger = env.Logger()` → `func logger() *zap.SugaredLogger`；所有 `logger.XXX` → `logger().XXX`
+- `main.go` — 添加 `env.Init()` + `db.Connect()` 显式调用；移除 `var logger = env.Logger().Desugar()`
 
 ### 10.3 参考资料
 

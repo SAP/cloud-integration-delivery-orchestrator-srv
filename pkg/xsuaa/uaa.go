@@ -10,6 +10,8 @@ import (
 
 	"net/http"
 	"net/url"
+
+	"go.uber.org/zap"
 )
 
 type UaaClient struct {
@@ -22,7 +24,8 @@ type cacheEntry struct {
 	expiresAt time.Time
 }
 
-var logger = env.Logger()
+// logger returns the package logger, resolved lazily via env.Logger().
+func logger() *zap.SugaredLogger { return env.Logger() }
 
 const cacheTTL = 30 * time.Hour
 
@@ -59,19 +62,19 @@ func GetUserEmail(ctx context.Context, userID string) (string, error) {
 // get user by sub/user_id from JWT claim body
 func (uaa *UaaClient) UserInfo(ctx context.Context, userID string) (*db.UserInfo, error) {
 	fullUrl := fmt.Sprintf("%s/Users/%s", uaa.ApiURL, userID)
-	logger.Infof("searching user info by sub/user_id, at %s", fullUrl)
+	logger().Infof("searching user info by sub/user_id, at %s", fullUrl)
 	request := env.HttpRequest{
 		ApiURL: fullUrl,
 		Method: http.MethodGet,
 	}
 	body, _, err := uaa.Do(ctx, &request)
 	if err != nil {
-		logger.Errorf("Error when getting uaa user by id, %s", err)
+		logger().Errorf("Error when getting uaa user by id, %s", err)
 		return nil, err
 	}
 	var resource Resource
 	if err := json.Unmarshal(*body, &resource); err != nil {
-		logger.Errorf("Error when unmarshal uaa user response, %s", err)
+		logger().Errorf("Error when unmarshal uaa user response, %s", err)
 		return nil, err
 	}
 	user := db.UserInfo{
@@ -104,7 +107,7 @@ func (uaa *UaaClient) SearchByEmail(ctx context.Context, email string, curUserOr
 	q := url.Values{}
 	q.Set("filter", fmt.Sprintf("email co %q", email))
 	fullURL := fmt.Sprintf("%s/Users?%s", uaa.ApiURL, q.Encode())
-	logger.Infof("Starting to get all user info: %s\n", fullURL)
+	logger().Infof("Starting to get all user info: %s\n", fullURL)
 	request := env.HttpRequest{
 		ApiURL: fullURL,
 		Method: http.MethodGet,
@@ -112,15 +115,15 @@ func (uaa *UaaClient) SearchByEmail(ctx context.Context, email string, curUserOr
 
 	respBodyContent, _, err := uaa.Do(ctx, &request)
 	if err != nil {
-		logger.Errorf("Error when getting uaa users by email, %s", err)
+		logger().Errorf("Error when getting uaa users by email, %s", err)
 		return []db.UserInfo{}, err
 	}
 	var document Document
 	if err := json.Unmarshal(*respBodyContent, &document); err != nil {
-		logger.Errorf("Error when unmarshal uaa users response, %s", err)
+		logger().Errorf("Error when unmarshal uaa users response, %s", err)
 		return []db.UserInfo{}, err
 	}
-	logger.Infof("Successfully retrieved uaa users: %+v", document)
+	logger().Infof("Successfully retrieved uaa users: %+v", document)
 	users := make([]db.UserInfo, 0)
 	for _, u := range document.Resources {
 		if u.Origin != curUserOrigin {

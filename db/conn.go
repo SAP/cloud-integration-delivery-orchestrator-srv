@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"fmt"
 	"os"
 
 	"mmt-delivery/pkg/env"
@@ -11,9 +12,19 @@ import (
 	"moul.io/zapgorm2"
 )
 
-var logger = zapgorm2.New(env.Logger().Desugar())
+var db *gorm.DB
 
-func init() {
+// Conn returns the global database connection.
+// Must be called after Connect().
+func Conn() *gorm.DB {
+	return db
+}
+
+// Connect initializes the database connection and runs AutoMigrate.
+// Must be called explicitly in main().
+func Connect() (*gorm.DB, error) {
+	logger := zapgorm2.New(env.Logger().Desugar())
+
 	var conn *sql.DB
 	var err error
 	remote, ok := os.LookupEnv("REMOTE")
@@ -22,17 +33,17 @@ func init() {
 		dbUri := env.PostgreUri()
 		conn, err = sql.Open("pgx", dbUri)
 		if err != nil {
-			panic("failed to connect to remote database" + err.Error())
+			return nil, fmt.Errorf("failed to connect to remote database: %w", err)
 		}
 	} else {
 		env.Logger().Info("Connecting to local database...")
 		localDbUri := os.Getenv("LOCAL_POSTGRES_URI")
 		if localDbUri == "" {
-			panic("LOCAL_POSTGRES_URI environment variable is not set")
+			return nil, fmt.Errorf("LOCAL_POSTGRES_URI environment variable is not set")
 		}
 		conn, err = sql.Open("pgx", localDbUri)
 		if err != nil {
-			panic("failed to connect to local database" + err.Error())
+			return nil, fmt.Errorf("failed to connect to local database: %w", err)
 		}
 	}
 
@@ -41,19 +52,14 @@ func init() {
 		&gorm.Config{Logger: logger},
 	)
 	if err != nil {
-		panic("failed to connect database: " + err.Error())
+		return nil, fmt.Errorf("failed to connect database: %w", err)
 	}
 	// AutoMigrate core legacy models plus new lifecycle models
 	if err := db.AutoMigrate(
 		&CpiTenant{}, &DeliveryRule{}, &DeliveryRequest{}, &ArtifactTenantOperation{}, &BatchJob{},
 		&Artifact{}, &Condition{},
 	); err != nil {
-		panic("failed to migrate: " + err.Error())
+		return nil, fmt.Errorf("failed to migrate: %w", err)
 	}
-}
-
-var db *gorm.DB
-
-func Conn() *gorm.DB {
-	return db
+	return db, nil
 }

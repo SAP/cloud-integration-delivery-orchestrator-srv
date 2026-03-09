@@ -21,9 +21,19 @@ import (
 	"github.com/lestrrat-go/jwx/jwk"
 )
 
-var logger = env.Logger().Desugar()
-
 func main() {
+	// --- Explicit initialization (no more init() side effects) ---
+	if err := env.Init(); err != nil {
+		panic("failed to initialize env: " + err.Error())
+	}
+
+	logger := env.Logger().Desugar()
+
+	database, err := db.Connect()
+	if err != nil {
+		panic("failed to connect database: " + err.Error())
+	}
+
 	ctx := context.Background()
 
 	// --- Create long-lived clients ---
@@ -41,7 +51,7 @@ func main() {
 
 	// --- Build service with all injected dependencies ---
 	svc := &service.Service{
-		DB:     db.Conn(),
+		DB:     database,
 		Logger: env.Logger(),
 		TMS:    tmsClient,
 		CPI: func(ctx context.Context, tenant string) (service.CPIClient, error) {
@@ -54,7 +64,7 @@ func main() {
 	// --- Build handler with all injected dependencies ---
 	h := handler.NewHandler(
 		svc,
-		db.Conn(),
+		database,
 		env.Logger(),
 		tmsClient,
 		cpiManager,

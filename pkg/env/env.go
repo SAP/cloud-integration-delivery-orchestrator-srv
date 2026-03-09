@@ -19,19 +19,29 @@ var logger *zap.SugaredLogger
 
 var appEnv *cfenv.App
 
-func init() {
+// Logger returns the package-level logger.
+// Safe to call before Init() — returns a fallback logger if not yet initialized.
+func Logger() *zap.SugaredLogger {
+	if logger == nil {
+		logger = NewLogger()
+	}
+	return logger
+}
+
+// Init initializes the env package: loads CF environment, creates logger, fetches destinations.
+// Must be called explicitly in main() before using TmsCredential/UaaCredential/Destinations.
+func Init() error {
 	var err error
 	appEnv, err = cfenv.Current()
 	if err != nil {
-		panic("Failed to load app env: " + err.Error())
+		return fmt.Errorf("failed to load app env: %w", err)
 	}
 	logLevel = zap.InfoLevel
 	logger = NewLogger()
-	initDestinations()
-}
-
-func Logger() *zap.SugaredLogger {
-	return logger
+	if err := initDestinations(); err != nil {
+		return fmt.Errorf("failed to init destinations: %w", err)
+	}
+	return nil
 }
 
 func Destinations() map[string]Destination {
@@ -133,12 +143,12 @@ type Destination struct {
 	Port                string `json:"port"` // SMTP port, etc.
 }
 
-// Get Destinations(including credentials)
-func initDestinations() {
+// initDestinations fetches destinations from the destination service.
+func initDestinations() error {
 	ctx := context.Background()
 	services, err := appEnv.Services.WithLabel("destination")
 	if err != nil || len(services) == 0 {
-		logger.Panic("Failed to get service with label 'destination'")
+		return fmt.Errorf("failed to get service with label 'destination'")
 	}
 	service := services[0]
 	authUrl, _ := service.CredentialString("url")
@@ -150,8 +160,7 @@ func initDestinations() {
 	clientSecret, _ := service.CredentialString("clientsecret")
 	client, err := NewClient(ctx, clientId, clientSecret, authUrl, apiUrl)
 	if err != nil {
-		logger.Panic("Error Creating destination client")
-		return
+		return fmt.Errorf("error creating destination client: %w", err)
 	}
 
 	apiUrl = fmt.Sprintf("%s/destination-configuration/v1/subaccountDestinations", apiUrl)
@@ -161,11 +170,11 @@ func initDestinations() {
 	}
 	resp, _, err := client.Do(ctx, req)
 	if err != nil {
-		logger.Panic("Error while Get subaccount destinations")
+		return fmt.Errorf("error getting subaccount destinations: %w", err)
 	}
 	var destinations []Destination
 	if err := json.Unmarshal(*resp, &destinations); err != nil {
-		logger.Panic("Failed to unmarchal destination")
+		return fmt.Errorf("failed to unmarshal destinations: %w", err)
 	}
 
 	m := make(map[string]Destination)
@@ -173,6 +182,7 @@ func initDestinations() {
 		m[v.Name] = v
 	}
 	destinationMap = m
+	return nil
 }
 
 func NewLogger() *zap.SugaredLogger {

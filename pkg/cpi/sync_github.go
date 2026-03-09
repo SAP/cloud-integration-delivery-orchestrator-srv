@@ -26,10 +26,16 @@ import (
 var githubClient *github.Client
 
 var gitRepo *git.Repository
-var gitAuth = &auth.BasicAuth{
-	Username: env.Destinations()["API_GIT_MMT_SCC"].User,
-	Password: env.Destinations()["API_GIT_MMT_SCC"].Password,
+
+// gitAuth returns git credentials lazily from env.Destinations().
+// Must be called after env.Init().
+func gitAuth() *auth.BasicAuth {
+	return &auth.BasicAuth{
+		Username: env.Destinations()["API_GIT_MMT_SCC"].User,
+		Password: env.Destinations()["API_GIT_MMT_SCC"].Password,
+	}
 }
+
 var Cpi_Base_Repo = "mmt-cpi-packages"
 var Artifact_Base_Dir = "./artifacts"
 
@@ -39,7 +45,7 @@ func init_disable() {
 		gitRepo, err = git.PlainClone("./mmt-cpi-packages/", false, &git.CloneOptions{
 			URL:      "https://github.wdf.sap.corp/MaCo-MMT/mmt-cpi-packages",
 			Progress: os.Stdout,
-			Auth:     gitAuth,
+			Auth:     gitAuth(),
 		})
 		if err != nil {
 			panic(fmt.Errorf("error when cloning git repo: %w", err))
@@ -206,7 +212,7 @@ func (c *CpiClient) UploadArtifact(ctx context.Context, artifactId string, artif
 	if err != nil {
 		return fmt.Errorf("error while uploading artifact: %s", err)
 	}
-	logger.Infof("Artifact %s:%s uploaded successfully, response: %s", artifactId, artifactVersion, string(*response))
+	logger().Infof("Artifact %s:%s uploaded successfully, response: %s", artifactId, artifactVersion, string(*response))
 	return nil
 }
 
@@ -365,7 +371,7 @@ func CommitAndPushChanges(path string, tag string, branch, modifiedBy, modifiedA
 
 	// Push the changes
 	if err := gitRepo.Push(&git.PushOptions{
-		Auth:       gitAuth,
+		Auth:       gitAuth(),
 		FollowTags: true,
 		Force:      true,
 	}); err != nil {
