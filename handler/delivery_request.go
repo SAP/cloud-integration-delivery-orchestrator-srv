@@ -14,7 +14,7 @@ import (
 	"mmt-delivery/service"
 )
 
-func CreateDr(c *gin.Context) {
+func (h *Handler) CreateDr(c *gin.Context) {
 	var dr db.DeliveryRequest
 	var err error
 	if err = c.ShouldBindJSON(&dr); err != nil {
@@ -35,7 +35,7 @@ func CreateDr(c *gin.Context) {
 		return
 	}
 	var rule db.DeliveryRule
-	if rule, err = service.GetDeliveryRuleWithAcc(dr.DeliveryRule.ID); err != nil {
+	if rule, err = h.svc.GetDeliveryRuleWithAcc(dr.DeliveryRule.ID); err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": fmt.Errorf("failed to generate target routes and nodes: %s", err)})
 		return
 	}
@@ -47,7 +47,7 @@ func CreateDr(c *gin.Context) {
 	user := service.UserID(c)
 	dr.CreatedBy, dr.UpdatedBy = user, user
 
-	if err := db.Conn().Create(&dr).Error; err != nil {
+	if err := h.db.Create(&dr).Error; err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
 	}
@@ -55,14 +55,14 @@ func CreateDr(c *gin.Context) {
 }
 
 // update DeliveryRequest, not including ops
-func UpdateDr(c *gin.Context) {
+func (h *Handler) UpdateDr(c *gin.Context) {
 	var dr db.DeliveryRequest
 	if err := c.ShouldBindJSON(&dr); err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
 		return
 	}
 	var existing db.DeliveryRequest
-	if err := db.Conn().First(&existing, dr.ID).Error; err != nil {
+	if err := h.db.First(&existing, dr.ID).Error; err != nil {
 		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"status": "fail", "code": 404, "error": fmt.Sprintf("delivery request id %d not found", dr.ID)})
 		return
 	}
@@ -70,7 +70,7 @@ func UpdateDr(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "only pending or waiting approval delivery request can be updated"})
 		return
 	}
-	rule, err := service.GetDeliveryRuleWithAcc(dr.DeliveryRule.ID)
+	rule, err := h.svc.GetDeliveryRuleWithAcc(dr.DeliveryRule.ID)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
@@ -91,7 +91,7 @@ func UpdateDr(c *gin.Context) {
 		dr.UpdatedBy = user
 	}
 	existing.Name = dr.Name
-	if err := db.Conn().Updates(&existing).Error; err != nil {
+	if err := h.db.Updates(&existing).Error; err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
 	}
@@ -99,9 +99,9 @@ func UpdateDr(c *gin.Context) {
 }
 
 // List all DeliveryRequests
-func GetAllDr(c *gin.Context) {
+func (h *Handler) GetAllDr(c *gin.Context) {
 	var drList []db.DeliveryRequest
-	if err := db.Conn().
+	if err := h.db.
 		Preload("SourceTenant").
 		Preload("DeliveryRule").
 		Find(&drList).Error; err != nil {
@@ -112,14 +112,14 @@ func GetAllDr(c *gin.Context) {
 }
 
 // Get a single DeliveryRequest by id
-func GetDeliveryRequest(c *gin.Context) {
+func (h *Handler) GetDeliveryRequest(c *gin.Context) {
 	raw := c.Param("id")
 	drID, err := strconv.Atoi(raw)
 	if err != nil || drID <= 0 {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "invalid id"})
 		return
 	}
-	dr, err := service.QueryDrWithAssociations(uint(drID))
+	dr, err := h.svc.QueryDrWithAssociations(uint(drID))
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
@@ -128,7 +128,7 @@ func GetDeliveryRequest(c *gin.Context) {
 }
 
 // DeleteDr DeliveryRequest by id
-func DeleteDr(c *gin.Context) {
+func (h *Handler) DeleteDr(c *gin.Context) {
 	// TODO: check if dr can be deleted. if approved, cannot delete
 	raw := c.Param("id")
 	id, err := strconv.Atoi(raw)
@@ -136,7 +136,7 @@ func DeleteDr(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "invalid id"})
 		return
 	}
-	if err := db.Conn().Delete(&db.DeliveryRequest{}, id).Error; err != nil {
+	if err := h.db.Delete(&db.DeliveryRequest{}, id).Error; err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
 	}
@@ -183,12 +183,12 @@ type DeliverOpRequest struct {
 }
 
 // General checks of dr before deliver(import/deploy) ops, like a hook
-func preDeliverCheck(req DeliverOpRequest) error {
+func (h *Handler) preDeliverCheck(req DeliverOpRequest) error {
 	if len(req.OpIDs) == 0 || req.TargetTenant == 0 || req.DeliveryRequestID == 0 {
 		return fmt.Errorf("missing opIDs, targetNode or deliveryRequestID")
 	}
 	var dr db.DeliveryRequest
-	if err := db.Conn().First(&dr, req.DeliveryRequestID).Error; err != nil {
+	if err := h.db.First(&dr, req.DeliveryRequestID).Error; err != nil {
 		return fmt.Errorf("delivery request id %d not found", req.DeliveryRequestID)
 	}
 	if dr.AggregateStatus == lifecycle.AggCanceled {
@@ -200,18 +200,18 @@ func preDeliverCheck(req DeliverOpRequest) error {
 	return nil
 }
 
-func HandleImportOps(c *gin.Context) {
+func (h *Handler) HandleImportOps(c *gin.Context) {
 	var req DeliverOpRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
 		return
 	}
-	if err := preDeliverCheck(req); err != nil {
+	if err := h.preDeliverCheck(req); err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
 		return
 	}
 	user := service.UserID(c)
-	success, err := service.BatchImportTenantOps(req.DeliveryRequestID, req.OpIDs, req.TargetTenant, user)
+	success, err := h.svc.BatchImportTenantOps(req.DeliveryRequestID, req.OpIDs, req.TargetTenant, user)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
@@ -219,18 +219,18 @@ func HandleImportOps(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": success, "msg": "Import triggered"})
 }
 
-func HandleDeployOps(c *gin.Context) {
+func (h *Handler) HandleDeployOps(c *gin.Context) {
 	var req DeliverOpRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
 		return
 	}
-	if err := preDeliverCheck(req); err != nil {
+	if err := h.preDeliverCheck(req); err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
 		return
 	}
 	user := service.UserID(c)
-	success, err := service.BatchDeployTenantOps(req.DeliveryRequestID, req.OpIDs, req.TargetTenant, user)
+	success, err := h.svc.BatchDeployTenantOps(req.DeliveryRequestID, req.OpIDs, req.TargetTenant, user)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
@@ -238,7 +238,7 @@ func HandleDeployOps(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": success, "msg": "Deploy triggered"})
 }
 
-func HandleSyncState(ctx *gin.Context) {
+func (h *Handler) HandleSyncState(ctx *gin.Context) {
 	drIDStr := ctx.Param("deliveryRequestId")
 	if drIDStr == "" {
 		ctx.JSON(http.StatusBadRequest, gin.H{"status": 400, "error": "missing query param: deliveryRequestId"})
@@ -250,7 +250,7 @@ func HandleSyncState(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"status": 400, "error": "invalid deliveryRequestId"})
 		return
 	}
-	if err := service.SyncDeliveryStatus(drID, user); err != nil {
+	if err := h.svc.SyncDeliveryStatus(drID, user); err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"status": 500, "error": err.Error()})
 		return
 	}
@@ -262,12 +262,12 @@ type DeleteOpsRequest struct {
 	OpIds []uint `json:"opIds"`
 }
 
-func HandleDeleteOps(c *gin.Context) {
+func (h *Handler) HandleDeleteOps(c *gin.Context) {
 	var req DeleteOpsRequest
 	if err := c.ShouldBindBodyWithJSON(&req); err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
 	}
-	if err := service.DeleteTenantOps(req.OpIds); err != nil {
+	if err := h.svc.DeleteTenantOps(req.OpIds); err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
 	}
@@ -281,7 +281,7 @@ type OpsRequest struct {
 	DeliveryRequestID uint                         `json:"deliveryRequestID"`
 }
 
-func HandleInsertOps(c *gin.Context) {
+func (h *Handler) HandleInsertOps(c *gin.Context) {
 	var req OpsRequest
 	if err := c.ShouldBindBodyWithJSON(&req); err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
@@ -293,7 +293,7 @@ func HandleInsertOps(c *gin.Context) {
 		return
 	}
 	var ops []db.ArtifactTenantOperation
-	ops, err := service.InsertTenantOps(req.DeliveryRequestID, req.Ops, user)
+	ops, err := h.svc.InsertTenantOps(req.DeliveryRequestID, req.Ops, user)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
@@ -302,14 +302,14 @@ func HandleInsertOps(c *gin.Context) {
 
 }
 
-func HandleUpdateOps(c *gin.Context) {
+func (h *Handler) HandleUpdateOps(c *gin.Context) {
 	var req OpsRequest
 	if err := c.ShouldBindBodyWithJSON(&req); err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
 		return
 	}
 	user := service.UserID(c)
-	ops, err := service.UpdateTenantOps(req.DeliveryRequestID, req.Ops, user)
+	ops, err := h.svc.UpdateTenantOps(req.DeliveryRequestID, req.Ops, user)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
@@ -317,7 +317,7 @@ func HandleUpdateOps(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": ops})
 }
 
-func HandleCheckTr(c *gin.Context) {
+func (h *Handler) HandleCheckTr(c *gin.Context) {
 	var req struct {
 		Op                db.ArtifactTenantOperation `json:"op"`
 		DeliveryRequestID uint                       `json:"deliveryRequestID"`
@@ -327,7 +327,7 @@ func HandleCheckTr(c *gin.Context) {
 		return
 	}
 	var dr db.DeliveryRequest
-	if err := db.Conn().First(&dr, req.DeliveryRequestID).Error; err != nil {
+	if err := h.db.First(&dr, req.DeliveryRequestID).Error; err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": fmt.Sprintf("failed to get delivery request id %d: %s", req.DeliveryRequestID, err)})
 		return
 	}
@@ -337,12 +337,12 @@ func HandleCheckTr(c *gin.Context) {
 		return
 	}
 	var sourceTenant db.CpiTenant
-	if err := db.Conn().First(&sourceTenant, sourceTenantID).Error; err != nil {
+	if err := h.db.First(&sourceTenant, sourceTenantID).Error; err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": fmt.Sprintf("failed to get source tenant id %d: %s", sourceTenantID, err)})
 		return
 	}
 
-	_, err := service.TrExist(&req.Op, &sourceTenant)
+	_, err := h.svc.TrExist(&req.Op, &sourceTenant)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
@@ -357,7 +357,7 @@ type CancelDrRequest struct {
 }
 
 // HandleCancelDr cancels a delivery request with a reason.
-func HandleCancelDr(c *gin.Context) {
+func (h *Handler) HandleCancelDr(c *gin.Context) {
 	var req CancelDrRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
@@ -369,7 +369,7 @@ func HandleCancelDr(c *gin.Context) {
 	}
 
 	user := service.UserID(c)
-	if err := service.CancelDeliveryRequest(req.DeliveryRequestID, user, req.Reason); err != nil {
+	if err := h.svc.CancelDeliveryRequest(req.DeliveryRequestID, user, req.Reason); err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
 		return
 	}

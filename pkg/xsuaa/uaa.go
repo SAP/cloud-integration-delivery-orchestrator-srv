@@ -53,7 +53,7 @@ func GetUserEmail(ctx context.Context, userID string) (string, error) {
 			return "", err
 		}
 	}
-	return globalClient.userEmail(ctx, userID)
+	return globalClient.UserEmail(ctx, userID)
 }
 
 // get user by sub/user_id from JWT claim body
@@ -82,7 +82,7 @@ func (uaa *UaaClient) UserInfo(ctx context.Context, userID string) (*db.UserInfo
 	return &user, nil
 }
 
-func (uaa *UaaClient) userEmail(ctx context.Context, userID string) (string, error) {
+func (uaa *UaaClient) UserEmail(ctx context.Context, userID string) (string, error) {
 	if entry, exists := uaa.emailCache[userID]; exists {
 		if time.Now().Before(entry.expiresAt) {
 			return entry.email, nil

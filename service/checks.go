@@ -6,15 +6,13 @@ import (
 	"fmt"
 	"mmt-delivery/consts"
 	"mmt-delivery/db"
-	"mmt-delivery/pkg/cpi"
-	"mmt-delivery/pkg/tms"
 	"strings"
 
 	"github.com/gobwas/glob"
 	"golang.org/x/mod/semver"
 )
 
-func DeliveryRuleCheck(op *db.ArtifactTenantOperation, rule *db.DeliveryRule) error {
+func (s *Service) DeliveryRuleCheck(op *db.ArtifactTenantOperation, rule *db.DeliveryRule) error {
 	// artifact version matches pattern in delivery rule
 	if err := checkVersionPattern(op, rule); err != nil {
 		return err
@@ -24,7 +22,7 @@ func DeliveryRuleCheck(op *db.ArtifactTenantOperation, rule *db.DeliveryRule) er
 			continue
 		}
 		// before deliver, should check if version would cause downgrade in target tenants
-		if err := checkVersionDowngradeInTenant(op, &tenant); err != nil {
+		if err := s.checkVersionDowngradeInTenant(op, &tenant); err != nil {
 			return err
 		}
 	}
@@ -42,8 +40,9 @@ func checkVersionPattern(op *db.ArtifactTenantOperation, rule *db.DeliveryRule) 
 	}
 	return nil
 }
-func checkVersionDowngradeInTenant(op *db.ArtifactTenantOperation, targetTenant *db.CpiTenant) error {
-	cli, err := cpi.NewClient(context.Background(), targetTenant.CpiEndpoint.Name)
+
+func (s *Service) checkVersionDowngradeInTenant(op *db.ArtifactTenantOperation, targetTenant *db.CpiTenant) error {
+	cli, err := s.CPI(context.Background(), targetTenant.CpiEndpoint.Name)
 	if err != nil {
 		return err
 	}
@@ -77,16 +76,12 @@ func checkVersionDowngradeInTenant(op *db.ArtifactTenantOperation, targetTenant 
 }
 
 // check tr Number existence in source tenant, and check state is RELEASED
-func TrExist(op *db.ArtifactTenantOperation, sourceTenant *db.CpiTenant) (bool, error) {
+func (s *Service) TrExist(op *db.ArtifactTenantOperation, sourceTenant *db.CpiTenant) (bool, error) {
 	trNumber := op.TransportRequestNumber
 	if trNumber == "" {
 		return false, fmt.Errorf("artifact %s has empty transport request number", op.ArtifactTechID)
 	}
-	tmsCli, err := tms.NewClient(context.Background())
-	if err != nil {
-		return false, fmt.Errorf("error when creating tms client: %s", err)
-	}
-	trV1, err := tmsCli.GetTransportRequest(context.Background(), trNumber) // v1 to check state
+	trV1, err := s.TMS.GetTransportRequest(context.Background(), trNumber) // v1 to check state
 	if err != nil {
 		return false, fmt.Errorf("error when getting transport request %s, the tr number may not exist, error message: %s", trNumber, err)
 	}
@@ -113,11 +108,11 @@ func TrExist(op *db.ArtifactTenantOperation, sourceTenant *db.CpiTenant) (bool, 
 	return true, nil
 }
 
-func BatchTrExist(ops []db.ArtifactTenantOperation, sourceTenant *db.CpiTenant) (bool, error) {
+func (s *Service) BatchTrExist(ops []db.ArtifactTenantOperation, sourceTenant *db.CpiTenant) (bool, error) {
 	errOps := make(map[uint]error)
 	for i := range ops {
 		op := &ops[i]
-		_, err := TrExist(op, sourceTenant)
+		_, err := s.TrExist(op, sourceTenant)
 		if err != nil {
 			errOps[op.ID] = err
 		}

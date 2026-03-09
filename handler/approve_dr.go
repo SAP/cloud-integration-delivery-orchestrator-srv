@@ -9,7 +9,7 @@ import (
 )
 
 // add approvers to delivery request
-func HandleRequestApproval(ctx *gin.Context) {
+func (h *Handler) HandleRequestApproval(ctx *gin.Context) {
 	var approvalReq struct {
 		Approvers []string `json:"approvers"`
 		DrID      uint     `json:"deliveryRequestId"`
@@ -24,14 +24,14 @@ func HandleRequestApproval(ctx *gin.Context) {
 		return
 	}
 	user := service.UserID(ctx)
-	if err := service.RequestApproval(approvalReq.DrID, user, approvalReq.Approvers, approvalReq.Comment); err != nil {
+	if err := h.svc.RequestApproval(approvalReq.DrID, user, approvalReq.Approvers, approvalReq.Comment); err != nil {
 		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": "approval request submitted"})
 }
 
-func HandleApproveDeliveryRequest(ctx *gin.Context) {
+func (h *Handler) HandleApproveDeliveryRequest(ctx *gin.Context) {
 	var approvalReq struct {
 		DrID    uint   `json:"deliveryRequestId"`
 		Comment string `json:"comment"`
@@ -43,7 +43,7 @@ func HandleApproveDeliveryRequest(ctx *gin.Context) {
 	user := service.UserID(ctx)
 	var dr *db.DeliveryRequest
 	var err error
-	if dr, err = service.Approve(approvalReq.DrID, user); err != nil {
+	if dr, err = h.svc.Approve(approvalReq.DrID, user); err != nil {
 		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
 	}

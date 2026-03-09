@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"mmt-delivery/pkg/cpi"
 	"net/http"
 	"net/url"
 	"strings"
@@ -23,14 +22,14 @@ type NativeDeliverRequest struct {
 }
 
 // deliver Artifacts natively, avoid to use transport plan, directly upload artifacts to target tenants
-func NativeDeliver(ctx *gin.Context) {
+func (h *Handler) NativeDeliver(ctx *gin.Context) {
 	var deliverRequest NativeDeliverRequest
 	if err := ctx.BindJSON(&deliverRequest); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"msg": "Failed to bind native deliver request json: " + err.Error()})
 		return
 	}
 
-	srcClient, err := cpi.NewClient(ctx, deliverRequest.SrcCpiTenant)
+	srcClient, err := h.cpi.Get(ctx, deliverRequest.SrcCpiTenant)
 	if err != nil {
 		ctx.JSON(500, gin.H{"error": "Failed to create CPI client: " + err.Error()})
 		return
@@ -78,7 +77,7 @@ func NativeDeliver(ctx *gin.Context) {
 		// deliver to destination tenants
 		// TODO: parallel
 		for _, destTenant := range deliverRequest.DestCpiTenants {
-			destClient, err := cpi.NewClient(ctx, destTenant)
+			destClient, err := h.cpi.Get(ctx, destTenant)
 			if err != nil {
 				ctx.JSON(500, gin.H{"error": "Failed to create destination CPI client: " + err.Error()})
 				return

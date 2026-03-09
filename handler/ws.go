@@ -16,7 +16,7 @@ var upgrader = websocket.Upgrader{
 	WriteBufferSize: 1024,
 }
 
-func WsHandler(c *gin.Context) {
+func (h *Handler) WsHandler(c *gin.Context) {
 	_ = service.UserID(c)
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {

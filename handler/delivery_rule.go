@@ -13,7 +13,7 @@ import (
 	"mmt-delivery/service"
 )
 
-func RuleCheck(c *gin.Context) {
+func (h *Handler) RuleCheck(c *gin.Context) {
 	var req OpsRequest
 	if err := c.ShouldBindBodyWithJSON(&req); err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
@@ -23,19 +23,19 @@ func RuleCheck(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "missing deliveryRequestID"})
 		return
 	}
-	dr, err := service.QueryDrWithAssociations(req.DeliveryRequestID)
+	dr, err := h.svc.QueryDrWithAssociations(req.DeliveryRequestID)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
 	}
-	rule, err := service.GetDeliveryRuleWithAcc(dr.DeliveryRuleID)
+	rule, err := h.svc.GetDeliveryRuleWithAcc(dr.DeliveryRuleID)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
 	}
 	for i := range req.Ops {
 		op := &req.Ops[i]
-		if err := service.DeliveryRuleCheck(op, &rule); err != nil {
+		if err := h.svc.DeliveryRuleCheck(op, &rule); err != nil {
 			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
 			return
 		}
@@ -44,7 +44,7 @@ func RuleCheck(c *gin.Context) {
 }
 
 // Create or update (upsert)
-func UpsertDeliveryRule(ctx *gin.Context) {
+func (h *Handler) UpsertDeliveryRule(ctx *gin.Context) {
 	var rule db.DeliveryRule
 	if err := ctx.ShouldBindJSON(&rule); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
@@ -72,9 +72,9 @@ func UpsertDeliveryRule(ctx *gin.Context) {
 	}
 
 	// Use explicit association updates for deterministic many2many behavior
-	if err := db.Conn().Transaction(func(tx *gorm.DB) error {
+	if err := h.db.Transaction(func(tx *gorm.DB) error {
 		// Recompute based on incoming IncludedTenants
-		sourceTenant, targetRoutes, targetNodes, err := service.SourceAndRoute(ctx, rule.IncludedTenants)
+		sourceTenant, targetRoutes, targetNodes, err := h.svc.SourceAndRoute(ctx, rule.IncludedTenants)
 		if err != nil {
 			return fmt.Errorf("failed to determine source tenant and target routes/nodes: %s", err.Error())
 		}
@@ -101,9 +101,9 @@ func UpsertDeliveryRule(ctx *gin.Context) {
 }
 
 // List all
-func GetDeliveryRules(ctx *gin.Context) {
+func (h *Handler) GetDeliveryRules(ctx *gin.Context) {
 	var rules []db.DeliveryRule
-	if err := db.Conn().
+	if err := h.db.
 		Preload("IncludedTenants").
 		Preload("ExcludedTenants").
 		Find(&rules).Error; err != nil {
@@ -114,14 +114,14 @@ func GetDeliveryRules(ctx *gin.Context) {
 }
 
 // Get by id
-func GetDeliveryRule(ctx *gin.Context) {
+func (h *Handler) GetDeliveryRule(ctx *gin.Context) {
 	idStr := ctx.Param("id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "invalid id"})
 		return
 	}
-	rule, err := service.GetDeliveryRuleWithAcc(uint(id))
+	rule, err := h.svc.GetDeliveryRuleWithAcc(uint(id))
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
@@ -130,14 +130,14 @@ func GetDeliveryRule(ctx *gin.Context) {
 }
 
 // Delete by id
-func DeleteDeliveryRule(ctx *gin.Context) {
+func (h *Handler) DeleteDeliveryRule(ctx *gin.Context) {
 	idStr := ctx.Param("id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "invalid id"})
 		return
 	}
-	if err := db.Conn().Delete(&db.DeliveryRule{}, id).Error; err != nil {
+	if err := h.db.Delete(&db.DeliveryRule{}, id).Error; err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
 	}

@@ -5,10 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"mmt-delivery/db"
-	"mmt-delivery/pkg/env"
 	"mmt-delivery/pkg/lifecycle"
-	"mmt-delivery/pkg/notify"
-	"mmt-delivery/pkg/xsuaa"
 	"time"
 )
 
@@ -16,9 +13,9 @@ import (
 
 // add approvers
 // currentUserID, approvers: subject/user_id in JWT claim
-func RequestApproval(drID uint, currentUserID string, approvers []string, comment string) error {
+func (s *Service) RequestApproval(drID uint, currentUserID string, approvers []string, comment string) error {
 	var dr db.DeliveryRequest
-	if err := db.Conn().First(&dr, drID).Error; err != nil {
+	if err := s.DB.First(&dr, drID).Error; err != nil {
 		return fmt.Errorf("delivery request #%d not found", drID)
 	}
 
@@ -28,18 +25,18 @@ func RequestApproval(drID uint, currentUserID string, approvers []string, commen
 	if dr.AggregateStatus != lifecycle.AggPending && dr.AggregateStatus != lifecycle.AggWaitingApprove {
 		return fmt.Errorf("only pending delivery request can be submitted for approval, current status: %s", dr.AggregateStatus)
 	}
-	requesterEmail, err := xsuaa.GetUserEmail(context.Background(), currentUserID)
+	requesterEmail, err := s.GetUserEmail(context.Background(), currentUserID)
 	if err != nil {
 		return err
 	}
 	// send email to approver asynchronously
-	sendMailto := sendMailto(dr.Approvers, approvers)
+	sendMailto := s.sendMailto(dr.Approvers, approvers)
 	if len(sendMailto) > 0 {
 		go func() {
-			if err := notify.SendApprovalRequest(sendMailto, drID, requesterEmail, comment); err != nil {
+			if err := s.Notifier.SendApprovalRequest(sendMailto, drID, requesterEmail, comment); err != nil {
 				// Log email error as condition
-				env.Logger().Error("Failed to send approval request email: %s", err)
-				_ = BatchInsertConditions([]db.Condition{
+				s.Logger.Error("Failed to send approval request email: %s", err)
+				_ = s.BatchInsertConditions([]db.Condition{
 					{
 						DeliveryRequestID: drID,
 						State:             lifecycle.CondWarn,
@@ -49,7 +46,7 @@ func RequestApproval(drID uint, currentUserID string, approvers []string, commen
 			}
 		}()
 	}
-	if err := db.Conn().Model(&dr).Updates(db.DeliveryRequest{
+	if err := s.DB.Model(&dr).Updates(db.DeliveryRequest{
 		AggregateStatus: lifecycle.AggWaitingApprove,
 		Approvers:       approvers,
 		UpdatedBy:       currentUserID,
@@ -57,7 +54,7 @@ func RequestApproval(drID uint, currentUserID string, approvers []string, commen
 		return fmt.Errorf("failed to update delivery request status: %s", err.Error())
 	}
 
-	if err := BatchInsertConditions([]db.Condition{
+	if err := s.BatchInsertConditions([]db.Condition{
 		{
 			DeliveryRequestID: drID,
 			State:             lifecycle.CondSuccess,
@@ -70,8 +67,8 @@ func RequestApproval(drID uint, currentUserID string, approvers []string, commen
 }
 
 // approverID: from JWT claim, user_id/subject
-func Approve(drID uint, approverID string) (*db.DeliveryRequest, error) {
-	dr, err := QueryDrWithAssociations(drID)
+func (s *Service) Approve(drID uint, approverID string) (*db.DeliveryRequest, error) {
+	dr, err := s.QueryDrWithAssociations(drID)
 	if err != nil {
 		return nil, err
 	}
@@ -89,12 +86,12 @@ func Approve(drID uint, approverID string) (*db.DeliveryRequest, error) {
 	// send email notification asynchronously
 	go func() {
 		message := fmt.Sprintf("Delivery request #%d has been approved by %s", drID, approverID)
-		if err := notify.SendDeliveryNotification(
+		if err := s.Notifier.SendDeliveryNotification(
 			[]string{approverID, dr.CreatedBy, dr.UpdatedBy}, drID, "Approved", message,
 		); err != nil {
 			// Log email error as condition
-			env.Logger().Error("Failed to send approval notification email: %s", err)
-			_ = BatchInsertConditions([]db.Condition{
+			s.Logger.Error("Failed to send approval notification email: %s", err)
+			_ = s.BatchInsertConditions([]db.Condition{
 				{
 					DeliveryRequestID: drID,
 					State:             lifecycle.CondWarn,
@@ -104,7 +101,7 @@ func Approve(drID uint, approverID string) (*db.DeliveryRequest, error) {
 		}
 	}()
 	// no need to call TrExist, for it will be done in update/insert ops.
-	if err := db.Conn().Model(&dr).Updates(db.DeliveryRequest{
+	if err := s.DB.Model(&dr).Updates(db.DeliveryRequest{
 		AggregateStatus: lifecycle.AggAwaitingImport,
 		ApprovedBy:      approverID,
 		ApprovedAt:      &now,
@@ -113,14 +110,14 @@ func Approve(drID uint, approverID string) (*db.DeliveryRequest, error) {
 		return nil, fmt.Errorf("failed to update delivery request status: %s", err.Error())
 	}
 	// sync import/deploy state after approval
-	if err := SyncDeliveryStatus(drID, approverID); err != nil {
+	if err := s.SyncDeliveryStatus(drID, approverID); err != nil {
 		return nil, err
 	}
-	approverEmail, err := xsuaa.GetUserEmail(context.Background(), approverID)
+	approverEmail, err := s.GetUserEmail(context.Background(), approverID)
 	if err != nil {
 		return nil, err
 	}
-	if err := BatchInsertConditions([]db.Condition{
+	if err := s.BatchInsertConditions([]db.Condition{
 		{
 			DeliveryRequestID: drID,
 			State:             lifecycle.CondSuccess,
@@ -133,7 +130,7 @@ func Approve(drID uint, approverID string) (*db.DeliveryRequest, error) {
 }
 
 // existAppr: already send mail to; newAppr: receive from http request.
-func sendMailto(existAppr []string, newAppr []string) []string {
+func (s *Service) sendMailto(existAppr []string, newAppr []string) []string {
 	markSent := make(map[string]bool) // mark user id that already send to approvers
 	for _, uid := range existAppr {
 		markSent[uid] = true
@@ -142,9 +139,9 @@ func sendMailto(existAppr []string, newAppr []string) []string {
 	for _, appr := range newAppr {
 		if _, ok := markSent[appr]; !ok {
 			// Convert XSUAA user ID to email address
-			email, err := xsuaa.GetUserEmail(context.Background(), appr)
+			email, err := s.GetUserEmail(context.Background(), appr)
 			if err != nil {
-				env.Logger().Error("Failed to get email for user %s: %s", appr, err)
+				s.Logger.Error("Failed to get email for user %s: %s", appr, err)
 				continue // skip if failed to get email
 			}
 			sendMailto = append(sendMailto, email)

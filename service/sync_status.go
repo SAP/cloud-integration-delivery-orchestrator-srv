@@ -5,17 +5,14 @@ import (
 	"fmt"
 	"mmt-delivery/consts"
 	"mmt-delivery/db"
-	"mmt-delivery/pkg/cpi"
-	"mmt-delivery/pkg/env"
 	"mmt-delivery/pkg/lifecycle"
-	"mmt-delivery/pkg/notify"
 	"mmt-delivery/pkg/tms"
 	"regexp"
 	"strings"
 )
 
-func DetermineOverallStatus(drID uint) error {
-	dr, err := QueryDrWithAssociations(drID)
+func (s *Service) DetermineOverallStatus(drID uint) error {
+	dr, err := s.QueryDrWithAssociations(drID)
 	if err != nil {
 		return fmt.Errorf("failed to query delivery request %d: %s", drID, err.Error())
 	}
@@ -44,21 +41,21 @@ func DetermineOverallStatus(drID uint) error {
 		return states
 	}())
 	if newAggStatus != dr.AggregateStatus {
-		if err := db.Conn().Model(&dr).Update("aggregate_status", newAggStatus).Error; err != nil {
+		if err := s.DB.Model(&dr).Update("aggregate_status", newAggStatus).Error; err != nil {
 			return fmt.Errorf("failed to update delivery request %d aggregate status: %s", drID, err.Error())
 		}
 	}
 	return nil
 }
 
-func SyncDeliveryStatus(deliveryRequestID uint, user string) error {
+func (s *Service) SyncDeliveryStatus(deliveryRequestID uint, user string) error {
 	// Always recompute aggregate status regardless of early returns below
 
-	defer DetermineOverallStatus(deliveryRequestID)
+	defer s.DetermineOverallStatus(deliveryRequestID)
 
 	// Check if delivery request is approved before syncing status
 	var dr db.DeliveryRequest
-	if err := db.Conn().First(&dr, deliveryRequestID).Error; err != nil {
+	if err := s.DB.First(&dr, deliveryRequestID).Error; err != nil {
 		return fmt.Errorf("failed to find delivery request %d: %s", deliveryRequestID, err.Error())
 	}
 	if dr.ApprovedAt == nil || dr.ApprovedBy == "" {
@@ -70,22 +67,22 @@ func SyncDeliveryStatus(deliveryRequestID uint, user string) error {
 	}
 
 	// sync import/deploy state after approval
-	if conditions := syncImportState(deliveryRequestID, user); len(conditions) != 0 {
-		BatchInsertConditions(conditions)
+	if conditions := s.syncImportState(deliveryRequestID, user); len(conditions) != 0 {
+		s.BatchInsertConditions(conditions)
 	}
-	if conditions := syncDeployState(deliveryRequestID, user); len(conditions) != 0 {
-		BatchInsertConditions(conditions)
+	if conditions := s.syncDeployState(deliveryRequestID, user); len(conditions) != 0 {
+		s.BatchInsertConditions(conditions)
 	}
 	return nil
 }
 
 // do this after sync import state
-func syncDeployState(deliveryRequestID uint, user string) []db.Condition {
+func (s *Service) syncDeployState(deliveryRequestID uint, user string) []db.Condition {
 	var ops []db.ArtifactTenantOperation
 	var err error
 	conditions := make([]db.Condition, 0)
 
-	if ops, err = queryOpsInDrWithAcc(deliveryRequestID); err != nil {
+	if ops, err = s.queryOpsInDrWithAcc(deliveryRequestID); err != nil {
 		return []db.Condition{
 			{
 				DeliveryRequestID: deliveryRequestID,
@@ -99,7 +96,7 @@ func syncDeployState(deliveryRequestID uint, user string) []db.Condition {
 		if op.DeployState != lifecycle.DeployInProgress {
 			continue
 		}
-		cpiCli, err := cpi.NewClient(context.Background(), op.Tenant.CpiEndpoint.Name)
+		cpiCli, err := s.CPI(context.Background(), op.Tenant.CpiEndpoint.Name)
 		if err != nil {
 			conditions = append(conditions, db.Condition{
 				DeliveryRequestID:         deliveryRequestID,
@@ -143,7 +140,7 @@ func syncDeployState(deliveryRequestID uint, user string) []db.Condition {
 		if state == op.DeployState { // only need update if deploy state changed
 			continue
 		}
-		if err := db.Conn().Model(&op).Updates(db.ArtifactTenantOperation{
+		if err := s.DB.Model(&op).Updates(db.ArtifactTenantOperation{
 			DeployState: state, // state sync no need to update other fields, like UpdatedBy
 		}).Error; err != nil {
 			conditions = append(conditions, db.Condition{
@@ -177,10 +174,10 @@ func syncDeployState(deliveryRequestID uint, user string) []db.Condition {
 }
 
 // when call this function, make sure all ops have valid tr number
-func syncImportState(deliveryRequestID uint, user string) []db.Condition {
+func (s *Service) syncImportState(deliveryRequestID uint, user string) []db.Condition {
 	var artifactOps []db.ArtifactTenantOperation
 	// Adjust the DB accessor (db.DB / db.GetDB()) to match your project setup
-	artifactOps, err := queryOpsInDrWithAcc(deliveryRequestID)
+	artifactOps, err := s.queryOpsInDrWithAcc(deliveryRequestID)
 	if err != nil {
 		return []db.Condition{
 			{
@@ -192,7 +189,7 @@ func syncImportState(deliveryRequestID uint, user string) []db.Condition {
 	}
 	// find delivery rule id in delivery request
 	var dr db.DeliveryRequest
-	if err := db.Conn().Preload("DeliveryRule").First(&dr, deliveryRequestID).Error; err != nil {
+	if err := s.DB.Preload("DeliveryRule").First(&dr, deliveryRequestID).Error; err != nil {
 		return []db.Condition{
 			{
 				DeliveryRequestID: deliveryRequestID,
@@ -209,16 +206,6 @@ func syncImportState(deliveryRequestID uint, user string) []db.Condition {
 		ruleTargetNodeIDs[node.ID] = true
 	}
 
-	tmsClient, err := tms.NewClient(context.Background())
-	if err != nil {
-		return []db.Condition{
-			{
-				DeliveryRequestID: deliveryRequestID,
-				State:             lifecycle.CondError,
-				Message:           fmt.Sprintf("error creating tms client: %s", err.Error()),
-			},
-		}
-	}
 	trNodeStatus := make(map[string]map[uint]tms.TrNodeStatus)          // tr number status in all nodes. trNumber - map[nodeID]status
 	tenantToOps := make(map[uint]map[string]db.ArtifactTenantOperation) // arTenantOp record in each node. cpi tenant ID - map[trNumber]ArtifactTenantOperation
 	//
@@ -228,7 +215,7 @@ func syncImportState(deliveryRequestID uint, user string) []db.Condition {
 			continue
 		}
 		// UpdateArtifactNodeStatus will call GetTransportRequest internally
-		ns, err := tmsClient.TrNodeStatuses(context.Background(), trNumber)
+		ns, err := s.TMS.TrNodeStatuses(context.Background(), trNumber)
 		if err != nil {
 			return []db.Condition{
 				{
@@ -265,12 +252,12 @@ func syncImportState(deliveryRequestID uint, user string) []db.Condition {
 		for nID, nState := range trNodeStatus[trNumber] {
 			// Skip nodes not in delivery rule - only process target nodes defined in the rule
 			if _, ok := ruleTargetNodeIDs[nID]; !ok {
-				env.Logger().Infof("skipping node %d for transport request %s: not in delivery rule target nodes", nID, trNumber)
+				s.Logger.Infof("skipping node %d for transport request %s: not in delivery rule target nodes", nID, trNumber)
 				continue
 			}
 
 			// Query tenant by node ID from database
-			tenant, err := queryTenantByNodeID(nID)
+			tenant, err := s.queryTenantByNodeID(nID)
 			if err != nil {
 				conditions = append(conditions, db.Condition{
 					DeliveryRequestID:         deliveryRequestID,
@@ -304,7 +291,7 @@ func syncImportState(deliveryRequestID uint, user string) []db.Condition {
 			// NOTE: determine import state
 			state := lifecycle.DeriveImport(nState.Status)
 			if state == curOp.ImportState { // skip if state no change
-				env.Logger().Infof("no import state change for artifact %s(#%d) in node %d, current state: %s", curOp.ArtifactTechID, curOp.ID, nID, state)
+				s.Logger.Infof("no import state change for artifact %s(#%d) in node %d, current state: %s", curOp.ArtifactTechID, curOp.ID, nID, state)
 				continue
 			}
 
@@ -314,7 +301,7 @@ func syncImportState(deliveryRequestID uint, user string) []db.Condition {
 			if curOp.ImportState == lifecycle.ImportComplete && curOp.DeployState == lifecycle.DeployNotStarted {
 				curOp.DeployState = lifecycle.DeployQueued
 			}
-			if err := db.Conn().Save(&curOp).Error; err != nil { // update each op
+			if err := s.DB.Save(&curOp).Error; err != nil { // update each op
 				return []db.Condition{
 					{
 						DeliveryRequestID:         deliveryRequestID,
@@ -337,20 +324,20 @@ func syncImportState(deliveryRequestID uint, user string) []db.Condition {
 				// Send notification to JIRA if configured
 				if dr.JiraLink != "" {
 					go func(jiraLink string, drID uint, message string) {
-						issueKey := extractJiraIssueKey(jiraLink)
+						issueKey := s.extractJiraIssueKey(jiraLink)
 						if issueKey == "" {
-							env.Logger().Warnf("Failed to extract JIRA issue key from link: %s", jiraLink)
+							s.Logger.Warnf("Failed to extract JIRA issue key from link: %s", jiraLink)
 							return
 						}
-						if err := notify.AddDeliveryComment(issueKey, drID, message, "Imported"); err != nil {
-							env.Logger().Errorf("Failed to add JIRA comment for import success: %s", err)
+						if err := s.Notifier.AddDeliveryComment(issueKey, drID, message, "Imported"); err != nil {
+							s.Logger.Errorf("Failed to add JIRA comment for import success: %s", err)
 						}
 					}(dr.JiraLink, deliveryRequestID, conditionMsg)
 				}
 			}
 			// get error logs if import failed
 			if state == lifecycle.ImportFailed {
-				logs, err := tmsClient.ErrLogsInTransportLog(context.Background(), trNumber, nID) // TODO: seems wrong function call.
+				logs, err := s.TMS.ErrLogsInTransportLog(context.Background(), trNumber, nID)
 				var message string
 				if err != nil {
 					message = fmt.Sprintf("error when getting error logs for transport request %s in node %d: %s", trNumber, nID, err.Error())
@@ -372,7 +359,7 @@ func syncImportState(deliveryRequestID uint, user string) []db.Condition {
 
 // extractJiraIssueKey extracts JIRA issue key from JIRA URL
 // Example: https://jira.tools.sap/browse/MACOMMT-32980 -> MACOMMT-32980
-func extractJiraIssueKey(jiraURL string) string {
+func (s *Service) extractJiraIssueKey(jiraURL string) string {
 	// Pattern to match JIRA URLs like:
 	// https://jira.tools.sap/browse/MACOMMT-32980
 	// https://domain.atlassian.net/browse/PROJ-123
@@ -383,6 +370,6 @@ func extractJiraIssueKey(jiraURL string) string {
 		return matches[1]
 	}
 
-	env.Logger().Warn("Failed to extract JIRA issue key from URL: %s", jiraURL)
+	s.Logger.Warn("Failed to extract JIRA issue key from URL: %s", jiraURL)
 	return ""
 }

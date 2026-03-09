@@ -15,8 +15,8 @@
   - [阶段一：超时机制试点](#阶段一超时机制试点-已完成)
   - [阶段二：推广超时到所有 TMS 方法](#阶段二推广超时到所有-tms-方法-已完成)
   - [阶段三：重构 HttpClient](#阶段三重构-httpclient--context-作为参数--修复-cacheclient-已完成)
-  - [阶段四：重构 Service 层](#阶段四重构-service-层--包级别函数--结构体方法)
-  - [阶段五：重构 Handler 层 + 移除 init()](#阶段五重构-handler-层--移除-init)
+  - [阶段四：Service 层 + Handler 层 DI](#阶段四service-层--handler-层-di-已完成)
+  - [阶段五：移除 init() 副作用](#阶段五移除-init-副作用)
   - [阶段六：推广超时到 CPI 包 + 完善测试](#阶段六推广超时到-cpi-包--完善测试)
 - [4. 超时时间设计](#4-超时时间设计)
 - [5. 单元测试设计](#5-单元测试设计)
@@ -255,101 +255,187 @@ func (c *HttpClient) Do(ctx context.Context, request *HttpRequest) (*[]byte, int
 | Service | `approve.go`, `cancel.go` | `context.Background()` |
 | Service | `dr.go` | 接收调用方传入的 `ctx` |
 
-### 阶段四：重构 Service 层 — 包级别函数 → 结构体方法
+### 阶段四：Service 层 + Handler 层 DI（✅ 已完成）
 
-**目标**：Service 层不再直接依赖全局变量
+**目标**：Service 层和 Handler 层不再直接依赖全局变量；所有依赖通过结构体字段注入
 
-**4.1 定义 Service 结构体**
+> 注：原计划的阶段四（Service 层）和阶段五（Handler 层）已合并为一个阶段实施。
+
+**4.1 架构决策**
+
+| 决策点 | 选择 | 理由 |
+|--------|------|------|
+| CPI 多 tenant 策略 | 带缓存的工厂函数（`sync.RWMutex` + `map` 延迟创建） | `env.Destinations()` 包含非 CPI 目标，无法预创建 |
+| Logger + Notifier | 两者都注入到 Service | Logger 作为 `*zap.SugaredLogger` 字段；Notifier 定义接口包装 `notify` 包 |
+| Handler 兼容策略 | 直接改 handler，不做 wrapper | 合并原阶段五的 handler 重构 |
+| Handler 与 Service 的依赖关系 | 两层各自持有客户端引用 | Service 通过接口持有（可 mock），Handler 持有具体类型（passthrough 用） |
+
+**4.2 Service 结构体与接口定义**
 
 ```go
 // service/service.go
-type Service struct {
-    DB     *gorm.DB
-    Logger *zap.SugaredLogger
-    TMS    func(ctx context.Context) (*tms.TmsClient, error)
-    CPI    func(ctx context.Context, tenant string) (*cpi.CpiClient, error)
+type TMSClient interface {
+    GetNodes(ctx context.Context) ([]db.TransportNode, error)
+    GetRoutes(ctx context.Context) ([]db.TransportRoute, error)
+    ImportTransportRequest(ctx context.Context, nodeID uint, trs []uint) (uint, error)
+    GetTransportRequest(ctx context.Context, TrNumber string) (*tms.TransportRequestV1, error)
+    TrNodeStatuses(ctx context.Context, trNumber string) (map[uint]tms.TrNodeStatus, error)
+    ErrLogsInTransportLog(ctx context.Context, trNumber string, nodeID uint) ([]string, error)
 }
 
-func New(db *gorm.DB, logger *zap.SugaredLogger, ...) *Service {
-    return &Service{DB: db, Logger: logger, ...}
+type CPIClient interface {
+    DeployArtifact(ctx context.Context, artifactID, artifactVersion string, artifactType consts.ArtifactType) (string, error)
+    RuntimeArtifact(ctx context.Context, artifactId string) (cpi.RuntimeArtifact, error)
+    GetDesignTimeIflow(ctx context.Context, iflowID string, iflowVersion string) (cpi.IflowItem, error)
+    GetDesignTimeScriptCollection(ctx context.Context, scID string, scVersion string) (cpi.ScriptCollectionItem, error)
+}
+
+type CPIFactory func(ctx context.Context, tenant string) (CPIClient, error)
+
+type Notifier interface {
+    SendApprovalRequest(to []string, drID uint, requestor string, description string) error
+    SendDeliveryNotification(to []string, drID uint, status string, message string) error
+    AddDeliveryComment(issueKey string, drID uint, message string, status string) error
+}
+
+type Service struct {
+    DB           *gorm.DB
+    Logger       *zap.SugaredLogger
+    TMS          TMSClient
+    CPI          CPIFactory
+    GetUserEmail func(ctx context.Context, userID string) (string, error)
+    Notifier     Notifier
 }
 ```
 
-**4.2 将包级别函数转为方法**
+接口设计说明：
+- `TMSClient`（6 方法）和 `CPIClient`（4 方法）只包含 Service 层业务逻辑需要的方法
+- Handler 层 passthrough 调用的方法（如 `GetNodeTransportRequests`、`GetPackages`）不在接口中，Handler 直接持有具体类型
+
+**4.3 CPI Manager — 线程安全缓存**
 
 ```go
-// ❌ 当前：包级别函数，直接使用 db.Conn()
-func QueryDrWithAssociations(drID uint) (*db.DeliveryRequest, error) {
-    var dr db.DeliveryRequest
-    if err := db.Conn().Preload(...).First(&dr, drID).Error; err != nil {
-        return nil, err
-    }
-    return &dr, nil
+// pkg/cpi/manager.go
+type Manager struct {
+    mu      sync.RWMutex
+    clients map[string]*CpiClient
 }
 
-// ✅ 重构后：方法，使用注入的 DB
-func (s *Service) QueryDrWithAssociations(drID uint) (*db.DeliveryRequest, error) {
-    var dr db.DeliveryRequest
-    if err := s.DB.Preload(...).First(&dr, drID).Error; err != nil {
-        return nil, err
+func (m *Manager) Get(ctx context.Context, tenant string) (*CpiClient, error) {
+    // Fast path: read lock
+    m.mu.RLock()
+    if cli, ok := m.clients[tenant]; ok {
+        m.mu.RUnlock()
+        return cli, nil
     }
-    return &dr, nil
+    m.mu.RUnlock()
+    // Slow path: write lock, double-check
+    m.mu.Lock()
+    defer m.mu.Unlock()
+    if cli, ok := m.clients[tenant]; ok { return cli, nil }
+    cli, err := NewClient(ctx, tenant)
+    // ...
 }
 ```
 
-**4.3 涉及的文件和函数**
-
-| 文件 | 函数数 | 全局依赖 |
-|------|--------|----------|
-| `service/dr.go` | ~11 | `db.Conn()`, `tms.NewClient` |
-| `service/deliver.go` | ~3 | `db.Conn()`, `tms.NewClient`, `cpi.NewClient`, `xsuaa.GetUserEmail` |
-| `service/approve.go` | ~2 | `db.Conn()`, `xsuaa.GetUserEmail`, `notify.*` |
-| `service/cancel.go` | ~1 | `db.Conn()`, `xsuaa.GetUserEmail`, `notify.*` |
-| `service/sync_status.go` | ~4 | `db.Conn()`, `tms.NewClient`, `cpi.NewClient`, `notify.*` |
-| `service/checks.go` | ~4 | `tms.NewClient`, `cpi.NewClient` |
-
-### 阶段五：重构 Handler 层 + 移除 init()
-
-**目标**：Handler 持有 Service 引用；`init()` 无副作用
-
-**5.1 定义 Handler 结构体**
+**4.4 Handler 结构体**
 
 ```go
 // handler/handler.go
 type Handler struct {
-    svc    *service.Service
-    logger *zap.SugaredLogger
+    svc          *service.Service
+    db           *gorm.DB              // handler 层直接 CRUD
+    logger       *zap.SugaredLogger
+    tms          *tms.TmsClient        // 具体类型，passthrough
+    cpi          *cpi.Manager          // 工厂，passthrough
+    xsuaa        *xsuaa.UaaClient      // 具体类型，passthrough
+    destinations map[string]env.Destination
 }
 
-func New(svc *service.Service, logger *zap.SugaredLogger) *Handler {
-    return &Handler{svc: svc, logger: logger}
-}
-
-func (h *Handler) SetupRoutes(r *gin.Engine) {
-    v1 := r.Group("/api/v1")
-    v1.GET("/dr/:drId", h.GetDr)
-    v1.POST("/dr", h.CreateDr)
-    // ...
-}
+func (h *Handler) SetupRoutes(v1, v2 *gin.RouterGroup, router *gin.Engine) { ... }
 ```
 
-**5.2 Handler 方法示例**
+Handler 与 Service 同时持有 TMS/CPI 客户端引用的原因：Service 使用接口类型（面向测试/mock），Handler 使用具体类型（面向 API 转发）。底层指向同一个实例，但类型和语义不同。
+
+**4.5 main.go 组装**
 
 ```go
-// ❌ 当前：包级别函数
-func GetDr(c *gin.Context) {
-    dr, err := service.QueryDrWithAssociations(drID)
-    // ...
-}
+func main() {
+    ctx := context.Background()
+    tmsClient, _ := tms.NewClient(ctx)
+    xsuaaClient, _ := xsuaa.NewClient(ctx)
+    cpiManager := cpi.NewManager()
 
-// ✅ 重构后：方法
-func (h *Handler) GetDr(c *gin.Context) {
-    dr, err := h.svc.QueryDrWithAssociations(drID)
-    // ...
+    svc := &service.Service{
+        DB: db.Conn(), Logger: env.Logger(), TMS: tmsClient,
+        CPI: func(ctx context.Context, tenant string) (service.CPIClient, error) {
+            return cpiManager.Get(ctx, tenant)
+        },
+        GetUserEmail: xsuaa.GetUserEmail,
+        Notifier:     service.NewDefaultNotifier(),
+    }
+
+    h := handler.NewHandler(svc, db.Conn(), env.Logger(), tmsClient, cpiManager, xsuaaClient, env.Destinations())
+    // ... router setup ...
+    h.SetupRoutes(v1Group, v2Group, router)
 }
 ```
 
-**5.3 移除 init() 副作用**
+**4.6 重构的文件清单**
+
+**新建文件：**
+
+| 文件 | 说明 |
+|------|------|
+| `service/service.go` | Service 结构体 + TMSClient/CPIClient/Notifier 接口 + defaultNotifier |
+| `pkg/cpi/manager.go` | CPI client 缓存管理器（double-checked locking） |
+| `handler/handler.go` | Handler 结构体 + NewHandler() + SetupRoutes() |
+
+**Service 层重构（包级别函数 → `*Service` 方法）：**
+
+| 文件 | 方法数 | 替换的全局依赖 |
+|------|--------|---------------|
+| `service/dr.go` | 12 | `db.Conn()` → `s.DB`，`tms.NewClient` → `s.TMS` |
+| `service/deliver.go` | 5 | `db.Conn()` → `s.DB`，`tms.NewClient` → `s.TMS`，`cpi.NewClient` → `s.CPI`，`xsuaa.GetUserEmail` → `s.GetUserEmail` |
+| `service/approve.go` | 3 | `db.Conn()` → `s.DB`，`xsuaa.GetUserEmail` → `s.GetUserEmail`，`notify.*` → `s.Notifier.*` |
+| `service/cancel.go` | 1 | `db.Conn()` → `s.DB`，`notify.*` → `s.Notifier.*` |
+| `service/sync_status.go` | 5 | `db.Conn()` → `s.DB`，`tms.NewClient` → `s.TMS`，`cpi.NewClient` → `s.CPI`，`notify.*` → `s.Notifier.*` |
+| `service/checks.go` | 4 | `tms.NewClient` → `s.TMS`，`cpi.NewClient` → `s.CPI` |
+
+保留为包级别的纯函数：`downstreamfromSource`（`dr.go`）、`checkVersionPattern`（`checks.go`）。
+`service/utils.go` 中的 gin.Context 辅助函数（`UserID`、`UserEmail`、`UaaOrigin` 等）保留为包级别函数。
+
+**Handler 层重构（包级别函数 → `*Handler` 方法）：**
+
+| 文件 | 关键替换 |
+|------|----------|
+| `handler/delivery_request.go` | `service.XXX()` → `h.svc.XXX()`，`db.Conn()` → `h.db` |
+| `handler/delivery_rule.go` | 同上 |
+| `handler/approve_dr.go` | `service.XXX()` → `h.svc.XXX()` |
+| `handler/cpi_handler.go` | 移除 `var logger`，`cpi.NewClient()` → `h.cpi.Get()`，`env.Destinations()` → `h.destinations` |
+| `handler/tms_handler.go` | `tms.NewClient()` → `h.tms`（复用长生命周期 client），`logger` → `h.logger` |
+| `handler/cpi_tenant.go` | `db.Conn()` → `h.db` |
+| `handler/uaa_handler.go` | `xsuaa.NewClient()` → `h.xsuaa` |
+| `handler/native_deliver.go` | `cpi.NewClient()` → `h.cpi.Get()` |
+| `handler/counts.go` | `db.Conn()` → `h.db` |
+| `handler/ws.go` | `WsHandler` → `(h *Handler) WsHandler` |
+
+保留为包级别的纯函数：`checkJIRA`（`delivery_request.go`）、`wrapArtifact`（`cpi_handler.go`）、`parseTenant`（`native_deliver.go`）。
+
+**其他修改：**
+
+| 文件 | 说明 |
+|------|------|
+| `pkg/xsuaa/uaa.go` | `userEmail` → `UserEmail`（导出） |
+| `main.go` | 重写：显式创建所有依赖 → Service → Handler → SetupRoutes |
+
+### 阶段五：移除 init() 副作用
+
+**目标**：`init()` 无副作用；所有有副作用的初始化在 `main()` 中显式执行
+
+> 注：原阶段五中的 Handler 层重构已合并到阶段四完成。此阶段仅处理 `init()` 移除。
+
+**5.1 移除 init() 副作用**
 
 ```go
 // ❌ 当前 pkg/env/env.go
@@ -383,20 +469,13 @@ func main() {
 }
 ```
 
-**5.4 涉及的文件**
+**5.2 涉及的文件**
 
-| 文件 | 路由数 | 直接使用 db.Conn() |
-|------|--------|-------------------|
-| `handler/delivery_request.go` | ~8 | YES |
-| `handler/delivery_rule.go` | ~4 | YES |
-| `handler/cpi_handler.go` | ~5 | NO（创建 cpi client） |
-| `handler/tms_handler.go` | ~3 | NO（创建 tms client） |
-| `handler/cpi_tenant.go` | ~4 | YES |
-| `handler/approve_dr.go` | ~2 | NO |
-| `handler/counts.go` | ~2 | YES |
-| `handler/ws.go` | ~1 | NO |
-| `handler/native_deliver.go` | ~2 | NO（创建 cpi client） |
-| `handler/uaa_handler.go` | ~1 | NO |
+| 文件 | 改动 |
+|------|------|
+| `pkg/env/env.go` | 移除 `init()`，改为导出构造函数 |
+| `db/conn.go` | 移除 `init()`，改为导出构造函数 |
+| `main.go` | 显式调用 env/db 初始化函数 |
 
 ### 阶段六：推广超时到 CPI 包 + 完善测试
 
@@ -804,15 +883,27 @@ go test ./...   # 不需要任何环境变量
   - 所有客户端包（tms/cpi/xsuaa）方法签名添加 `ctx`
   - 所有调用方（handler/service）适配新签名
   - **已知中间状态**：每次 `NewClient()` 都 `fetchToken()`，阶段四将 client 提升为长生命周期对象后解决
+- [x] 阶段四：Service 层 + Handler 层 DI
+  - **新建文件**：`service/service.go`（Service 结构体 + 接口定义 + defaultNotifier）、`pkg/cpi/manager.go`（线程安全 CPI client 缓存）、`handler/handler.go`（Handler 结构体 + SetupRoutes）
+  - **Service 层**：6 个文件、30 个函数从包级别函数转为 `*Service` 方法；消除 `db.Conn()`、`tms.NewClient()`、`cpi.NewClient()`、`notify.*` 等全局依赖
+  - **Handler 层**：10 个文件所有函数转为 `*Handler` 方法；消除 `db.Conn()`、`var logger`、每次请求 `NewClient()` 等模式
+  - **main.go**：重写为显式依赖创建 + 注入。Client 在启动时创建一次成为长生命周期对象，解决了阶段三遗留的"每次 NewClient 都 fetchToken"问题
+  - **CPI 多 tenant**：`cpi.Manager` 通过 `sync.RWMutex` + double-checked locking 延迟创建并缓存 client
+  - **`pkg/xsuaa/uaa.go`**：`userEmail` → `UserEmail`（导出供 Service 注入）
+  - **构建验证**：`go build ./...` 零错误通过
 
 ---
 
 ## 9. 待确认事项（已决定）
 
 1. [x] **实施节奏**：先实施阶段三（Context 作为参数），后续阶段逐步推进
-2. [x] **接口定义**：阶段四定义 `TMSService`（7 方法）和 `CPIService`（8 方法）+ `CPITransferService`（3 方法）接口，便于 mock 测试
+2. [x] **接口定义**：阶段四定义 `TMSClient`（6 方法）和 `CPIClient`（4 方法）接口，只覆盖 Service 层需要的方法；Handler 层 passthrough 使用具体类型
 3. [x] **统一配置管理**：需要。将 `env.TmsCredential()`, `env.UaaCredential()`, `env.Destinations()`, `env.PostgreUri()` 统一到 `Config` 结构体
 4. [x] **`cacheClient` 处理**：替换为实例级 token 管理 + `sync.Mutex` 保护，在阶段三中一并完成。当前问题：非线程安全（data race）、无主动过期、401 刷新无重试上限
+5. [x] **CPI 多 tenant 策略**：带缓存的工厂函数。`cpi.Manager` 使用 `sync.RWMutex` + `map` 延迟创建，阶段四实现
+6. [x] **Logger + Notifier 注入**：两者都注入 Service。Logger 为 `*zap.SugaredLogger` 字段，Notifier 定义接口、`defaultNotifier` 包装 `notify` 包函数
+7. [x] **Handler 兼容策略**：直接改 handler（不做 wrapper），合并原阶段五的 handler 重构到阶段四
+8. [x] **Handler 与 Service 依赖重复**：保持现状。Service 持有接口（可 mock），Handler 持有具体类型（passthrough），底层同一实例，语义不同
 
 ---
 
@@ -846,23 +937,66 @@ go test ./...   # 不需要任何环境变量
 - `handler/native_deliver.go` — 传递 gin ctx 给 CPI 方法
 - `handler/delivery_rule.go` — SourceAndRoute 调用传入 ctx
 
+**阶段四**：
+- `service/service.go` — 新建：Service 结构体 + TMSClient/CPIClient/Notifier 接口 + defaultNotifier
+- `pkg/cpi/manager.go` — 新建：CPI client 缓存管理器（`sync.RWMutex` + double-checked locking）
+- `handler/handler.go` — 新建：Handler 结构体 + NewHandler() + SetupRoutes()
+- `service/dr.go` — 12 个函数转为 `*Service` 方法
+- `service/deliver.go` — 5 个函数转为方法
+- `service/approve.go` — 3 个函数转为方法
+- `service/cancel.go` — 1 个函数转为方法
+- `service/sync_status.go` — 5 个函数转为方法
+- `service/checks.go` — 4 个函数转为方法
+- `handler/delivery_request.go` — 所有函数转为 `*Handler` 方法；`db.Conn()` → `h.db`
+- `handler/delivery_rule.go` — 同上
+- `handler/approve_dr.go` — `service.XXX()` → `h.svc.XXX()`
+- `handler/cpi_handler.go` — 移除 `var logger`；`cpi.NewClient()` → `h.cpi.Get()`；`env.Destinations()` → `h.destinations`
+- `handler/tms_handler.go` — `tms.NewClient()` → `h.tms`；`logger` → `h.logger`
+- `handler/cpi_tenant.go` — `db.Conn()` → `h.db`
+- `handler/uaa_handler.go` — `xsuaa.NewClient()` → `h.xsuaa`
+- `handler/native_deliver.go` — `cpi.NewClient()` → `h.cpi.Get()`
+- `handler/counts.go` — `db.Conn()` → `h.db`
+- `handler/ws.go` — `WsHandler` → `(h *Handler) WsHandler`
+- `pkg/xsuaa/uaa.go` — `userEmail` → `UserEmail`（导出）
+- `main.go` — 重写：显式依赖创建 → Service → Handler → SetupRoutes
+
 ### 10.2 各阶段待修改的文件
 
-**阶段四**（Service 层 DI）：
-- `service/service.go` — 新增，定义 Service 结构体
-- `service/dr.go` — 函数 → 方法
-- `service/deliver.go` — 函数 → 方法
-- `service/approve.go` — 函数 → 方法
-- `service/cancel.go` — 函数 → 方法
-- `service/sync_status.go` — 函数 → 方法
-- `service/checks.go` — 函数 → 方法
+**阶段四**（Service 层 + Handler 层 DI）— ✅ 已完成：
 
-**阶段五**（Handler 层 DI + 移除 init）：
-- `handler/handler.go` — 新增，定义 Handler 结构体 + SetupRoutes
-- `handler/*.go` — 函数 → 方法
-- `main.go` — 重写，显式初始化所有依赖
+新建：
+- `service/service.go` — Service 结构体 + TMSClient/CPIClient/Notifier 接口 + defaultNotifier
+- `pkg/cpi/manager.go` — CPI client 缓存管理器（double-checked locking）
+- `handler/handler.go` — Handler 结构体 + NewHandler() + SetupRoutes()
+
+Service 层重构：
+- `service/dr.go` — 12 个函数 → `*Service` 方法
+- `service/deliver.go` — 5 个函数 → 方法
+- `service/approve.go` — 3 个函数 → 方法
+- `service/cancel.go` — 1 个函数 → 方法
+- `service/sync_status.go` — 5 个函数 → 方法
+- `service/checks.go` — 4 个函数 → 方法
+
+Handler 层重构：
+- `handler/delivery_request.go` — `service.XXX()` → `h.svc.XXX()`，`db.Conn()` → `h.db`
+- `handler/delivery_rule.go` — 同上
+- `handler/approve_dr.go` — `service.XXX()` → `h.svc.XXX()`
+- `handler/cpi_handler.go` — 移除 `var logger`，`cpi.NewClient()` → `h.cpi.Get()`，`env.Destinations()` → `h.destinations`
+- `handler/tms_handler.go` — `tms.NewClient()` → `h.tms`，`logger` → `h.logger`
+- `handler/cpi_tenant.go` — `db.Conn()` → `h.db`
+- `handler/uaa_handler.go` — `xsuaa.NewClient()` → `h.xsuaa`
+- `handler/native_deliver.go` — `cpi.NewClient()` → `h.cpi.Get()`
+- `handler/counts.go` — `db.Conn()` → `h.db`
+- `handler/ws.go` — `WsHandler` → `(h *Handler) WsHandler`
+
+其他：
+- `pkg/xsuaa/uaa.go` — `userEmail` → `UserEmail`（导出）
+- `main.go` — 重写：显式创建所有依赖 → Service → Handler → SetupRoutes
+
+**阶段五**（移除 init 副作用）：
 - `pkg/env/env.go` — 移除 init()，改为导出构造函数
 - `db/conn.go` — 移除 init()，改为导出构造函数
+- `main.go` — 显式调用 env/db 初始化函数
 
 ### 10.3 参考资料
 

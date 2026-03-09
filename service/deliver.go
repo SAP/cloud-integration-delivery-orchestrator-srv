@@ -5,25 +5,22 @@ import (
 	"errors"
 	"fmt"
 	"mmt-delivery/db"
-	"mmt-delivery/pkg/cpi"
 	"mmt-delivery/pkg/lifecycle"
-	"mmt-delivery/pkg/tms"
-	"mmt-delivery/pkg/xsuaa"
 	"strings"
 
 	"gorm.io/gorm"
 )
 
 // import INITIAL artifact operations under target node
-func BatchImportTenantOps(drID uint, opIDs []uint, targetTenantID uint, userID string) (bool, error) {
+func (s *Service) BatchImportTenantOps(drID uint, opIDs []uint, targetTenantID uint, userID string) (bool, error) {
 	var ops []db.ArtifactTenantOperation
 	var err error
-	if ops, err = queryOpsWithAcco(opIDs); err != nil {
+	if ops, err = s.queryOpsWithAcco(opIDs); err != nil {
 		return false, err
 	}
 
 	var targetTenant *db.CpiTenant
-	if targetTenant, err = queryTenant(targetTenantID); err != nil {
+	if targetTenant, err = s.queryTenant(targetTenantID); err != nil {
 		return false, err
 	}
 	targetNodeID := targetTenant.TransportNodeID
@@ -44,7 +41,7 @@ func BatchImportTenantOps(drID uint, opIDs []uint, targetTenantID uint, userID s
 			continue
 		}
 		// NOTE: VERY IMPORTANT! validate if there is version decrease in target tenant before import
-		if err := checkVersionDowngradeInTenant(op, targetTenant); err != nil {
+		if err := s.checkVersionDowngradeInTenant(op, targetTenant); err != nil {
 			errOps[op.ID] = err
 			continue
 		}
@@ -60,44 +57,27 @@ func BatchImportTenantOps(drID uint, opIDs []uint, targetTenantID uint, userID s
 		return false, errors.New(errMsg)
 	}
 	// update ops state to InProgress first
-	err = batchUpdateOps(ops)
+	err = s.batchUpdateOps(ops)
 	if err != nil {
 		return false, err
 	}
 
 	// trigger async import in goroutine to avoid blocking
 	go func(drID uint, targetNodeID uint, targetTenantName string, trs []uint, ops []db.ArtifactTenantOperation, user string) {
-		tmsCli, err := tms.NewClient(context.Background())
-		if err != nil {
-			// revert ops state to ImportFailed on TMS client creation error
-			for i := range ops {
-				ops[i].ImportState = lifecycle.ImportFailed
-			}
-			_ = batchUpdateOps(ops)
-
-			condition := db.Condition{
-				DeliveryRequestID: drID,
-				State:             lifecycle.CondError,
-				Message:           fmt.Sprintf("batch import failed to create TMS client for tenant %s (node %d). Error: %s", targetTenantName, targetNodeID, err.Error()),
-			}
-			BatchInsertConditions([]db.Condition{condition})
-			return
-		}
-
-		actionID, err := tmsCli.ImportTransportRequest(context.Background(), targetNodeID, trs)
+		actionID, err := s.TMS.ImportTransportRequest(context.Background(), targetNodeID, trs)
 		if err != nil {
 			// revert ops state to ImportFailed on import error
 			for i := range ops {
 				ops[i].ImportState = lifecycle.ImportFailed
 			}
-			_ = batchUpdateOps(ops)
+			_ = s.batchUpdateOps(ops)
 
 			condition := db.Condition{
 				DeliveryRequestID: drID,
 				State:             lifecycle.CondError,
 				Message:           fmt.Sprintf("batch import failed in tenant %s (node %d). Error: %s", targetTenantName, targetNodeID, err.Error()),
 			}
-			BatchInsertConditions([]db.Condition{condition})
+			s.BatchInsertConditions([]db.Condition{condition})
 			return
 		}
 
@@ -106,27 +86,27 @@ func BatchImportTenantOps(drID uint, opIDs []uint, targetTenantID uint, userID s
 		for _, op := range ops {
 			artifactList = append(artifactList, fmt.Sprintf("  - %s (version %s)", op.ArtifactTechID, op.ArtifactVersion))
 		}
-		userEmail, _ := xsuaa.GetUserEmail(context.Background(), user)
+		userEmail, _ := s.GetUserEmail(context.Background(), user)
 		condition := db.Condition{
 			DeliveryRequestID: drID,
 			State:             lifecycle.CondSuccess,
 			Message:           fmt.Sprintf("batch import triggered in tenant %s (node %d) by %s. Action ID: %d.\nArtifacts:\n%s", targetTenantName, targetNodeID, userEmail, actionID, strings.Join(artifactList, "\n")),
 		}
-		BatchInsertConditions([]db.Condition{condition})
+		s.BatchInsertConditions([]db.Condition{condition})
 	}(drID, targetNodeID, targetTenant.Name, trs, ops, userID)
 
 	return true, nil
 }
 
 // when trggered deploy, the artifact operation will be set to DeployInProgress
-func BatchDeployTenantOps(drID uint, opIDs []uint, targetTenantID uint, userID string) (bool, error) {
+func (s *Service) BatchDeployTenantOps(drID uint, opIDs []uint, targetTenantID uint, userID string) (bool, error) {
 	var ops []db.ArtifactTenantOperation
 	var err error
-	if ops, err = queryOpsWithAcco(opIDs); err != nil {
+	if ops, err = s.queryOpsWithAcco(opIDs); err != nil {
 		return false, err
 	}
 	var tenant *db.CpiTenant
-	if tenant, err = queryTenant(targetTenantID); err != nil { // check tenant existence
+	if tenant, err = s.queryTenant(targetTenantID); err != nil { // check tenant existence
 		return false, err
 	}
 	errOps := make(map[uint]error)
@@ -155,7 +135,7 @@ func BatchDeployTenantOps(drID uint, opIDs []uint, targetTenantID uint, userID s
 	}
 
 	// update ops state to InProgress
-	err = batchUpdateOps(validOps)
+	err = s.batchUpdateOps(validOps)
 	if err != nil {
 		return false, err
 	}
@@ -168,7 +148,7 @@ func BatchDeployTenantOps(drID uint, opIDs []uint, targetTenantID uint, userID s
 
 		for i := range ops {
 			op := &ops[i]
-			cpiCli, err := cpi.NewClient(context.Background(), op.Tenant.CpiEndpoint.Name)
+			cpiCli, err := s.CPI(context.Background(), op.Tenant.CpiEndpoint.Name)
 			if err != nil {
 				errOps[op.ID] = fmt.Errorf("failed to create cpi client for tenant %s: %s", op.Tenant.Name, err)
 				// mark as failed and continue
@@ -189,7 +169,7 @@ func BatchDeployTenantOps(drID uint, opIDs []uint, targetTenantID uint, userID s
 
 		// update failed ops state to DeployFailed in database
 		if len(failedOps) > 0 {
-			_ = batchUpdateOps(failedOps)
+			_ = s.batchUpdateOps(failedOps)
 		}
 
 		// record conditions based on results
@@ -203,7 +183,7 @@ func BatchDeployTenantOps(drID uint, opIDs []uint, targetTenantID uint, userID s
 				State:             lifecycle.CondError,
 				Message:           fmt.Sprintf("batch deploy failed in tenant %s. Error: %s", tenant.Name, errMsg),
 			}
-			BatchInsertConditions([]db.Condition{condition})
+			s.BatchInsertConditions([]db.Condition{condition})
 		}
 
 		// save condition for successful deployments
@@ -212,22 +192,22 @@ func BatchDeployTenantOps(drID uint, opIDs []uint, targetTenantID uint, userID s
 			for _, op := range successOps {
 				artifactList = append(artifactList, fmt.Sprintf("  - %s (version %s)", op.ArtifactTechID, op.ArtifactVersion))
 			}
-			userEmail, _ := xsuaa.GetUserEmail(context.Background(), user)
+			userEmail, _ := s.GetUserEmail(context.Background(), user)
 			condition := db.Condition{
 				DeliveryRequestID: drID,
 				State:             lifecycle.CondSuccess,
 				Message:           fmt.Sprintf("batch deploy triggered in tenant %s by %s. Artifacts:\n%s", tenant.Name, userEmail, strings.Join(artifactList, "\n")),
 			}
-			BatchInsertConditions([]db.Condition{condition})
+			s.BatchInsertConditions([]db.Condition{condition})
 		}
 	}(drID, tenant, validOps, userID)
 
 	return true, nil
 }
 
-func queryTenant(tenantID uint) (*db.CpiTenant, error) {
+func (s *Service) queryTenant(tenantID uint) (*db.CpiTenant, error) {
 	var tenant db.CpiTenant
-	if err := db.Conn().First(&tenant, tenantID).Error; err != nil {
+	if err := s.DB.First(&tenant, tenantID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, fmt.Errorf("tenant %d not found", tenantID)
 		}
@@ -237,13 +217,13 @@ func queryTenant(tenantID uint) (*db.CpiTenant, error) {
 }
 
 // query artifact operations with preloaded Artifact and Tenant
-func queryOpsWithAcco(opIDs []uint) ([]db.ArtifactTenantOperation, error) {
+func (s *Service) queryOpsWithAcco(opIDs []uint) ([]db.ArtifactTenantOperation, error) {
 	if len(opIDs) == 0 {
 		return nil, fmt.Errorf("no operation ids provided")
 	}
 
 	var ops []db.ArtifactTenantOperation
-	if err := db.Conn().Preload("Artifact").Preload("Tenant").
+	if err := s.DB.Preload("Artifact").Preload("Tenant").
 		Find(&ops, opIDs).Error; err != nil {
 		return nil, fmt.Errorf("failed to query artifact operations of %v: %s", opIDs, err)
 	}
@@ -267,11 +247,11 @@ func queryOpsWithAcco(opIDs []uint) ([]db.ArtifactTenantOperation, error) {
 	return ops, nil
 }
 
-func batchUpdateOps(ops []db.ArtifactTenantOperation) error {
+func (s *Service) batchUpdateOps(ops []db.ArtifactTenantOperation) error {
 	errOps := make(map[uint]error)
 	for i := range ops {
 		op := &ops[i]
-		if err := db.Conn().Model(op).Updates(op).Error; err != nil {
+		if err := s.DB.Model(op).Updates(op).Error; err != nil {
 			errOps[op.ID] = fmt.Errorf("failed to update artifact operation %d: %s", op.ID, err)
 			continue
 		}

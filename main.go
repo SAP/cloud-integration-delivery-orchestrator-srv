@@ -8,9 +8,12 @@ import (
 	"time"
 
 	"mmt-delivery/db"
-	"mmt-delivery/pkg/env"
-
 	"mmt-delivery/handler"
+	"mmt-delivery/pkg/cpi"
+	"mmt-delivery/pkg/env"
+	"mmt-delivery/pkg/tms"
+	"mmt-delivery/pkg/xsuaa"
+	"mmt-delivery/service"
 
 	ginzap "github.com/gin-contrib/zap"
 	"github.com/gin-gonic/gin"
@@ -21,76 +24,58 @@ import (
 var logger = env.Logger().Desugar()
 
 func main() {
-	//engine := gin.New()
+	ctx := context.Background()
+
+	// --- Create long-lived clients ---
+	tmsClient, err := tms.NewClient(ctx)
+	if err != nil {
+		panic("failed to create TMS client: " + err.Error())
+	}
+
+	xsuaaClient, err := xsuaa.NewClient(ctx)
+	if err != nil {
+		panic("failed to create XSUAA client: " + err.Error())
+	}
+
+	cpiManager := cpi.NewManager()
+
+	// --- Build service with all injected dependencies ---
+	svc := &service.Service{
+		DB:     db.Conn(),
+		Logger: env.Logger(),
+		TMS:    tmsClient,
+		CPI: func(ctx context.Context, tenant string) (service.CPIClient, error) {
+			return cpiManager.Get(ctx, tenant)
+		},
+		GetUserEmail: xsuaa.GetUserEmail,
+		Notifier:     service.NewDefaultNotifier(),
+	}
+
+	// --- Build handler with all injected dependencies ---
+	h := handler.NewHandler(
+		svc,
+		db.Conn(),
+		env.Logger(),
+		tmsClient,
+		cpiManager,
+		xsuaaClient,
+		env.Destinations(),
+	)
+
+	// --- Setup Gin router ---
 	router := gin.New()
 	router.Use(ginzap.Ginzap(logger, time.RFC3339, true))
 	router.Use(ginzap.RecoveryWithZap(logger, true))
-	// router.Use(cors.Default()) // allow all origins
 	router.Use(AuthMiddleware())
 
 	v1Group := router.Group("/api/v1")
-	{
-		v1Group.GET("/tanant/packages", handler.GetPackagesHandler)                   //get all packages under a tenant
-		v1Group.GET("/tenant/packages/artifacts", handler.GetPackageArtifactsHandler) // get all iflows under a package
-		v1Group.GET("/tenant/runtime", handler.GetRuntimeArtifacts)                   // get all runtime artifacts under a tenant
-		// tms
-		v1Group.GET("/tms/nodes", handler.GetTmsNodesHandler)
-		v1Group.GET("/tms/trs", handler.GetTranportRequestsHandler)
-		v1Group.GET("/tms/routes", handler.GetRoutesHandler)
-
-		v1Group.GET("/destinations", handler.GetDestinationsHandler) // get cpi tenant destinations
-		// cpi tenant bind
-		v1Group.GET("/cpiTenant", handler.GetCpiTenants)
-		v1Group.GET("/cpiTenant/:id", handler.GetCpiTenant)
-		v1Group.POST("/cpiTenant", handler.UpsertCpiTenant)
-		v1Group.DELETE("/cpiTenant/:id", handler.DeleteCpiTenant)
-		// delivery rule
-		v1Group.GET("/deliveryRule", handler.GetDeliveryRules)
-		v1Group.GET("/deliveryRule/:id", handler.GetDeliveryRule)
-		v1Group.POST("/deliveryRule", handler.UpsertDeliveryRule)
-		v1Group.DELETE("/deliveryRule/:id", handler.DeleteDeliveryRule)
-		v1Group.POST("/deliveryRule/ruleCheck", handler.RuleCheck)
-		// delivery request
-		v1Group.GET("/deliveryRequest", handler.GetAllDr)
-		v1Group.GET("/deliveryRequest/:id", handler.GetDeliveryRequest)
-		v1Group.POST("/deliveryRequest", handler.CreateDr)
-		v1Group.PUT("/deliveryRequest", handler.UpdateDr)
-		v1Group.DELETE("/deliveryRequest/:id", handler.DeleteDr)
-		v1Group.POST("/deliveryRequest/import", handler.HandleImportOps)
-		v1Group.POST("/deliveryRequest/deploy", handler.HandleDeployOps)
-		v1Group.POST("/deliveryRequest/syncState/:deliveryRequestId", handler.HandleSyncState)
-		v1Group.POST("/deliveryRequest/deleteOps", handler.HandleDeleteOps)
-		v1Group.POST("/deliveryRequest/insertOps", handler.HandleInsertOps) // batch delete
-		v1Group.PUT("/deliveryRequest/updateOps", handler.HandleUpdateOps)
-		v1Group.POST("/deliveryRequest/checkTr", handler.HandleCheckTr)
-		// approve
-		v1Group.POST("/deliveryRequest/requestApproval", handler.HandleRequestApproval)
-		v1Group.POST("/deliveryRequest/approve", handler.HandleApproveDeliveryRequest)
-		// cancel
-		v1Group.POST("/deliveryRequest/cancel", handler.HandleCancelDr)
-
-		// uaa
-		v1Group.GET("/uaa/search/:email", handler.HandleUaaUserEmailSearch)
-		v1Group.GET("/uaa/id/:id", handler.HandleUaaUserIDSearch)
-
-		// counts
-		v1Group.GET("/deliveryRequest/counts", handler.DeliveryRequestCounts)
-		v1Group.GET("/cpiTenant/counts", handler.CpiTenantCounts)
-		v1Group.GET("/deliveryRule/counts", handler.DeliveryRuleCounts)
-
-	}
-
 	v2Group := router.Group("/api/v2")
-	{
-		v2Group.POST("/deliver", handler.NativeDeliver)
-	}
 
-	router.GET("/ws", handler.WsHandler)
+	h.SetupRoutes(v1Group, v2Group, router)
 
 	if err := router.Run(":8080"); err != nil {
 		panic(err)
 	}
-
 }
 
 func keyFromJKU(jku string, kid string) (*rsa.PublicKey, error) {
@@ -108,6 +93,7 @@ func keyFromJKU(jku string, kid string) (*rsa.PublicKey, error) {
 	}
 	return &rsaPubKey, nil
 }
+
 func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		auth := c.GetHeader("Authorization")
