@@ -17,7 +17,7 @@
   - [阶段三：重构 HttpClient](#阶段三重构-httpclient--context-作为参数--修复-cacheclient-已完成)
   - [阶段四：Service 层 + Handler 层 DI](#阶段四service-层--handler-层-di-已完成)
   - [阶段五：移除 init() 副作用](#阶段五移除-init-副作用-已完成)
-  - [阶段六：推广超时到 CPI 包 + 完善测试](#阶段六推广超时到-cpi-包--完善测试)
+  - [阶段六：推广超时到 CPI 包 + XSUAA 包 + 统一超时配置 + 完善测试](#阶段六推广超时到-cpi-包--xsuaa-包--统一超时配置--完善测试-已完成)
 - [4. 超时时间设计](#4-超时时间设计)
 - [5. 单元测试设计](#5-单元测试设计)
   - [5.1 当前测试（阶段一~二）](#51-当前测试阶段一二)
@@ -540,14 +540,21 @@ func main() {
 
 `pkg/notify/email.go` 和 `pkg/notify/jira.go` 中的 `env.Logger()` 和 `env.GetDestination()` 调用发生在运行时（方法内部），此时 `env.Init()` 已在 `main()` 中完成，无需修改。
 
-### 阶段六：推广超时到 CPI 包 + 完善测试
+### 阶段六：推广超时到 CPI 包 + XSUAA 包 + 统一超时配置 + 完善测试（✅ 已完成）
 
 | 步骤 | 任务 |
 |------|------|
-| 1 | `pkg/cpi/*.go` 所有方法添加超时 |
-| 2 | 为 service 层编写使用 mock 的单元测试 |
-| 3 | 统一超时配置管理 |
-| 4 | 完善文档 |
+| 1 | `pkg/cpi/cpi.go` 所有方法添加超时 + `errors.Is(context.DeadlineExceeded)` 检查 |
+| 2 | `pkg/cpi/sync_github.go` DownloadArtifact / UploadArtifact 添加超时 |
+| 3 | `pkg/xsuaa/uaa.go` UserInfo / SearchByEmail 添加超时 |
+| 4 | 新建 `pkg/cpi/cpi_test.go` — 16 个单元测试（Success / Timeout / InvalidJSON / ContextCancellation） |
+| 5 | 统一超时配置：超时常量从各包移至 `consts/consts.go`，各包通过 `consts.DefaultRequestTimeout` 等引用 |
+| 6 | 完善文档 |
+
+> **超时分类**：
+> - GET 30s (`DefaultRequestTimeout`)：GetPackages, GetPackage, GetPackageIflows, GetPackageIflow, GetDesignTimeIflow, GetPackageScriptcollections, GetDesignTimeScriptCollection, CheckDeployStatusByTaskID, GetRuntimeArtifacts, CheckUndeployStatus, RuntimeArtifact, DeleteIflow, DeleteScriptCollection, UserInfo, SearchByEmail
+> - GET 60s (`LongRequestTimeout`)：DownloadArtifact（下载 zip 文件，大数据量）
+> - POST/DELETE 60s (`ImportTimeout`)：ImportPackage, DeployIflow, DeployScriptCollection, UploadArtifact, UndeployRuntimeArtifacts
 
 ---
 
@@ -555,9 +562,13 @@ func main() {
 
 | 操作类型 | 超时 | 说明 |
 |----------|------|------|
-| GET 请求（轻量） | 30s | GetNode, GetNodes, GetRoutes |
-| GET 请求（重量） | 60s | GetActionResultLog, getTransportLogs |
-| POST 请求 | 60s | ImportTransportRequest |
+| GET 请求（轻量） | 30s | TMS: GetNode, GetNodes, GetRoutes, GetNodeTransportRequests, GetActionResult, GetTransportRequest |
+| | | CPI: GetPackages, GetPackage, GetPackageIflows, GetPackageIflow, GetDesignTimeIflow, GetPackageScriptcollections, GetDesignTimeScriptCollection, CheckDeployStatusByTaskID, GetRuntimeArtifacts, CheckUndeployStatus, RuntimeArtifact, DeleteIflow, DeleteScriptCollection |
+| | | XSUAA: UserInfo, SearchByEmail |
+| GET 请求（重量） | 60s | TMS: GetActionResultLog, getTransportLogs |
+| | | CPI: DownloadArtifact（下载 zip 文件） |
+| POST/DELETE 请求 | 60s | TMS: ImportTransportRequest |
+| | | CPI: ImportPackage, DeployIflow, DeployScriptCollection, UploadArtifact, UndeployRuntimeArtifacts |
 
 ### 4.1 超时触发机制详解
 
@@ -962,6 +973,15 @@ go test ./...   # 不需要任何环境变量
   - **`main.go`**：添加 `env.Init()` 和 `db.Connect()` 显式调用，移除 `var logger = env.Logger().Desugar()`
   - **测试验证**：`go test -v ./pkg/tms/...` 全部 10 个测试通过，无需 `SKIP_DB_INIT=true`
   - **构建验证**：`go build ./...` 零错误通过
+- [x] 阶段六：推广超时到 CPI 包 + XSUAA 包 + 统一超时配置 + 完善测试
+  - **统一超时配置**：超时常量从 `pkg/tms`、`pkg/cpi`、`pkg/xsuaa` 各自的局部定义移至 `consts/consts.go`，各包通过 `consts.DefaultRequestTimeout`、`consts.LongRequestTimeout`、`consts.ImportTimeout` 引用，消除重复
+  - **`pkg/cpi/cpi.go`**：移除局部超时常量；所有 17 个方法添加 `context.WithTimeout` + `errors.Is(context.DeadlineExceeded)` 检查
+  - **`pkg/cpi/sync_github.go`**：DownloadArtifact（60s）、UploadArtifact（60s）添加超时
+  - **`pkg/xsuaa/uaa.go`**：移除局部超时常量；UserInfo、SearchByEmail 添加超时
+  - **`pkg/tms/tms.go`**：移除局部超时常量，改为引用 `consts`
+  - **新建 `pkg/cpi/cpi_test.go`**：16 个单元测试（GetPackages Success/Timeout/InvalidJSON、GetPackageIflows Success/Timeout、DeployIflow Success/Timeout、CheckDeployStatusByTaskID Success/Timeout、GetRuntimeArtifacts Success/Timeout、ContextCancellation、ImportPackage Success/Timeout、UndeployRuntimeArtifacts Success/Timeout）
+  - **测试验证**：`go test -v ./pkg/cpi/...` 全部 16 个测试通过；`go test -v ./pkg/tms/...` 全部 10 个测试通过
+  - **构建验证**：`go build ./...` 零错误通过
 
 ---
 
@@ -1041,6 +1061,14 @@ go test ./...   # 不需要任何环境变量
 - `pkg/xsuaa/uaa.go` — `var logger = env.Logger()` → `func logger() *zap.SugaredLogger`；所有 `logger.XXX` → `logger().XXX`
 - `main.go` — 添加 `env.Init()` + `db.Connect()` 显式调用；移除 `var logger = env.Logger().Desugar()`
 
+**阶段六**：
+- `consts/consts.go` — 新增统一 HTTP 超时常量（`DefaultRequestTimeout` 30s、`LongRequestTimeout` 60s、`ImportTimeout` 60s）
+- `pkg/cpi/cpi.go` — 移除局部超时常量；所有 17 个方法添加 `context.WithTimeout` + `errors.Is(context.DeadlineExceeded)` 检查；改用 `consts.` 引用
+- `pkg/cpi/sync_github.go` — DownloadArtifact（60s）、UploadArtifact（60s）添加超时；添加 `consts` + `errors` import
+- `pkg/xsuaa/uaa.go` — 移除局部超时常量；UserInfo、SearchByEmail 添加超时；改用 `consts.` 引用
+- `pkg/tms/tms.go` — 移除局部超时常量；改用 `consts.` 引用
+- `pkg/cpi/cpi_test.go` — 新建：16 个单元测试
+
 ### 10.2 各阶段待修改的文件
 
 **阶段四**（Service 层 + Handler 层 DI）— ✅ 已完成：
@@ -1083,6 +1111,14 @@ Handler 层重构：
 - `pkg/cpi/sync_github.go` — `var gitAuth = ...` → `func gitAuth()` 延迟获取；`logger.Infof` → `logger().Infof`
 - `pkg/xsuaa/uaa.go` — `var logger = env.Logger()` → `func logger() *zap.SugaredLogger`；所有 `logger.XXX` → `logger().XXX`
 - `main.go` — 添加 `env.Init()` + `db.Connect()` 显式调用；移除 `var logger = env.Logger().Desugar()`
+
+**阶段六**（推广超时到 CPI + XSUAA + 统一超时配置）— ✅ 已完成：
+- `consts/consts.go` — 新增统一 HTTP 超时常量（`DefaultRequestTimeout` 30s、`LongRequestTimeout` 60s、`ImportTimeout` 60s）
+- `pkg/tms/tms.go` — 移除局部超时常量，改用 `consts.` 引用
+- `pkg/cpi/cpi.go` — 移除局部超时常量；17 个方法全部添加超时 + `errors.Is(context.DeadlineExceeded)` 检查；改用 `consts.` 引用
+- `pkg/cpi/sync_github.go` — DownloadArtifact（LongRequestTimeout 60s）、UploadArtifact（ImportTimeout 60s）添加超时
+- `pkg/xsuaa/uaa.go` — 移除局部超时常量；UserInfo、SearchByEmail 添加超时；改用 `consts.` 引用
+- `pkg/cpi/cpi_test.go` — 新建：16 个单元测试
 
 ### 10.3 参考资料
 

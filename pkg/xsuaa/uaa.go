@@ -3,7 +3,9 @@ package xsuaa
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"mmt-delivery/consts"
 	"mmt-delivery/db"
 	"mmt-delivery/pkg/env"
 	"time"
@@ -61,14 +63,19 @@ func GetUserEmail(ctx context.Context, userID string) (string, error) {
 
 // get user by sub/user_id from JWT claim body
 func (uaa *UaaClient) UserInfo(ctx context.Context, userID string) (*db.UserInfo, error) {
+	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
+	defer cancel()
 	fullUrl := fmt.Sprintf("%s/Users/%s", uaa.ApiURL, userID)
 	logger().Infof("searching user info by sub/user_id, at %s", fullUrl)
 	request := env.HttpRequest{
 		ApiURL: fullUrl,
 		Method: http.MethodGet,
 	}
-	body, _, err := uaa.Do(ctx, &request)
+	body, _, err := uaa.Do(childCtx, &request)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			logger().Errorf("UserInfo request timeout after %v: %s", consts.DefaultRequestTimeout, fullUrl)
+		}
 		logger().Errorf("Error when getting uaa user by id, %s", err)
 		return nil, err
 	}
@@ -104,6 +111,8 @@ func (uaa *UaaClient) UserEmail(ctx context.Context, userID string) (string, err
 
 // search uaa user by email, 'co' operator(https://simplecloud.info/specs/draft-scim-api-01.html#query-resources)
 func (uaa *UaaClient) SearchByEmail(ctx context.Context, email string, curUserOrigin string) ([]db.UserInfo, error) {
+	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
+	defer cancel()
 	q := url.Values{}
 	q.Set("filter", fmt.Sprintf("email co %q", email))
 	fullURL := fmt.Sprintf("%s/Users?%s", uaa.ApiURL, q.Encode())
@@ -113,8 +122,11 @@ func (uaa *UaaClient) SearchByEmail(ctx context.Context, email string, curUserOr
 		Method: http.MethodGet,
 	}
 
-	respBodyContent, _, err := uaa.Do(ctx, &request)
+	respBodyContent, _, err := uaa.Do(childCtx, &request)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			logger().Errorf("SearchByEmail request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
+		}
 		logger().Errorf("Error when getting uaa users by email, %s", err)
 		return []db.UserInfo{}, err
 	}

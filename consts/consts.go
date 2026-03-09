@@ -1,5 +1,7 @@
 package consts
 
+import "time"
+
 type ArtifactType string
 
 type RuntimeState string
@@ -28,7 +30,7 @@ const (
 )
 
 const (
-	Artifact_Rt_Started  RuntimeState = "STARTED"  // deployed in runtime
+	Artifact_Rt_Started  RuntimeState = "STARTED" // deployed in runtime
 	Artifact_Rt_Error    RuntimeState = "ERROR"
 	Artifact_Rt_Starting RuntimeState = "STARTING"
 )
@@ -46,4 +48,11 @@ const (
 	Step_Type_Import   = "Import"
 	Step_Type_Deploy   = "Deploy"
 	Step_Type_Undeploy = "Undeploy"
+)
+
+// HTTP request timeout constants — used by pkg/tms, pkg/cpi, pkg/xsuaa
+const (
+	DefaultRequestTimeout = 30 * time.Second // GET 请求（轻量）
+	LongRequestTimeout    = 60 * time.Second // GET 请求（大数据量，如日志、文件下载）
+	ImportTimeout         = 60 * time.Second // POST/DELETE 请求（Import、Deploy、Upload、Undeploy）
 )

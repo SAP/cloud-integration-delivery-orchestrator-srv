@@ -6,8 +6,10 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"mmt-delivery/consts"
 	"mmt-delivery/pkg/env"
 	"net/http"
 	"net/url"
@@ -101,13 +103,19 @@ func (c *CpiClient) SyncToGithub(artifactId, artifactVersion, artifactType, pack
 
 // download artifact zip file, write it to the base directory
 func (c *CpiClient) DownloadArtifact(ctx context.Context, artifactId, artifactVersion, packageID, artifactType string) error {
+	childCtx, cancel := context.WithTimeout(ctx, consts.LongRequestTimeout)
+	defer cancel()
 	// Download the artifact from CPI
+	fullURL := fmt.Sprintf("%s/IntegrationDesigntimeArtifacts(Id='%s',Version='%s')/$value", c.ApiURL, artifactId, artifactVersion)
 	request := env.HttpRequest{
 		Method: http.MethodGet,
-		ApiURL: fmt.Sprintf("%s/IntegrationDesigntimeArtifacts(Id='%s',Version='%s')/$value", c.ApiURL, artifactId, artifactVersion),
+		ApiURL: fullURL,
 	}
-	artifactContent, _, err := c.Do(ctx, &request) // zip content
+	artifactContent, _, err := c.Do(childCtx, &request) // zip content
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			logger().Errorf("DownloadArtifact request timeout after %v: %s", consts.LongRequestTimeout, fullURL)
+		}
 		return fmt.Errorf("failed to download artifact: %w", err)
 	}
 
@@ -173,6 +181,8 @@ func (c *CpiClient) PublishToGithubRelease(ctx context.Context, artifactId, arti
 
 // upload artifact zip file to respective tenant
 func (c *CpiClient) UploadArtifact(ctx context.Context, artifactId string, artifactName string, artifactVersion string, packageId string) error {
+	childCtx, cancel := context.WithTimeout(ctx, consts.ImportTimeout)
+	defer cancel()
 
 	// Read zip file from disk
 	zipFilePath := fmt.Sprintf("%s/%s:%s.zip", Artifact_Base_Dir, artifactId, artifactVersion)
@@ -208,8 +218,11 @@ func (c *CpiClient) UploadArtifact(ctx context.Context, artifactId string, artif
 		ApiURL:      fmt.Sprintf("%s/IntegrationDesigntimeArtifacts", c.ApiURL),
 		RequestBody: bytes.NewBuffer(requestBody),
 	}
-	response, _, err := c.Do(ctx, &request)
+	response, _, err := c.Do(childCtx, &request)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			logger().Errorf("UploadArtifact request timeout after %v: %s/IntegrationDesigntimeArtifacts", consts.ImportTimeout, c.ApiURL)
+		}
 		return fmt.Errorf("error while uploading artifact: %s", err)
 	}
 	logger().Infof("Artifact %s:%s uploaded successfully, response: %s", artifactId, artifactVersion, string(*response))
