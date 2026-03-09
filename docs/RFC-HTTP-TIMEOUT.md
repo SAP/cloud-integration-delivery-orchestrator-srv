@@ -1,5 +1,38 @@
 # RFC: HTTP 超时机制 + 依赖注入架构重构
 
+## 目录
+
+- [1. 问题背景](#1-问题背景)
+  - [1.1 问题一：缺少超时机制](#11-问题一缺少超时机制)
+  - [1.2 问题二：Context 存储在结构体中（反模式）](#12-问题二context-存储在结构体中反模式)
+  - [1.3 问题三：全局状态和 init() 副作用](#13-问题三全局状态和-init-副作用)
+  - [1.4 当前依赖关系图](#14-当前依赖关系图)
+- [2. 技术方案：依赖注入重构](#2-技术方案依赖注入重构)
+  - [2.1 方案概述](#21-方案概述)
+  - [2.2 目标架构](#22-目标架构)
+  - [2.3 分阶段实施策略](#23-分阶段实施策略)
+- [3. 实施计划](#3-实施计划)
+  - [阶段一：超时机制试点](#阶段一超时机制试点-已完成)
+  - [阶段二：推广超时到所有 TMS 方法](#阶段二推广超时到所有-tms-方法-已完成)
+  - [阶段三：重构 HttpClient](#阶段三重构-httpclient--context-作为参数--修复-cacheclient)
+  - [阶段四：重构 Service 层](#阶段四重构-service-层--包级别函数--结构体方法)
+  - [阶段五：重构 Handler 层 + 移除 init()](#阶段五重构-handler-层--移除-init)
+  - [阶段六：推广超时到 CPI 包 + 完善测试](#阶段六推广超时到-cpi-包--完善测试)
+- [4. 超时时间设计](#4-超时时间设计)
+- [5. 单元测试设计](#5-单元测试设计)
+  - [5.1 当前测试（阶段一~二）](#51-当前测试阶段一二)
+  - [5.2 阶段四后的测试（目标状态）](#52-阶段四后的测试目标状态)
+- [6. 风险评估](#6-风险评估)
+- [7. 回滚方案](#7-回滚方案)
+- [8. 已完成事项](#8-已完成事项)
+- [9. 待确认事项](#9-待确认事项)
+- [10. 附录](#10-附录)
+  - [10.1 已修改的文件](#101-已修改的文件)
+  - [10.2 各阶段待修改的文件](#102-各阶段待修改的文件)
+  - [10.3 参考资料](#103-参考资料)
+
+---
+
 ## 1. 问题背景
 
 ### 1.1 问题一：缺少超时机制
@@ -157,9 +190,9 @@ const (
 )
 ```
 
-### 阶段三：重构 HttpClient — Context 作为参数 + 移除全局缓存
+### 阶段三：重构 HttpClient — Context 作为参数 + 修复 cacheClient
 
-**目标**：解决 Context 反模式，为 DI 打基础
+**目标**：解决 Context 反模式和 cacheClient 线程安全问题
 
 **3.1 修改 `pkg/env/remotecall.go`**
 
@@ -173,19 +206,55 @@ type HttpClient struct {
     // ...
 }
 
-var cacheClient map[string]*HttpClient  // 全局可变缓存
+var cacheClient map[string]*HttpClient  // 全局可变缓存，非线程安全
 
 func (c *HttpClient) Do(request *HttpRequest) (*[]byte, int, error)
 
 // ✅ 重构后
 type HttpClient struct {
-    HttpClient  *http.Client     // 去掉 Context 字段
-    AccessToken string
-    ApiURL      string
-    // ...
+    mu           sync.Mutex       // 保护 token 刷新
+    HttpClient   *http.Client     // 去掉 Context 字段
+    AccessToken  string
+    ApiURL       string
+    ClientId     string
+    ClientSecret string
+    AuthUrl      string
 }
 
+// Do 接受 ctx 作为第一个参数
 func (c *HttpClient) Do(ctx context.Context, request *HttpRequest) (*[]byte, int, error)
+
+// NewClient 不再使用全局缓存，改为直接创建实例
+// 缓存由调用方（TmsClient/CpiClient 工厂）负责
+func NewClient(ctx context.Context, clientID, clientSecret, authUrl, apiUrl string) (*HttpClient, error)
+```
+
+**3.1.1 cacheClient 迁移方案**
+
+将全局 `cacheClient` 移除，改为在各客户端包内管理缓存：
+- `pkg/tms/`: TMS 只有一个 clientID，由 `NewClient()` 返回单例
+- `pkg/cpi/`: CPI 有多个 tenant，缓存放在调用方（service 层或未来的 factory）
+- `pkg/xsuaa/`: 已有 `globalClient` 单例，保持不变
+
+**3.1.2 token 刷新改为实例级**
+
+```go
+func (c *HttpClient) Do(ctx context.Context, request *HttpRequest) (*[]byte, int, error) {
+    // ... 执行请求 ...
+    if resp.StatusCode == 401 {
+        c.mu.Lock()
+        err := c.refreshToken(ctx)
+        c.mu.Unlock()
+        if err != nil {
+            return nil, 0, err
+        }
+        return c.Do(ctx, request)  // 重试一次
+    }
+}
+
+func (c *HttpClient) refreshToken(ctx context.Context) error {
+    // 重新获取 OAuth2 token，更新 c.AccessToken
+}
 ```
 
 **3.2 修改 `pkg/tms/` 所有方法签名**
@@ -447,12 +516,12 @@ go test ./...   # 不需要任何环境变量
 
 ---
 
-## 9. 待确认事项
+## 9. 待确认事项（已决定）
 
-1. [ ] 阶段三~五的实施节奏（一次性还是分批）
-2. [ ] 是否为 TMS/CPI client 定义接口（便于 mock），还是保持具体类型
-3. [ ] 是否需要统一的配置管理（环境变量 → 结构体）
-4. [ ] `pkg/env/remotecall.go` 中的 `cacheClient` 全局缓存如何处理
+1. [x] **实施节奏**：先实施阶段三（Context 作为参数），后续阶段逐步推进
+2. [x] **接口定义**：阶段四定义 `TMSService`（7 方法）和 `CPIService`（8 方法）+ `CPITransferService`（3 方法）接口，便于 mock 测试
+3. [x] **统一配置管理**：需要。将 `env.TmsCredential()`, `env.UaaCredential()`, `env.Destinations()`, `env.PostgreUri()` 统一到 `Config` 结构体
+4. [x] **`cacheClient` 处理**：替换为实例级 token 管理 + `sync.Mutex` 保护，在阶段三中一并完成。当前问题：非线程安全（data race）、无主动过期、401 刷新无重试上限
 
 ---
 
