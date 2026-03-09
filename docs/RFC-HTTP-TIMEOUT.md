@@ -417,6 +417,317 @@ func main() {
 | GET 请求（重量） | 60s | GetActionResultLog, getTransportLogs |
 | POST 请求 | 60s | ImportTransportRequest |
 
+### 4.1 超时触发机制详解
+
+#### 4.1.1 应用层调用链
+
+以 `GetNodes` 为例：
+
+```
+Handler 层                    TMS 层                         env 层                        Go 标准库
+─────────                    ──────                         ──────                        ─────────
+
+ctx (来自 gin)
+     │
+     ▼
+GetNodes(ctx)
+     │
+     │  childCtx, cancel := context.WithTimeout(ctx, 30s)
+     │  // childCtx 内置了一个 30s 倒计时定时器
+     │
+     ▼
+t.Do(childCtx, &request)
+     │
+     ▼
+doRequest(childCtx, ...)
+     │
+     │  req, _ = http.NewRequestWithContext(childCtx, ...)
+     │  // 把带超时的 childCtx 绑到 http.Request 上
+     │
+     ▼
+c.HttpClient.Do(req)     ←── Go 的 net/http 内部实现（见 4.1.2）
+     │
+     │  30s 到期 → net/http 检测到 context.Done()
+     │  → 关闭 TCP 连接 → 返回 context.DeadlineExceeded
+     │
+     ▼
+errReq != nil → errors.Is(errReq, context.DeadlineExceeded) → true
+```
+
+**`defer cancel()` 的作用**：不参与超时触发，是资源清理操作。`context.WithTimeout` 创建时启动内部 `time.Timer`，如果请求提前完成（如 2s），定时器仍运行到 30s 才被 GC。`cancel()` 立即停掉定时器释放资源。Go 官方要求 `WithTimeout`/`WithCancel` 必须调用 cancel，否则 `go vet` 报警告。
+
+#### 4.1.2 Go net/http 标准库内部实现
+
+超时不是我们自己实现的，而是 Go 标准库 `net/http` 的内建机制。以下基于 Go 源码（[golang/go](https://github.com/golang/go)）分析完整链路。
+
+**核心架构**：每个 HTTP/1.1 请求有 3 个协作 goroutine：
+1. **Caller goroutine** — 运行 `persistConn.roundTrip()`，通过 `select` 编排请求
+2. **writeLoop goroutine** — 向 TCP 连接写请求
+3. **readLoop goroutine** — 从 TCP 连接读响应
+
+Context 取消由 Caller goroutine 的 `select` 检测，然后**关闭底层 TCP 连接**，使其他 goroutine 的阻塞 I/O 立即失败。
+
+**完整调用链**：
+
+```
+context.WithTimeout(ctx, 30s)  →  创建 ctx，内部启动 time.Timer
+         │
+         ▼
+http.Client.Do(req)
+  └─ Client.do()  →  Client.send()  →  send()
+         │
+         ├─ setRequestCancel()                    [src/net/http/client.go ~L353]
+         │    若 Client.Timeout 更早则包装 ctx；
+         │    否则保留用户 ctx 的 deadline（我们的场景）
+         │
+         ▼
+Transport.RoundTrip(req)
+  └─ Transport.roundTrip()                        [src/net/http/transport.go ~L621]
+         │
+         ├─ ctx, cancel := context.WithCancelCause(req.Context())   [~L693]
+         │
+         ├─ 循环顶部快速检查：                       [~L704]
+         │    select {
+         │    case <-ctx.Done():
+         │        return nil, context.Cause(ctx)   // 已超时则立即返回
+         │    default:
+         │    }
+         │
+         ├─ getConn()                              [~L1555]
+         │    select {
+         │    case r := <-w.result:                 // 拿到连接
+         │    case <-treq.ctx.Done():               // 等连接时超时
+         │        return nil, context.Cause(treq.ctx)
+         │    }
+         │
+         └─ persistConn.roundTrip()                [~L2903]
+              │
+              │  发送请求到 writeLoop 和 readLoop：
+              │    pc.writech  <- writeRequest{...}
+              │    pc.reqch    <- requestAndChan{...}
+              │
+              │  主 select 循环：                    [~L2999]
+              │    ctxDoneChan := req.ctx.Done()
+              │    for {
+              │        select {
+              │        case err := <-writeErrCh:     // 写完成
+              │        case <-pcClosed:               // 连接关闭
+              │        case re := <-resc:             // 收到响应
+              │            return handleResponse(re)
+              │
+              │        case <-ctxDoneChan:            // ★ 超时触发点
+              │            select {
+              │            case re := <-resc:         // 竞争：响应刚好到达
+              │                return handleResponse(re)
+              │            default:
+              │            }
+              │            pc.cancelRequest(          // ★ 取消请求
+              │                context.Cause(req.ctx) // = context.DeadlineExceeded
+              │            )
+              │        }
+              │    }
+```
+
+**`pc.cancelRequest()` 的实现** （`transport.go ~L2264`）：
+
+```go
+func (pc *persistConn) cancelRequest(err error) {
+    pc.mu.Lock()
+    defer pc.mu.Unlock()
+    pc.canceledErr = err                    // 存储 context.DeadlineExceeded
+    pc.closeLocked(errRequestCanceled)
+}
+```
+
+**`pc.closeLocked()` 的实现** （`transport.go ~L3082`）：
+
+```go
+func (pc *persistConn) closeLocked(err error) {
+    // ...
+    pc.conn.Close()      // ★ 关闭 TCP 连接 → 发送 FIN → 阻塞的 Read/Write 立即失败
+    close(pc.closech)    // ★ 通知所有 goroutine
+}
+```
+
+**错误回传路径**：
+
+`pc.conn.Close()` 导致 readLoop/writeLoop 中阻塞的 I/O 返回错误（如 `use of closed network connection`）。但 `mapRoundTripError()`（`transport.go ~L2294`）优先返回存储的 `pc.canceledErr`（即 `context.DeadlineExceeded`），而非 I/O 错误：
+
+```go
+func (pc *persistConn) mapRoundTripError(...) error {
+    if cerr := pc.canceled(); cerr != nil {
+        return cerr    // 返回 context.DeadlineExceeded，而非 I/O 错误
+    }
+    // ...
+}
+```
+
+**关键设计**：Go **不使用** `net.Conn.SetDeadline()` 实现 context 超时。而是通过 `select` 监听 `ctx.Done()` channel，触发后**强制关闭 TCP 连接**，然后用 `mapRoundTripError` 将 I/O 错误替换为 context 错误。
+
+#### 4.1.3 context.WithTimeout 的 Done() 实现
+
+`context.WithTimeout` 是如何让 `Done()` channel 在超时后关闭的？以下基于 Go 源码 [`src/context/context.go`](https://github.com/golang/go/blob/master/src/context/context.go) 分析。
+
+**入口：`WithTimeout` → `WithDeadline` → `WithDeadlineCause`**
+
+```go
+// ~L704
+func WithTimeout(parent Context, timeout time.Duration) (Context, CancelFunc) {
+    return WithDeadline(parent, time.Now().Add(timeout))  // 相对时间 → 绝对 deadline
+}
+```
+
+**核心数据结构**：
+
+```go
+// cancelCtx ~L426 — 拥有 done channel
+type cancelCtx struct {
+    Context
+    mu       sync.Mutex
+    done     atomic.Value          // chan struct{}，惰性创建，首次 cancel 时关闭
+    children map[canceler]struct{} // 子 context 集合
+    err      atomic.Value
+    cause    error
+}
+
+// timerCtx ~L657 — 嵌入 cancelCtx，增加定时器
+type timerCtx struct {
+    cancelCtx                      // 继承 Done()、Err() 等方法
+    timer    *time.Timer           // AfterFunc 定时器
+    deadline time.Time
+}
+```
+
+**`WithDeadlineCause` 的关键步骤** （~L632）：
+
+```go
+func WithDeadlineCause(parent Context, d time.Time, cause error) (Context, CancelFunc) {
+    // 1. 若 parent deadline 更早，退化为 WithCancel（parent 会先触发）
+    if cur, ok := parent.Deadline(); ok && cur.Before(d) {
+        return WithCancel(parent)
+    }
+
+    // 2. 创建 timerCtx
+    c := &timerCtx{deadline: d}
+    c.cancelCtx.propagateCancel(parent, c)  // 注册为 parent 的子 context
+
+    // 3. 若 deadline 已过，立即取消
+    dur := time.Until(d)
+    if dur <= 0 {
+        c.cancel(true, DeadlineExceeded, cause)
+        return c, func() { c.cancel(false, Canceled, nil) }
+    }
+
+    // 4. ★ 设置定时器 — 核心行
+    c.mu.Lock()
+    defer c.mu.Unlock()
+    if c.err.Load() == nil {
+        c.timer = time.AfterFunc(dur, func() {
+            c.cancel(true, DeadlineExceeded, cause)   // dur 到期后自动调用
+        })
+    }
+    return c, func() { c.cancel(true, Canceled, nil) }
+}
+```
+
+**`Done()` — 惰性创建 channel**（双重检查锁定）（~L448）：
+
+```go
+func (c *cancelCtx) Done() <-chan struct{} {
+    d := c.done.Load()
+    if d != nil {
+        return d.(chan struct{})         // 快速路径：已创建
+    }
+    c.mu.Lock()
+    defer c.mu.Unlock()
+    d = c.done.Load()                   // 锁内二次检查
+    if d == nil {
+        d = make(chan struct{})          // ← 惰性创建 channel
+        c.done.Store(d)
+    }
+    return d.(chan struct{})
+}
+```
+
+**定时器到期 → `timerCtx.cancel()` → `cancelCtx.cancel()` → 关闭 channel**：
+
+```go
+// timerCtx.cancel() ~L678
+func (c *timerCtx) cancel(removeFromParent bool, err, cause error) {
+    c.cancelCtx.cancel(false, err, cause)   // 委托给 cancelCtx 关闭 channel
+    if removeFromParent {
+        removeChild(c.cancelCtx.Context, c)
+    }
+    c.mu.Lock()
+    if c.timer != nil {
+        c.timer.Stop()                       // 释放定时器资源
+        c.timer = nil
+    }
+    c.mu.Unlock()
+}
+
+// cancelCtx.cancel() ~L549 — 关闭 done channel 的实际位置
+func (c *cancelCtx) cancel(removeFromParent bool, err, cause error) {
+    c.mu.Lock()
+    if c.err.Load() != nil {
+        c.mu.Unlock()
+        return                               // 幂等：已取消则直接返回
+    }
+    c.err.Store(err)                         // 存储 DeadlineExceeded
+    c.cause = cause
+
+    d, _ := c.done.Load().(chan struct{})
+    if d == nil {
+        c.done.Store(closedchan)             // 优化：无人调用过 Done()，存预关闭 channel
+    } else {
+        close(d)                             // ★ 关闭 channel，所有 <-ctx.Done() 立即解除阻塞
+    }
+
+    for child := range c.children {          // 级联取消所有子 context
+        child.cancel(false, err, cause)
+    }
+    c.children = nil
+    c.mu.Unlock()
+}
+```
+
+`closedchan` 优化（~L423）：包级别预关闭的 channel 单例，避免为从未被 `Done()` 读取的 context 分配新 channel：
+
+```go
+var closedchan = make(chan struct{})
+func init() { close(closedchan) }
+```
+
+**完整事件链**：
+
+```
+WithTimeout(parent, 30s)
+  │
+  └─ WithDeadlineCause(parent, time.Now().Add(30s), nil)
+       │
+       ├─ 创建 &timerCtx{deadline: d}（嵌入 cancelCtx）
+       │
+       ├─ propagateCancel(parent, c)  // 注册父子关系
+       │
+       └─ c.timer = time.AfterFunc(30s, func() { c.cancel(...) })
+            │
+            │  ... Go runtime 内部：30s 后定时器到期 ...
+            │  （AfterFunc 在独立 goroutine 中执行回调）
+            │
+            └─ timerCtx.cancel(true, DeadlineExceeded, nil)
+                 │
+                 └─ cancelCtx.cancel(false, DeadlineExceeded, nil)
+                      │
+                      ├─ c.err.Store(DeadlineExceeded)
+                      │
+                      ├─ close(d)  ← ★ Done() channel 关闭
+                      │               所有 select { case <-ctx.Done(): } 解除阻塞
+                      │               net/http 的 persistConn.roundTrip() 检测到
+                      │               → cancelRequest() → conn.Close() → 超时错误返回
+                      │
+                      └─ 级联取消所有子 context
+```
+
 ---
 
 ## 5. 单元测试设计
@@ -559,6 +870,13 @@ go test ./...   # 不需要任何环境变量
 - [Go Context 最佳实践](https://pkg.go.dev/context)
 - [Go HTTP Client 超时配置](https://blog.cloudflare.com/the-complete-guide-to-golang-net-http-timeouts/)
 - [Go Blog: Context](https://go.dev/blog/context)
+- [`src/context/context.go` — `WithDeadlineCause`, `cancelCtx`, `timerCtx`](https://github.com/golang/go/blob/master/src/context/context.go) — Done() channel 惰性创建 + 定时器关闭机制
+
+**net/http 源码（超时实现）**：
+- [`src/net/http/client.go` — `setRequestCancel()`](https://github.com/golang/go/blob/master/src/net/http/client.go) — 包装 context deadline
+- [`src/net/http/transport.go` — `roundTrip()`](https://github.com/golang/go/blob/master/src/net/http/transport.go) — 主 select 循环监听 `ctx.Done()`
+- [`src/net/http/transport.go` — `persistConn.roundTrip()`](https://github.com/golang/go/blob/master/src/net/http/transport.go) — 超时触发 → `cancelRequest()` → `conn.Close()`
+- [`src/net/http/transport.go` — `mapRoundTripError()`](https://github.com/golang/go/blob/master/src/net/http/transport.go) — 将 I/O 错误替换为 `context.DeadlineExceeded`
 
 **init() 反模式**：
 - [100 Go Mistakes: #3 滥用 init 函数](https://100go.co/3-init-functions/)
