@@ -92,18 +92,17 @@ type TrNodeStatus struct {
 
 // check status of a single TR. /v1/transportRequests/{TrNumber}
 // NOTE: this api is not from api hub. may not be stable
-func (t *TmsClient) GetTransportRequest(TrNumber string) (*TransportRequestV1, error) {
-	childCtx, cancel := context.WithTimeout(t.Context, DefaultRequestTimeout)
+func (t *TmsClient) GetTransportRequest(ctx context.Context, TrNumber string) (*TransportRequestV1, error) {
+	childCtx, cancel := context.WithTimeout(ctx, DefaultRequestTimeout)
 	defer cancel()
 
 	fullURL := fmt.Sprintf("%s/v1/transportRequests/%s?expand=logs,landscape", t.ApiURL, TrNumber)
 	logger.Infof("Starting to get tr info: %s\n", fullURL)
 	request := env.HttpRequest{
-		Ctx:    childCtx,
 		ApiURL: fullURL,
 		Method: http.MethodGet,
 	}
-	body, _, err := t.Do(&request)
+	body, _, err := t.Do(childCtx, &request)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			logger.Errorf("GetTransportRequest timeout after %v: %s", DefaultRequestTimeout, fullURL)
@@ -121,8 +120,8 @@ func (t *TmsClient) GetTransportRequest(TrNumber string) (*TransportRequestV1, e
 // update Import status of an artifact in each transport node.
 // status can be(from TMS): SUCCEEDED, INITIAL(when imported into next node. eg: dev -> ci, then state in ci should be inital),
 // FATAL, RUNNING, etc...
-func (t *TmsClient) TrNodeStatuses(trNumber string) (map[uint]TrNodeStatus, error) {
-	tr, err := t.GetTransportRequest(trNumber)
+func (t *TmsClient) TrNodeStatuses(ctx context.Context, trNumber string) (map[uint]TrNodeStatus, error) {
+	tr, err := t.GetTransportRequest(ctx, trNumber)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get transport request %s: %s", trNumber, err)
 	}

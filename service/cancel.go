@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"mmt-delivery/db"
 	"mmt-delivery/pkg/env"
@@ -52,7 +53,7 @@ func CancelDeliveryRequest(drID uint, userID string, reason string) error {
 	}
 
 	// 5. Create cancellation condition
-	userEmail, _ := xsuaa.GetUserEmail(userID)
+	userEmail, _ := xsuaa.GetUserEmail(context.Background(), userID)
 	conditionMsg := fmt.Sprintf("Delivery request canceled by %s. Reason: %s", userEmail, reason)
 	_ = BatchInsertConditions([]db.Condition{
 		{

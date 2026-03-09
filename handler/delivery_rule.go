@@ -74,7 +74,7 @@ func UpsertDeliveryRule(ctx *gin.Context) {
 	// Use explicit association updates for deterministic many2many behavior
 	if err := db.Conn().Transaction(func(tx *gorm.DB) error {
 		// Recompute based on incoming IncludedTenants
-		sourceTenant, targetRoutes, targetNodes, err := service.SourceAndRoute(rule.IncludedTenants)
+		sourceTenant, targetRoutes, targetNodes, err := service.SourceAndRoute(ctx, rule.IncludedTenants)
 		if err != nil {
 			return fmt.Errorf("failed to determine source tenant and target routes/nodes: %s", err.Error())
 		}

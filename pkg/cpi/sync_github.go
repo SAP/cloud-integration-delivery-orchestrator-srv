@@ -94,16 +94,13 @@ func (c *CpiClient) SyncToGithub(artifactId, artifactVersion, artifactType, pack
 }
 
 // download artifact zip file, write it to the base directory
-func (c *CpiClient) DownloadArtifact(artifactId, artifactVersion, packageID, artifactType string) error {
-	childCtx, cancel := context.WithCancel(c.Context)
-	defer cancel()
+func (c *CpiClient) DownloadArtifact(ctx context.Context, artifactId, artifactVersion, packageID, artifactType string) error {
 	// Download the artifact from CPI
 	request := env.HttpRequest{
-		Ctx:    childCtx,
 		Method: http.MethodGet,
 		ApiURL: fmt.Sprintf("%s/IntegrationDesigntimeArtifacts(Id='%s',Version='%s')/$value", c.ApiURL, artifactId, artifactVersion),
 	}
-	artifactContent, _, err := c.Do(&request) // zip content
+	artifactContent, _, err := c.Do(ctx, &request) // zip content
 	if err != nil {
 		return fmt.Errorf("failed to download artifact: %w", err)
 	}
@@ -128,9 +125,11 @@ func (c *CpiClient) DownloadArtifact(artifactId, artifactVersion, packageID, art
 }
 
 // ABORT this feature
-//  use sap JFrog instead. Currently cannot publish to github release, seems premission issue, also release asset is not applicable in this scenario.
+//
+//	use sap JFrog instead. Currently cannot publish to github release, seems premission issue, also release asset is not applicable in this scenario.
+//
 // publish artifact to git repository release
-func (c *CpiClient) PublishToGithubRelease(artifactId, artifactVersion, branch string) error {
+func (c *CpiClient) PublishToGithubRelease(ctx context.Context, artifactId, artifactVersion, branch string) error {
 	zipFilePath := fmt.Sprintf("%s/%s:%s.zip", Artifact_Base_Dir, artifactId, artifactVersion)
 	zipFile, err := os.Open(zipFilePath)
 	if err != nil {
@@ -143,7 +142,7 @@ func (c *CpiClient) PublishToGithubRelease(artifactId, artifactVersion, branch s
 		return fmt.Errorf("failed to get file info for %s: %w", zipFilePath, err)
 	}
 
-	release, _, err := githubClient.Repositories.CreateRelease(c.Context, "MaCo-MMT", Cpi_Base_Repo, &github.RepositoryRelease{
+	release, _, err := githubClient.Repositories.CreateRelease(ctx, "MaCo-MMT", Cpi_Base_Repo, &github.RepositoryRelease{
 		TagName:         github.String(fmt.Sprintf("%s-v%s", artifactId, artifactVersion)),
 		Name:            github.String(fmt.Sprintf("%s v%s", artifactId, artifactVersion)),
 		Body:            github.String(fmt.Sprintf("Artifact %s:%s\nUploaded by MMT DevOps", artifactId, artifactVersion)),
@@ -155,7 +154,7 @@ func (c *CpiClient) PublishToGithubRelease(artifactId, artifactVersion, branch s
 		return fmt.Errorf("failed to create release: %w", err)
 	}
 
-	_, _, err = githubClient.Repositories.UploadReleaseAsset(c.Context, "MaCo-MMT", Cpi_Base_Repo, release.GetID(), &github.UploadOptions{
+	_, _, err = githubClient.Repositories.UploadReleaseAsset(ctx, "MaCo-MMT", Cpi_Base_Repo, release.GetID(), &github.UploadOptions{
 		Name:  fileInfo.Name(),
 		Label: fmt.Sprintf("Artifact %s:%s", artifactId, artifactVersion),
 	}, zipFile)
@@ -167,7 +166,7 @@ func (c *CpiClient) PublishToGithubRelease(artifactId, artifactVersion, branch s
 }
 
 // upload artifact zip file to respective tenant
-func (c *CpiClient) UploadArtifact(artifactId string, artifactName string, artifactVersion string, packageId string) error {
+func (c *CpiClient) UploadArtifact(ctx context.Context, artifactId string, artifactName string, artifactVersion string, packageId string) error {
 
 	// Read zip file from disk
 	zipFilePath := fmt.Sprintf("%s/%s:%s.zip", Artifact_Base_Dir, artifactId, artifactVersion)
@@ -199,12 +198,11 @@ func (c *CpiClient) UploadArtifact(artifactId string, artifactName string, artif
 		return fmt.Errorf("failed to marshal payload: %w", err)
 	}
 	request := env.HttpRequest{
-		Ctx:         c.Context,
 		Method:      http.MethodPost,
 		ApiURL:      fmt.Sprintf("%s/IntegrationDesigntimeArtifacts", c.ApiURL),
 		RequestBody: bytes.NewBuffer(requestBody),
 	}
-	response, _, err := c.Do(&request)
+	response, _, err := c.Do(ctx, &request)
 	if err != nil {
 		return fmt.Errorf("error while uploading artifact: %s", err)
 	}

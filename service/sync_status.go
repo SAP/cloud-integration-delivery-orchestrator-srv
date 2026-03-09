@@ -109,7 +109,7 @@ func syncDeployState(deliveryRequestID uint, user string) []db.Condition {
 			})
 			continue
 		}
-		rt, err := cpiCli.RuntimeArtifact(op.ArtifactTechID)
+		rt, err := cpiCli.RuntimeArtifact(context.Background(), op.ArtifactTechID)
 		if err != nil {
 			// if api return error, may not deployed yet, just continue
 			conditions = append(conditions, db.Condition{
@@ -228,7 +228,7 @@ func syncImportState(deliveryRequestID uint, user string) []db.Condition {
 			continue
 		}
 		// UpdateArtifactNodeStatus will call GetTransportRequest internally
-		ns, err := tmsClient.TrNodeStatuses(trNumber)
+		ns, err := tmsClient.TrNodeStatuses(context.Background(), trNumber)
 		if err != nil {
 			return []db.Condition{
 				{
@@ -350,7 +350,7 @@ func syncImportState(deliveryRequestID uint, user string) []db.Condition {
 			}
 			// get error logs if import failed
 			if state == lifecycle.ImportFailed {
-				logs, err := tmsClient.ErrLogsInTransportLog(trNumber, nID) // TODO: seems wrong function call.
+				logs, err := tmsClient.ErrLogsInTransportLog(context.Background(), trNumber, nID) // TODO: seems wrong function call.
 				var message string
 				if err != nil {
 					message = fmt.Sprintf("error when getting error logs for transport request %s in node %d: %s", trNumber, nID, err.Error())

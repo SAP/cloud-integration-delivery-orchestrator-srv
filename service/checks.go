@@ -51,13 +51,13 @@ func checkVersionDowngradeInTenant(op *db.ArtifactTenantOperation, targetTenant 
 	var targetVersion string
 	switch op.Artifact.Type {
 	case consts.Artifact_Type_Iflow:
-		iflow, err := cli.GetDesignTimeIflow(op.ArtifactTechID, "active")
+		iflow, err := cli.GetDesignTimeIflow(context.Background(), op.ArtifactTechID, "active")
 		if err != nil {
 			return err
 		}
 		targetVersion = iflow.Version
 	case consts.Artifact_Type_Sc:
-		sc, err := cli.GetDesignTimeScriptCollection(op.ArtifactTechID, "active")
+		sc, err := cli.GetDesignTimeScriptCollection(context.Background(), op.ArtifactTechID, "active")
 		if err != nil {
 			return err
 		}
@@ -86,7 +86,7 @@ func TrExist(op *db.ArtifactTenantOperation, sourceTenant *db.CpiTenant) (bool, 
 	if err != nil {
 		return false, fmt.Errorf("error when creating tms client: %s", err)
 	}
-	trV1, err := tmsCli.GetTransportRequest(trNumber) // v1 to check state
+	trV1, err := tmsCli.GetTransportRequest(context.Background(), trNumber) // v1 to check state
 	if err != nil {
 		return false, fmt.Errorf("error when getting transport request %s, the tr number may not exist, error message: %s", trNumber, err)
 	}

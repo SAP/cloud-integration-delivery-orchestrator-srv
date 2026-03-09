@@ -13,7 +13,7 @@ import (
 )
 
 type UaaClient struct {
-	env.HttpClient
+	*env.HttpClient
 	emailCache map[string]*cacheEntry
 }
 
@@ -28,46 +28,43 @@ const cacheTTL = 30 * time.Hour
 
 var globalClient *UaaClient
 
-func NewClient(c context.Context) (*UaaClient, error) {
+func NewClient(ctx context.Context) (*UaaClient, error) {
 	if globalClient != nil {
 		return globalClient, nil
 	}
 
 	v := env.UaaCredential()
-	client, err := env.NewClient(c, v.Clientid, v.Clientsecret, v.AuthUrl, v.ApiUrl)
+	client, err := env.NewClient(ctx, v.Clientid, v.Clientsecret, v.AuthUrl, v.ApiUrl)
 	if err != nil {
 		return nil, err
 	}
 
 	globalClient = &UaaClient{
-		HttpClient:  *client,
-		emailCache:  make(map[string]*cacheEntry),
+		HttpClient: client,
+		emailCache: make(map[string]*cacheEntry),
 	}
 	return globalClient, nil
 }
 
-func GetUserEmail(userID string) (string, error) {
+func GetUserEmail(ctx context.Context, userID string) (string, error) {
 	if globalClient == nil {
-		_, err := NewClient(context.Background())
+		_, err := NewClient(ctx)
 		if err != nil {
 			return "", err
 		}
 	}
-	return globalClient.userEmail(userID)
+	return globalClient.userEmail(ctx, userID)
 }
 
 // get user by sub/user_id from JWT claim body
-func (uaa *UaaClient) UserInfo(userID string) (*db.UserInfo, error) {
-	childCtx, cancel := context.WithCancel(uaa.Context)
-	defer cancel()
+func (uaa *UaaClient) UserInfo(ctx context.Context, userID string) (*db.UserInfo, error) {
 	fullUrl := fmt.Sprintf("%s/Users/%s", uaa.ApiURL, userID)
 	logger.Infof("searching user info by sub/user_id, at %s", fullUrl)
 	request := env.HttpRequest{
-		Ctx:    childCtx,
 		ApiURL: fullUrl,
 		Method: http.MethodGet,
 	}
-	body, _, err := uaa.Do(&request)
+	body, _, err := uaa.Do(ctx, &request)
 	if err != nil {
 		logger.Errorf("Error when getting uaa user by id, %s", err)
 		return nil, err
@@ -85,13 +82,13 @@ func (uaa *UaaClient) UserInfo(userID string) (*db.UserInfo, error) {
 	return &user, nil
 }
 
-func (uaa *UaaClient) userEmail(userID string) (string, error) {
+func (uaa *UaaClient) userEmail(ctx context.Context, userID string) (string, error) {
 	if entry, exists := uaa.emailCache[userID]; exists {
 		if time.Now().Before(entry.expiresAt) {
 			return entry.email, nil
 		}
 	}
-	userInfo, err := uaa.UserInfo(userID)
+	userInfo, err := uaa.UserInfo(ctx, userID)
 	if err != nil {
 		return "", err
 	}
@@ -103,20 +100,17 @@ func (uaa *UaaClient) userEmail(userID string) (string, error) {
 }
 
 // search uaa user by email, 'co' operator(https://simplecloud.info/specs/draft-scim-api-01.html#query-resources)
-func (uaa *UaaClient) SearchByEmail(email string, curUserOrigin string) ([]db.UserInfo, error) {
-	childCtx, cancel := context.WithCancel(uaa.Context)
-	defer cancel()
+func (uaa *UaaClient) SearchByEmail(ctx context.Context, email string, curUserOrigin string) ([]db.UserInfo, error) {
 	q := url.Values{}
 	q.Set("filter", fmt.Sprintf("email co %q", email))
 	fullURL := fmt.Sprintf("%s/Users?%s", uaa.ApiURL, q.Encode())
 	logger.Infof("Starting to get all user info: %s\n", fullURL)
 	request := env.HttpRequest{
-		Ctx:    childCtx,
 		ApiURL: fullURL,
 		Method: http.MethodGet,
 	}
 
-	respBodyContent, _, err := uaa.Do(&request)
+	respBodyContent, _, err := uaa.Do(ctx, &request)
 	if err != nil {
 		logger.Errorf("Error when getting uaa users by email, %s", err)
 		return []db.UserInfo{}, err

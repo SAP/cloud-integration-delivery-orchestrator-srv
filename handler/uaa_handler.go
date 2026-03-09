@@ -9,13 +9,13 @@ import (
 
 func HandleUaaUserEmailSearch(c *gin.Context) {
 	email := c.Param("email")
-	uaaClient, err := xsuaa.NewClient(c.Copy())
+	uaaClient, err := xsuaa.NewClient(c)
 	if err != nil {
 		c.JSON(500, gin.H{"status": 500, "error": err.Error()})
 		return
 	}
 	origin := service.UaaOrigin(c)
-	document, err := uaaClient.SearchByEmail(email, origin)
+	document, err := uaaClient.SearchByEmail(c, email, origin)
 	if err != nil {
 		c.JSON(500, gin.H{"status": 500, "error": err.Error()})
 		return
@@ -25,12 +25,12 @@ func HandleUaaUserEmailSearch(c *gin.Context) {
 
 func HandleUaaUserIDSearch(c *gin.Context) {
 	uid := c.Param("id")
-	uaaClient, err := xsuaa.NewClient(c.Copy())
+	uaaClient, err := xsuaa.NewClient(c)
 	if err != nil {
 		c.JSON(500, gin.H{"status": 500, "error": err.Error()})
 		return
 	}
-	userInfo, err := uaaClient.UserInfo(uid)
+	userInfo, err := uaaClient.UserInfo(c, uid)
 	if err != nil {
 		c.JSON(500, gin.H{"status": 500, "error": err.Error()})
 		return

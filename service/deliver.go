@@ -84,7 +84,7 @@ func BatchImportTenantOps(drID uint, opIDs []uint, targetTenantID uint, userID s
 			return
 		}
 
-		actionID, err := tmsCli.ImportTransportRequest(targetNodeID, trs)
+		actionID, err := tmsCli.ImportTransportRequest(context.Background(), targetNodeID, trs)
 		if err != nil {
 			// revert ops state to ImportFailed on import error
 			for i := range ops {
@@ -106,7 +106,7 @@ func BatchImportTenantOps(drID uint, opIDs []uint, targetTenantID uint, userID s
 		for _, op := range ops {
 			artifactList = append(artifactList, fmt.Sprintf("  - %s (version %s)", op.ArtifactTechID, op.ArtifactVersion))
 		}
-		userEmail, _ := xsuaa.GetUserEmail(user)
+		userEmail, _ := xsuaa.GetUserEmail(context.Background(), user)
 		condition := db.Condition{
 			DeliveryRequestID: drID,
 			State:             lifecycle.CondSuccess,
@@ -176,7 +176,7 @@ func BatchDeployTenantOps(drID uint, opIDs []uint, targetTenantID uint, userID s
 				failedOps = append(failedOps, *op)
 				continue
 			}
-			_, err = cpiCli.DeployArtifact(op.ArtifactTechID, op.ArtifactVersion, op.Artifact.Type)
+			_, err = cpiCli.DeployArtifact(context.Background(), op.ArtifactTechID, op.ArtifactVersion, op.Artifact.Type)
 			if err != nil {
 				errOps[op.ID] = fmt.Errorf("failed to deploy artifact %s:%s to tenant %s: %s", op.ArtifactTechID, op.ArtifactVersion, op.Tenant.Name, err)
 				// mark as failed and continue
@@ -212,7 +212,7 @@ func BatchDeployTenantOps(drID uint, opIDs []uint, targetTenantID uint, userID s
 			for _, op := range successOps {
 				artifactList = append(artifactList, fmt.Sprintf("  - %s (version %s)", op.ArtifactTechID, op.ArtifactVersion))
 			}
-			userEmail, _ := xsuaa.GetUserEmail(user)
+			userEmail, _ := xsuaa.GetUserEmail(context.Background(), user)
 			condition := db.Condition{
 				DeliveryRequestID: drID,
 				State:             lifecycle.CondSuccess,

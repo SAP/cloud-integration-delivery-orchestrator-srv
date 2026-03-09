@@ -70,18 +70,18 @@ func queryOpsInDrWithAcc(drID uint) (ops []db.ArtifactTenantOperation, err error
 }
 
 // generate source tenant, included routes and nodes from included tenants
-func SourceAndRoute(includedTenants []db.CpiTenant) (sorceTenant *db.CpiTenant, includedRoutes []db.TransportRoute, includedNodes []db.TransportNode, err error) {
+func SourceAndRoute(ctx context.Context, includedTenants []db.CpiTenant) (sorceTenant *db.CpiTenant, includedRoutes []db.TransportRoute, includedNodes []db.TransportNode, err error) {
 	// generate Transport routes
 	var tmsCli *tms.TmsClient
-	if tmsCli, err = tms.NewClient(context.Background()); err != nil {
+	if tmsCli, err = tms.NewClient(ctx); err != nil {
 		return
 	}
 	var transportRoutes []db.TransportRoute
-	if transportRoutes, err = tmsCli.GetRoutes(); err != nil {
+	if transportRoutes, err = tmsCli.GetRoutes(ctx); err != nil {
 		return
 	}
 	var transportNodes []db.TransportNode
-	if transportNodes, err = tmsCli.GetNodes(); err != nil {
+	if transportNodes, err = tmsCli.GetNodes(ctx); err != nil {
 		return
 	}
 	nodeAll := make(map[uint]db.TransportNode) // all nodes map
@@ -192,12 +192,12 @@ func GetDeliveryRuleWithAcc(drRuleID uint) (db.DeliveryRule, error) {
 }
 
 // generate route info for delivery rule. determine source tenant, TMS target routes and nodes
-func GenRouteForRule(ruleID uint) (err error) {
+func GenRouteForRule(ctx context.Context, ruleID uint) (err error) {
 	rule, err := GetDeliveryRuleWithAcc(ruleID)
 	if err != nil {
 		return
 	}
-	sourceTenant, targetRoutes, targetNodes, err := SourceAndRoute(rule.IncludedTenants)
+	sourceTenant, targetRoutes, targetNodes, err := SourceAndRoute(ctx, rule.IncludedTenants)
 	if err != nil {
 		return
 	}

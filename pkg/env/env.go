@@ -156,11 +156,10 @@ func initDestinations() {
 
 	apiUrl = fmt.Sprintf("%s/destination-configuration/v1/subaccountDestinations", apiUrl)
 	req := &HttpRequest{
-		Ctx:    ctx,
 		ApiURL: apiUrl,
 		Method: http.MethodGet,
 	}
-	resp, _, err := client.Do(req)
+	resp, _, err := client.Do(ctx, req)
 	if err != nil {
 		logger.Panic("Error while Get subaccount destinations")
 	}

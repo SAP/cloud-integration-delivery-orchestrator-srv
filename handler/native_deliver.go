@@ -43,7 +43,7 @@ func NativeDeliver(ctx *gin.Context) {
 
 		switch artifact.ArtifactType {
 		case "ScriptCollection":
-			scItem, err := srcClient.GetDesignTimeScriptCollection(artifact.ArtifactID, artifact.ArtifactVersion)
+			scItem, err := srcClient.GetDesignTimeScriptCollection(ctx, artifact.ArtifactID, artifact.ArtifactVersion)
 			if err != nil {
 				ctx.JSON(500, gin.H{"error": "Failed to get script collection:" + err.Error()})
 				return
@@ -52,7 +52,7 @@ func NativeDeliver(ctx *gin.Context) {
 			modifiedBy, modifiedAt = scItem.ModifiedBy, scItem.ModifiedAt
 
 		case "IntegrationFlow":
-			iflowItem, err := srcClient.GetDesignTimeIflow(artifact.ArtifactID, artifact.ArtifactVersion)
+			iflowItem, err := srcClient.GetDesignTimeIflow(ctx, artifact.ArtifactID, artifact.ArtifactVersion)
 			if err != nil {
 				ctx.JSON(500, gin.H{"error": "Failed to get integration flow:" + err.Error()})
 				return
@@ -61,7 +61,7 @@ func NativeDeliver(ctx *gin.Context) {
 			modifiedBy, modifiedAt = iflowItem.ModifiedBy, iflowItem.ModifiedAt
 		}
 
-		if err := srcClient.DownloadArtifact(artifact.ArtifactID, artifact.ArtifactVersion, packageID, artifact.ArtifactType); err != nil {
+		if err := srcClient.DownloadArtifact(ctx, artifact.ArtifactID, artifact.ArtifactVersion, packageID, artifact.ArtifactType); err != nil {
 			ctx.JSON(500, gin.H{"error": "Failed to download artifact:" + err.Error()})
 			return
 		}
@@ -84,7 +84,7 @@ func NativeDeliver(ctx *gin.Context) {
 				return
 			}
 
-			if err := destClient.UploadArtifact(artifact.ArtifactID, artifact.ArtifactVersion, packageID, artifact.ArtifactType); err != nil {
+			if err := destClient.UploadArtifact(ctx, artifact.ArtifactID, artifact.ArtifactVersion, packageID, artifact.ArtifactType); err != nil {
 				ctx.JSON(500, gin.H{"error": "Failed to upload artifact to destination tenant: " + err.Error()})
 				return
 			}
@@ -93,7 +93,7 @@ func NativeDeliver(ctx *gin.Context) {
 
 			// TODO: loop for aroud 5 times to check deploy status
 			for i := 0; i < 5; i++ {
-				runtimeArtifact, err := destClient.RuntimeArtifact(artifact.ArtifactID)
+				runtimeArtifact, err := destClient.RuntimeArtifact(ctx, artifact.ArtifactID)
 				if err != nil {
 					ctx.JSON(500, gin.H{"error": "Failed to check deploy status on destination tenant: " + err.Error()})
 					return

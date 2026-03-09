@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"mmt-delivery/db"
@@ -27,7 +28,7 @@ func RequestApproval(drID uint, currentUserID string, approvers []string, commen
 	if dr.AggregateStatus != lifecycle.AggPending && dr.AggregateStatus != lifecycle.AggWaitingApprove {
 		return fmt.Errorf("only pending delivery request can be submitted for approval, current status: %s", dr.AggregateStatus)
 	}
-	requesterEmail, err := xsuaa.GetUserEmail(currentUserID)
+	requesterEmail, err := xsuaa.GetUserEmail(context.Background(), currentUserID)
 	if err != nil {
 		return err
 	}
@@ -115,7 +116,7 @@ func Approve(drID uint, approverID string) (*db.DeliveryRequest, error) {
 	if err := SyncDeliveryStatus(drID, approverID); err != nil {
 		return nil, err
 	}
-	approverEmail, err := xsuaa.GetUserEmail(approverID)
+	approverEmail, err := xsuaa.GetUserEmail(context.Background(), approverID)
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +142,7 @@ func sendMailto(existAppr []string, newAppr []string) []string {
 	for _, appr := range newAppr {
 		if _, ok := markSent[appr]; !ok {
 			// Convert XSUAA user ID to email address
-			email, err := xsuaa.GetUserEmail(appr)
+			email, err := xsuaa.GetUserEmail(context.Background(), appr)
 			if err != nil {
 				env.Logger().Error("Failed to get email for user %s: %s", appr, err)
 				continue // skip if failed to get email

@@ -23,7 +23,7 @@ func GetPackagesHandler(ctx *gin.Context) {
 		logger.Error("error while retrieving packages: %s", error)
 		return
 	}
-	packages, error := cpiClient.GetPackages()
+	packages, error := cpiClient.GetPackages(ctx)
 	if error != nil {
 		logger.Error("error while retrieving packages: %s", error)
 		return
@@ -42,7 +42,7 @@ func GetPackageIflowsHandler(ctx *gin.Context) {
 	packageID := ctx.Query("package")
 
 	cpiClient, _ := cpi.NewClient(ctx, cpi_tenant)
-	iflows, error := cpiClient.GetPackageIflows(packageID)
+	iflows, error := cpiClient.GetPackageIflows(ctx, packageID)
 	if error != nil {
 		logger.Error("Error while retrieving iflows within a package")
 		ctx.JSON(http.StatusInternalServerError, gin.H{"status": 500, "result": fmt.Sprintf("internal server error: %s", error)})
@@ -65,12 +65,12 @@ func GetPackageArtifactsHandler(ctx *gin.Context) {
 		return
 	}
 	artifactResp := make([]db.Artifact, 0)
-	iflows, err := client.GetPackageIflows(packageID)
+	iflows, err := client.GetPackageIflows(ctx, packageID)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"status": http.StatusInternalServerError, "result": fmt.Sprintf("failed to get iflows: %s", err)})
 		return
 	}
-	scriptColls, err := client.GetPackageScriptcollections(packageID)
+	scriptColls, err := client.GetPackageScriptcollections(ctx, packageID)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"status": http.StatusInternalServerError, "result": fmt.Sprintf("failed to get script collections: %s", err)})
 		return
@@ -157,7 +157,7 @@ func GetRuntimeArtifacts(ctx *gin.Context) {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"msg": fmt.Sprintf("failed to create cpi client: %s", err)})
 		return
 	}
-	artifacts, err := client.GetRuntimeArtifacts()
+	artifacts, err := client.GetRuntimeArtifacts(ctx)
 	if err != nil {
 		return
 	}

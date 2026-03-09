@@ -26,26 +26,25 @@ type TMSNodesResp struct {
 	Nodes []db.TransportNode `json:"nodes"`
 }
 type TmsClient struct {
-	env.HttpClient
+	*env.HttpClient
 }
 
 func NewClient(ctx context.Context) (*TmsClient, error) {
 	v := env.TmsCredential()
 	client, err := env.NewClient(ctx, v.Clientid, v.Clientsecret, v.AuthUrl, v.ApiUrl)
-	return &TmsClient{*client}, err
+	return &TmsClient{client}, err
 }
 
-func (t *TmsClient) GetNodes() ([]db.TransportNode, error) {
-	childCtx, cancel := context.WithTimeout(t.Context, DefaultRequestTimeout)
+func (t *TmsClient) GetNodes(ctx context.Context) ([]db.TransportNode, error) {
+	childCtx, cancel := context.WithTimeout(ctx, DefaultRequestTimeout)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/v2/nodes", t.ApiURL)
 	logger.Infof("Starting to get all tms nodes from %s\n", fullURL)
 	request := env.HttpRequest{
-		Ctx:    childCtx,
 		ApiURL: fullURL,
 		Method: http.MethodGet,
 	}
-	respBodyContent, _, errReq := t.Do(&request)
+	respBodyContent, _, errReq := t.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
 			logger.Errorf("GetNodes request timeout after %v: %s", DefaultRequestTimeout, fullURL)
@@ -66,9 +65,9 @@ func (t *TmsClient) GetNodes() ([]db.TransportNode, error) {
 
 }
 
-func (t *TmsClient) GetNodeID(nodeName string) uint {
+func (t *TmsClient) GetNodeID(ctx context.Context, nodeName string) uint {
 	var nodeID uint
-	nodes, err := t.GetNodes()
+	nodes, err := t.GetNodes(ctx)
 	if err != nil {
 		logger.Errorf("Error when getting nodes, the error message is %s", err)
 		return nodeID
@@ -82,18 +81,17 @@ func (t *TmsClient) GetNodeID(nodeName string) uint {
 	return nodeID
 }
 
-func (t *TmsClient) GetNode(nodeID uint) (db.TransportNode, error) {
-	childCtx, cancel := context.WithTimeout(t.Context, DefaultRequestTimeout)
+func (t *TmsClient) GetNode(ctx context.Context, nodeID uint) (db.TransportNode, error) {
+	childCtx, cancel := context.WithTimeout(ctx, DefaultRequestTimeout)
 	defer cancel()
 
 	fullURL := fmt.Sprintf("%s/v2/nodes/%d", t.ApiURL, nodeID)
 	logger.Infof("Starting to get tms node from %s\n", fullURL)
 	request := env.HttpRequest{
-		Ctx:    childCtx,
 		ApiURL: fullURL,
 		Method: http.MethodGet,
 	}
-	respBodyContent, _, errReq := t.Do(&request)
+	respBodyContent, _, errReq := t.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
 			logger.Errorf("GetNode request timeout after %v: %s", DefaultRequestTimeout, fullURL)
@@ -113,9 +111,9 @@ func (t *TmsClient) GetNode(nodeID uint) (db.TransportNode, error) {
 	return tmsNodeResp, nil
 
 }
-func (t *TmsClient) GetNodeName(nodeID uint) string {
+func (t *TmsClient) GetNodeName(ctx context.Context, nodeID uint) string {
 	var nodeName string
-	node, err := t.GetNode(nodeID)
+	node, err := t.GetNode(ctx, nodeID)
 	if err != nil {
 		logger.Errorf("Error when getting node by id, the error message is %s", err)
 		return nodeName
@@ -130,17 +128,16 @@ type TMSRoutesResp struct {
 }
 
 // TODO: this is not a official API from TMS api hub.
-func (t *TmsClient) GetRoutes() ([]db.TransportRoute, error) {
-	childCtx, cancel := context.WithTimeout(t.Context, DefaultRequestTimeout)
+func (t *TmsClient) GetRoutes(ctx context.Context) ([]db.TransportRoute, error) {
+	childCtx, cancel := context.WithTimeout(ctx, DefaultRequestTimeout)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/v2/routes", t.ApiURL)
 	logger.Infof("Starting to get all tms routes from %s\n", fullURL)
 	request := env.HttpRequest{
-		Ctx:    childCtx,
 		ApiURL: fullURL,
 		Method: http.MethodGet,
 	}
-	respBodyContent, _, errReq := t.Do(&request)
+	respBodyContent, _, errReq := t.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
 			logger.Errorf("GetRoutes request timeout after %v: %s", DefaultRequestTimeout, fullURL)
@@ -180,19 +177,18 @@ type NodeTransportRequestsResp struct {
 	TransportRequests []NodeTransportRequest `json:"transportRequests"`
 }
 
-func (t *TmsClient) GetNodeTransportRequests(nodeID uint) ([]NodeTransportRequest, error) {
-	childCtx, cancel := context.WithTimeout(t.Context, DefaultRequestTimeout)
+func (t *TmsClient) GetNodeTransportRequests(ctx context.Context, nodeID uint) ([]NodeTransportRequest, error) {
+	childCtx, cancel := context.WithTimeout(ctx, DefaultRequestTimeout)
 	defer cancel()
 
 	fullURL := fmt.Sprintf("%s/v2/nodes/%d/transportRequests?status=in,re,er,fa", t.ApiURL, nodeID)
 	logger.Infof("Starting to get transport requests for node %d from %s\n", nodeID, fullURL)
 
 	request := env.HttpRequest{
-		Ctx:    childCtx,
 		ApiURL: fullURL,
 		Method: http.MethodGet,
 	}
-	respBodyContent, _, errReq := t.Do(&request)
+	respBodyContent, _, errReq := t.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
 			logger.Errorf("GetNodeTransportRequests request timeout after %v: %s", DefaultRequestTimeout, fullURL)
@@ -221,8 +217,8 @@ type ReqImportTransportResp struct {
 	MonitoringURL string `json:"monitoringURL"`
 }
 
-func (t *TmsClient) ImportTransportRequest(nodeID uint, transportRequestIDs []uint) (uint, error) {
-	childCtx, cancel := context.WithTimeout(t.Context, ImportTimeout)
+func (t *TmsClient) ImportTransportRequest(ctx context.Context, nodeID uint, transportRequestIDs []uint) (uint, error) {
+	childCtx, cancel := context.WithTimeout(ctx, ImportTimeout)
 	defer cancel()
 
 	fullURL := fmt.Sprintf("%s/v2/nodes/%d/transportRequests/import", t.ApiURL, nodeID)
@@ -235,12 +231,11 @@ func (t *TmsClient) ImportTransportRequest(nodeID uint, transportRequestIDs []ui
 	logger.Infof("Starting to import transport requests to node %d: %s\n", nodeID, fullURL)
 
 	request := env.HttpRequest{
-		Ctx:         childCtx,
 		ApiURL:      fullURL,
 		Method:      http.MethodPost,
 		RequestBody: bytes.NewBuffer(requestBodyJson),
 	}
-	respBodyContent, _, errReq := t.Do(&request)
+	respBodyContent, _, errReq := t.Do(childCtx, &request)
 
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
@@ -288,16 +283,15 @@ type ActionResultResp struct {
 
 // succeeded, warning, error, fatal, running, initial, unknown
 // also return endedAt, if status is not running
-func (t *TmsClient) GetActionResult(actionID uint) (string, string, error) {
-	childCtx, cancel := context.WithTimeout(t.Context, DefaultRequestTimeout)
+func (t *TmsClient) GetActionResult(ctx context.Context, actionID uint) (string, string, error) {
+	childCtx, cancel := context.WithTimeout(ctx, DefaultRequestTimeout)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/v2/actions/%d", t.ApiURL, actionID)
 	request := env.HttpRequest{
-		Ctx:    childCtx,
 		ApiURL: fullURL,
 		Method: http.MethodGet,
 	}
-	respBodyContent, _, errReq := t.Do(&request)
+	respBodyContent, _, errReq := t.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
 			logger.Errorf("GetActionResult request timeout after %v: %s", DefaultRequestTimeout, fullURL)
@@ -341,16 +335,15 @@ type ActionLogResp struct {
 	} `json:"logs"`
 }
 
-func (t *TmsClient) GetActionResultLog(actionID uint) (ActionLogResp, error) {
-	childCtx, cancel := context.WithTimeout(t.Context, LongRequestTimeout)
+func (t *TmsClient) GetActionResultLog(ctx context.Context, actionID uint) (ActionLogResp, error) {
+	childCtx, cancel := context.WithTimeout(ctx, LongRequestTimeout)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/v2/actions/%d/logs", t.ApiURL, actionID)
 	request := env.HttpRequest{
-		Ctx:    childCtx,
 		ApiURL: fullURL,
 		Method: http.MethodGet,
 	}
-	respBodyContent, _, errReq := t.Do(&request)
+	respBodyContent, _, errReq := t.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
 			logger.Errorf("GetActionResultLog request timeout after %v: %s", LongRequestTimeout, fullURL)
@@ -397,16 +390,15 @@ type TransportLog struct {
 	} `json:"logs"`
 }
 
-func (t *TmsClient) getTransportLogs(trNumber string, nodeID uint) (TransportLog, error) {
-	childCtx, cancel := context.WithTimeout(t.Context, LongRequestTimeout)
+func (t *TmsClient) getTransportLogs(ctx context.Context, trNumber string, nodeID uint) (TransportLog, error) {
+	childCtx, cancel := context.WithTimeout(ctx, LongRequestTimeout)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/v2/nodes/%d/transportRequests/%s/logs", t.ApiURL, nodeID, trNumber)
 	request := env.HttpRequest{
-		Ctx:    childCtx,
 		ApiURL: fullURL,
 		Method: http.MethodGet,
 	}
-	respBodyContent, _, errReq := t.Do(&request)
+	respBodyContent, _, errReq := t.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
 			logger.Errorf("getTransportLogs request timeout after %v: %s", LongRequestTimeout, fullURL)
@@ -423,9 +415,9 @@ func (t *TmsClient) getTransportLogs(trNumber string, nodeID uint) (TransportLog
 	return transportLogResp, nil
 }
 
-func (t *TmsClient) ErrLogsInTransportLog(trNumber string, nodeID uint) (errLogs []string, err error) {
+func (t *TmsClient) ErrLogsInTransportLog(ctx context.Context, trNumber string, nodeID uint) (errLogs []string, err error) {
 	errLogs = make([]string, 0)
-	transportLogResp, err := t.getTransportLogs(trNumber, nodeID)
+	transportLogResp, err := t.getTransportLogs(ctx, trNumber, nodeID)
 	if err != nil {
 		return
 	}

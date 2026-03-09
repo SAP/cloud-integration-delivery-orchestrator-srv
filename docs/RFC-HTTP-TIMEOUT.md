@@ -14,7 +14,7 @@
 - [3. 实施计划](#3-实施计划)
   - [阶段一：超时机制试点](#阶段一超时机制试点-已完成)
   - [阶段二：推广超时到所有 TMS 方法](#阶段二推广超时到所有-tms-方法-已完成)
-  - [阶段三：重构 HttpClient](#阶段三重构-httpclient--context-作为参数--修复-cacheclient)
+  - [阶段三：重构 HttpClient](#阶段三重构-httpclient--context-作为参数--修复-cacheclient-已完成)
   - [阶段四：重构 Service 层](#阶段四重构-service-层--包级别函数--结构体方法)
   - [阶段五：重构 Handler 层 + 移除 init()](#阶段五重构-handler-层--移除-init)
   - [阶段六：推广超时到 CPI 包 + 完善测试](#阶段六推广超时到-cpi-包--完善测试)
@@ -66,7 +66,7 @@ Go 最佳实践：Context 应作为函数第一个参数传递，而非存储在
 | `var db *gorm.DB` | `db/conn.go init()` | 连接数据库、执行 AutoMigrate |
 | `var appEnv *cfenv.App` | `pkg/env/env.go init()` | 读取 CF 环境变量 |
 | `var destinationMap` | `pkg/env/env.go init()` | HTTP 调用 Destination 服务 |
-| `var cacheClient map[string]*HttpClient` | `pkg/env/remotecall.go` | 可变的全局 OAuth2 客户端缓存 |
+| ~~`var cacheClient map[string]*HttpClient`~~ | ~~`pkg/env/remotecall.go`~~ | ~~可变的全局 OAuth2 客户端缓存~~ （阶段三已移除） |
 | `var logger` | 多处 | 包级别单例 |
 | `var globalClient *UaaClient` | `pkg/xsuaa/uaa.go` | 可变的全局单例 |
 
@@ -86,21 +86,21 @@ main.go
 handler/*
   ├── db.Conn()                      [直接使用全局 DB]
   ├── service.*()                    [调用包级别函数]
-  ├── tms.NewClient(ctx)             [工厂函数，依赖 env 全局]
-  ├── cpi.NewClient(ctx, tenant)     [工厂函数，依赖 env 全局]
+  ├── tms.NewClient(ctx)             [每次请求创建新实例 + fetchToken]
+  ├── cpi.NewClient(ctx, tenant)     [每次请求创建新实例 + fetchToken]
   └── env.Logger()                   [包级别变量]
   │
 service/*
   ├── db.Conn()                      [每个 service 文件都直接使用]
-  ├── tms.NewClient(ctx.Background()) [在 goroutine 中创建]
-  ├── cpi.NewClient(ctx.Background()) [在 goroutine 中创建]
+  ├── tms.NewClient(ctx.Background()) [goroutine 中创建新实例]
+  ├── cpi.NewClient(ctx.Background()) [goroutine 中创建新实例]
   ├── xsuaa.GetUserEmail()           [全局单例]
   ├── notify.Send*()                 [每次创建新客户端]
   └── env.Logger()                   [包级别变量]
   │
 pkg/tms, pkg/cpi, pkg/xsuaa
   ├── env.TmsCredential()            [读取 CF 环境]
-  ├── env.NewClient()                [全局 cacheClient]
+  ├── env.NewClient(ctx, ...)        [直接创建实例，无全局缓存（阶段三后）]
   └── env.Logger()                   [包级别变量]
 ```
 
@@ -190,98 +190,70 @@ const (
 )
 ```
 
-### 阶段三：重构 HttpClient — Context 作为参数 + 修复 cacheClient
+### 阶段三：重构 HttpClient — Context 作为参数 + 修复 cacheClient（✅ 已完成）
 
 **目标**：解决 Context 反模式和 cacheClient 线程安全问题
 
-**3.1 修改 `pkg/env/remotecall.go`**
+**3.1 `pkg/env/remotecall.go` 重构（已完成）**
+
+| 改动 | 说明 |
+|------|------|
+| 移除 `Context` 字段 | 不再存储在结构体中 |
+| 移除 `Ctx` 字段 | 同上 |
+| 移除全局 `cacheClient` map | 非线程安全的全局可变缓存 |
+| `Do()` 添加 `ctx context.Context` 参数 | Context 作为函数参数传递 |
+| 新增 `fetchToken(ctx)` | 实例级 token 获取，`sync.Mutex` 保护 |
+| 401 单次重试 | `Do()` → 401 → `fetchToken()` → 重试一次（不再递归） |
+| 嵌入改为指针 | `TmsClient`/`CpiClient`/`UaaClient` 嵌入 `*env.HttpClient`（因含 `sync.Mutex`） |
+
+重构前后对比：
 
 ```go
-// ❌ 当前
+// ❌ 重构前
 type HttpClient struct {
-    Context     context.Context  // 存储在结构体中
+    Context     context.Context  // 反模式：存储在结构体中
     HttpClient  *http.Client
     AccessToken string
     ApiURL      string
-    // ...
 }
-
 var cacheClient map[string]*HttpClient  // 全局可变缓存，非线程安全
-
 func (c *HttpClient) Do(request *HttpRequest) (*[]byte, int, error)
 
-// ✅ 重构后
+// ✅ 重构后（当前状态）
 type HttpClient struct {
-    mu           sync.Mutex       // 保护 token 刷新
-    HttpClient   *http.Client     // 去掉 Context 字段
+    mu           sync.Mutex       // 保护 AccessToken
+    HttpClient   *http.Client
     AccessToken  string
     ApiURL       string
     ClientId     string
     ClientSecret string
     AuthUrl      string
 }
-
-// Do 接受 ctx 作为第一个参数
-func (c *HttpClient) Do(ctx context.Context, request *HttpRequest) (*[]byte, int, error)
-
-// NewClient 不再使用全局缓存，改为直接创建实例
-// 缓存由调用方（TmsClient/CpiClient 工厂）负责
 func NewClient(ctx context.Context, clientID, clientSecret, authUrl, apiUrl string) (*HttpClient, error)
+func (c *HttpClient) Do(ctx context.Context, request *HttpRequest) (*[]byte, int, error)
 ```
 
-**3.1.1 cacheClient 迁移方案**
+**3.1.1 cacheClient 迁移方案 — 当前中间状态**
 
-将全局 `cacheClient` 移除，改为在各客户端包内管理缓存：
-- `pkg/tms/`: TMS 只有一个 clientID，由 `NewClient()` 返回单例
-- `pkg/cpi/`: CPI 有多个 tenant，缓存放在调用方（service 层或未来的 factory）
-- `pkg/xsuaa/`: 已有 `globalClient` 单例，保持不变
+全局 `cacheClient` 已移除。当前每次调用 `tms.NewClient()` / `cpi.NewClient()` 都会创建新实例并 `fetchToken()`，这是**有意为之的中间状态**：
 
-**3.1.2 token 刷新改为实例级**
+- **阶段三**：先解决线程安全和无限递归风险，接受短期内多发 token 请求的代价
+- **阶段四**（Service 层 DI）：Client 在启动时/Service 构造时创建一次，存在 Service 结构体中成为长生命周期对象。token 刷新靠 `Do()` 内的 401 重试机制。CPI 多 tenant 情况下，启动时遍历 `env.Destinations()` 为每个 tenant 创建一个 `CpiClient`，存在 `map[string]*cpi.CpiClient` 中
 
-```go
-func (c *HttpClient) Do(ctx context.Context, request *HttpRequest) (*[]byte, int, error) {
-    // ... 执行请求 ...
-    if resp.StatusCode == 401 {
-        c.mu.Lock()
-        err := c.refreshToken(ctx)
-        c.mu.Unlock()
-        if err != nil {
-            return nil, 0, err
-        }
-        return c.Do(ctx, request)  // 重试一次
-    }
-}
+**3.2 修改所有客户端包方法签名（已完成）**
 
-func (c *HttpClient) refreshToken(ctx context.Context) error {
-    // 重新获取 OAuth2 token，更新 c.AccessToken
-}
-```
+- `pkg/tms/tms.go` + `v1.go`：所有方法添加 `ctx context.Context` 第一个参数
+- `pkg/cpi/cpi.go` + `sync_github.go`：所有方法添加 `ctx context.Context`
+- `pkg/xsuaa/uaa.go`：`GetUserEmail`, `UserInfo`, `SearchByEmail` 添加 `ctx`
 
-**3.2 修改 `pkg/tms/` 所有方法签名**
+**3.3 更新所有调用方（已完成）**
 
-```go
-// ❌ 当前
-func (t *TmsClient) ImportTransportRequest(nodeID uint, trIDs []uint) (uint, error) {
-    childCtx, cancel := context.WithTimeout(t.Context, ImportTimeout)
-}
-
-// ✅ 重构后
-func (t *TmsClient) ImportTransportRequest(ctx context.Context, nodeID uint, trIDs []uint) (uint, error) {
-    childCtx, cancel := context.WithTimeout(ctx, ImportTimeout)
-}
-```
-
-**3.3 同步修改 `pkg/cpi/` 所有方法签名**
-
-**3.4 更新所有调用方**
-
-| 调用方 | 修改点 |
-|--------|--------|
-| `service/deliver.go` | goroutine 中传递 `context.Background()` 而非无超时的旧 context |
-| `service/sync_status.go` | 同上 |
-| `service/checks.go` | 同上 |
-| `handler/tms_handler.go` | 使用 `c.Request.Context()` |
-| `handler/cpi_handler.go` | 使用 `c.Request.Context()` |
+| 层级 | 文件 | ctx 来源 |
+|------|------|----------|
+| Handler | `tms_handler.go`, `cpi_handler.go`, `uaa_handler.go`, `native_deliver.go`, `delivery_rule.go` | `c.Request.Context()`（gin context） |
+| Service | `deliver.go`, `sync_status.go`, `checks.go` | `context.Background()`（goroutine 生命周期独立） |
+| Service | `approve.go`, `cancel.go` | `context.Background()` |
+| Service | `dr.go` | 接收调用方传入的 `ctx` |
 
 ### 阶段四：重构 Service 层 — 包级别函数 → 结构体方法
 
@@ -513,6 +485,14 @@ go test ./...   # 不需要任何环境变量
 
 - [x] 阶段一：ImportTransportRequest 超时试点
 - [x] 阶段二：推广超时到所有 TMS 方法 + 单元测试
+- [x] 阶段三：重构 HttpClient — Context 作为参数 + 修复 cacheClient
+  - 移除全局 `cacheClient`，token 管理改为实例级（`sync.Mutex` 保护）
+  - `Do()` 添加 `ctx context.Context` 参数，移除结构体中的 `Context`/`Ctx` 字段
+  - 嵌入改为指针（`*env.HttpClient`），因含 `sync.Mutex` 不可复制
+  - 401 刷新改为单次重试（不再递归）
+  - 所有客户端包（tms/cpi/xsuaa）方法签名添加 `ctx`
+  - 所有调用方（handler/service）适配新签名
+  - **已知中间状态**：每次 `NewClient()` 都 `fetchToken()`，阶段四将 client 提升为长生命周期对象后解决
 
 ---
 
@@ -534,17 +514,28 @@ go test ./...   # 不需要任何环境变量
 - `pkg/tms/v1.go` — GetTransportRequest 方法添加超时
 - `pkg/tms/tms_test.go` — 单元测试
 
-### 10.2 各阶段待修改的文件
-
-**阶段三**（Context 作为参数）：
-- `pkg/env/remotecall.go` — HttpClient 移除 Context 字段，Do() 添加 ctx 参数
-- `pkg/tms/tms.go` — 所有方法签名添加 ctx
+**阶段三**：
+- `pkg/env/remotecall.go` — 重写：移除全局 cacheClient、Context/Ctx 字段；Do() 接受 ctx；fetchToken() + sync.Mutex；401 单次重试
+- `pkg/env/env.go` — 更新 initDestinations 中的 HttpRequest 和 Do() 调用
+- `pkg/tms/tms.go` — 嵌入改为 `*env.HttpClient`；所有方法签名添加 ctx
 - `pkg/tms/v1.go` — 所有方法签名添加 ctx
-- `pkg/cpi/cpi.go` — 所有方法签名添加 ctx
-- `pkg/cpi/sync_github.go` — 方法签名添加 ctx
-- `pkg/xsuaa/uaa.go` — 方法签名添加 ctx
-- `service/*.go` — 更新所有调用
-- `handler/*.go` — 更新所有调用
+- `pkg/tms/tms_test.go` — 适配指针嵌入和 ctx 参数
+- `pkg/cpi/cpi.go` — 嵌入改为 `*env.HttpClient`；所有方法签名添加 ctx
+- `pkg/cpi/sync_github.go` — DownloadArtifact, UploadArtifact, PublishToGithubRelease 添加 ctx
+- `pkg/xsuaa/uaa.go` — 嵌入改为 `*env.HttpClient`；GetUserEmail/UserInfo/SearchByEmail 添加 ctx
+- `service/dr.go` — SourceAndRoute, GenRouteForRule 添加 ctx
+- `service/deliver.go` — goroutine 内传入 context.Background()
+- `service/sync_status.go` — 传入 context.Background()
+- `service/checks.go` — 传入 context.Background()
+- `service/approve.go` — GetUserEmail 传入 context.Background()
+- `service/cancel.go` — 同上
+- `handler/tms_handler.go` — 传递 gin ctx 给 TMS 方法
+- `handler/cpi_handler.go` — 传递 gin ctx 给 CPI 方法
+- `handler/uaa_handler.go` — 传递 gin ctx 给 XSUAA 方法
+- `handler/native_deliver.go` — 传递 gin ctx 给 CPI 方法
+- `handler/delivery_rule.go` — SourceAndRoute 调用传入 ctx
+
+### 10.2 各阶段待修改的文件
 
 **阶段四**（Service 层 DI）：
 - `service/service.go` — 新增，定义 Service 结构体

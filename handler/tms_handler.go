@@ -17,7 +17,7 @@ func GetTmsNodesHandler(ctx *gin.Context) {
 	if error != nil {
 		return
 	}
-	tmsNodes, error := tmsClient.GetNodes()
+	tmsNodes, error := tmsClient.GetNodes(ctx)
 	if error != nil {
 		errorMsg := fmt.Sprintf("Error while retrieving tms Nodes: %s", error)
 		ctx.JSON(http.StatusBadRequest, gin.H{"status": 500, "result": errorMsg})
@@ -32,7 +32,7 @@ func GetRoutesHandler(ctx *gin.Context) {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"status": 500, "error": fmt.Sprintf("Error while creating tms client: %s", error)})
 		return
 	}
-	routes, err := tmsClient.GetRoutes()
+	routes, err := tmsClient.GetRoutes(ctx)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"status": 500, "error": fmt.Sprintf("Error while get routes from tms: %s", err)})
 		return
@@ -55,7 +55,7 @@ func GetTranportRequestsHandler(ctx *gin.Context) {
 		logger.Error(error)
 		return
 	}
-	trs, error := tmsClient.GetNodeTransportRequests(uint(nodeId))
+	trs, error := tmsClient.GetNodeTransportRequests(ctx, uint(nodeId))
 	trResp := make([]db.TransportRequest, len(trs))
 	for i := range trs {
 		trResp[i] = db.TransportRequest{

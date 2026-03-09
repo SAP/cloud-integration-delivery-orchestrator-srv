@@ -26,20 +26,7 @@ type testTMSNodesResp struct {
 // createTestClient creates a TmsClient for testing with the given API URL
 func createTestClient(apiURL string) *TmsClient {
 	return &TmsClient{
-		HttpClient: env.HttpClient{
-			Context:     context.Background(),
-			HttpClient:  &http.Client{},
-			AccessToken: "test-token",
-			ApiURL:      apiURL,
-		},
-	}
-}
-
-// createTestClientWithContext creates a TmsClient for testing with a custom context
-func createTestClientWithContext(ctx context.Context, apiURL string) *TmsClient {
-	return &TmsClient{
-		HttpClient: env.HttpClient{
-			Context:     ctx,
+		HttpClient: &env.HttpClient{
 			HttpClient:  &http.Client{},
 			AccessToken: "test-token",
 			ApiURL:      apiURL,
@@ -69,7 +56,7 @@ func TestImportTransportRequest_Success(t *testing.T) {
 	defer server.Close()
 
 	client := createTestClient(server.URL)
-	actionID, err := client.ImportTransportRequest(1, []uint{100, 101})
+	actionID, err := client.ImportTransportRequest(context.Background(), 1, []uint{100, 101})
 
 	if err != nil {
 		t.Errorf("Expected no error, got %v", err)
@@ -92,8 +79,8 @@ func TestImportTransportRequest_Timeout(t *testing.T) {
 	shortCtx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
-	client := createTestClientWithContext(shortCtx, server.URL)
-	_, err := client.ImportTransportRequest(1, []uint{100})
+	client := createTestClient(server.URL)
+	_, err := client.ImportTransportRequest(shortCtx, 1, []uint{100})
 
 	if err == nil {
 		t.Error("Expected timeout error, got nil")
@@ -112,7 +99,7 @@ func TestImportTransportRequest_InvalidActionID(t *testing.T) {
 	defer server.Close()
 
 	client := createTestClient(server.URL)
-	_, err := client.ImportTransportRequest(1, []uint{100})
+	_, err := client.ImportTransportRequest(context.Background(), 1, []uint{100})
 
 	if err == nil {
 		t.Error("Expected error for zero actionId, got nil")
@@ -131,7 +118,7 @@ func TestImportTransportRequest_InvalidResponse(t *testing.T) {
 	defer server.Close()
 
 	client := createTestClient(server.URL)
-	_, err := client.ImportTransportRequest(1, []uint{100})
+	_, err := client.ImportTransportRequest(context.Background(), 1, []uint{100})
 
 	if err == nil {
 		t.Error("Expected JSON unmarshal error, got nil")
@@ -154,7 +141,7 @@ func TestImportTransportRequest_RequestBody(t *testing.T) {
 
 	client := createTestClient(server.URL)
 	expectedTRs := []uint{100, 200, 300}
-	_, err := client.ImportTransportRequest(5, expectedTRs)
+	_, err := client.ImportTransportRequest(context.Background(), 5, expectedTRs)
 
 	if err != nil {
 		t.Errorf("Expected no error, got %v", err)
@@ -181,7 +168,7 @@ func TestImportTransportRequest_ContextCancellation(t *testing.T) {
 	// Create a context that will be cancelled
 	ctx, cancel := context.WithCancel(context.Background())
 
-	client := createTestClientWithContext(ctx, server.URL)
+	client := createTestClient(server.URL)
 
 	// Cancel the context after a short delay
 	go func() {
@@ -189,7 +176,7 @@ func TestImportTransportRequest_ContextCancellation(t *testing.T) {
 		cancel()
 	}()
 
-	_, err := client.ImportTransportRequest(1, []uint{100})
+	_, err := client.ImportTransportRequest(ctx, 1, []uint{100})
 
 	if err == nil {
 		t.Error("Expected context cancelled error, got nil")
@@ -221,7 +208,7 @@ func TestGetNodes_Success(t *testing.T) {
 	defer server.Close()
 
 	client := createTestClient(server.URL)
-	nodes, err := client.GetNodes()
+	nodes, err := client.GetNodes(context.Background())
 
 	if err != nil {
 		t.Errorf("Expected no error, got %v", err)
@@ -242,8 +229,8 @@ func TestGetNodes_Timeout(t *testing.T) {
 	shortCtx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
-	client := createTestClientWithContext(shortCtx, server.URL)
-	_, err := client.GetNodes()
+	client := createTestClient(server.URL)
+	_, err := client.GetNodes(shortCtx)
 
 	if err == nil {
 		t.Error("Expected timeout error, got nil")
@@ -270,7 +257,7 @@ func TestGetActionResult_Success(t *testing.T) {
 	defer server.Close()
 
 	client := createTestClient(server.URL)
-	status, endedAt, err := client.GetActionResult(123)
+	status, endedAt, err := client.GetActionResult(context.Background(), 123)
 
 	if err != nil {
 		t.Errorf("Expected no error, got %v", err)
@@ -294,8 +281,8 @@ func TestGetActionResult_Timeout(t *testing.T) {
 	shortCtx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
-	client := createTestClientWithContext(shortCtx, server.URL)
-	_, _, err := client.GetActionResult(123)
+	client := createTestClient(server.URL)
+	_, _, err := client.GetActionResult(shortCtx, 123)
 
 	if err == nil {
 		t.Error("Expected timeout error, got nil")
