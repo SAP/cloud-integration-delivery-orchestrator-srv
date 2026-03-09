@@ -3,6 +3,7 @@ package tms
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	. "mmt-delivery/consts"
 	"mmt-delivery/pkg/env"
@@ -92,7 +93,7 @@ type TrNodeStatus struct {
 // check status of a single TR. /v1/transportRequests/{TrNumber}
 // NOTE: this api is not from api hub. may not be stable
 func (t *TmsClient) GetTransportRequest(TrNumber string) (*TransportRequestV1, error) {
-	childCtx, cancel := context.WithCancel(t.Context)
+	childCtx, cancel := context.WithTimeout(t.Context, DefaultRequestTimeout)
 	defer cancel()
 
 	fullURL := fmt.Sprintf("%s/v1/transportRequests/%s?expand=logs,landscape", t.ApiURL, TrNumber)
@@ -104,6 +105,9 @@ func (t *TmsClient) GetTransportRequest(TrNumber string) (*TransportRequestV1, e
 	}
 	body, _, err := t.Do(&request)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			logger.Errorf("GetTransportRequest timeout after %v: %s", DefaultRequestTimeout, fullURL)
+		}
 		return nil, fmt.Errorf("error when getting transport request %s, error message %s", TrNumber, err)
 	}
 	var tr TransportRequestV1

@@ -28,7 +28,7 @@ const (
 )
 
 // Canonical import states.
-// status from TMS API: INITIAL, RUNNING, SUCCEEDED, FATAL, etc...
+// status from TMS API: INITIAL, RUNNING, SUCCEEDED, FATAL, TODO: REPEAT, etc...
 const (
 	ImportNotStarted ImportState = "NOT_STARTED"
 	ImportQueued     ImportState = "QUEUED" // INITIAL
@@ -73,7 +73,8 @@ const (
 	CondSuccess ConditionState = "Success"
 )
 
-// INITIAL, RUNNING, SUCCEEDED, FATAL
+// INITIAL, RUNNING, SUCCEEDED, FATAL, 
+// TODO: REPEAT, deleted, unknown, warning
 func DeriveImport(state string) ImportState {
 	switch strings.ToUpper(state) {
 	case "INITIAL":

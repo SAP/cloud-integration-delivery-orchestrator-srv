@@ -350,7 +350,7 @@ func syncImportState(deliveryRequestID uint, user string) []db.Condition {
 			}
 			// get error logs if import failed
 			if state == lifecycle.ImportFailed {
-				logs, err := tmsClient.ErrLogsInTransportLog(trNumber, nID)
+				logs, err := tmsClient.ErrLogsInTransportLog(trNumber, nID) // TODO: seems wrong function call.
 				var message string
 				if err != nil {
 					message = fmt.Sprintf("error when getting error logs for transport request %s in node %d: %s", trNumber, nID, err.Error())
