@@ -54,7 +54,7 @@ func main() {
 		DB:     database,
 		Logger: env.Logger(),
 		TMS:    tmsClient,
-		CPI: func(ctx context.Context, tenant string) (service.CPIClient, error) {
+		CPI: func(ctx context.Context, tenant string) (service.IntegrationService, error) {
 			return cpiManager.Get(ctx, tenant)
 		},
 		GetUserEmail: xsuaa.GetUserEmail,

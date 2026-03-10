@@ -15,8 +15,8 @@ import (
 
 // --- Interfaces for external dependencies (used by Service for testability) ---
 
-// TMSClient defines the TMS operations needed by the service layer.
-type TMSClient interface {
+// TransportService defines the TMS operations needed by the service layer.
+type TransportService interface {
 	GetNodes(ctx context.Context) ([]db.TransportNode, error)
 	GetRoutes(ctx context.Context) ([]db.TransportRoute, error)
 	ImportTransportRequest(ctx context.Context, nodeID uint, trs []uint) (uint, error)
@@ -25,16 +25,16 @@ type TMSClient interface {
 	ErrLogsInTransportLog(ctx context.Context, trNumber string, nodeID uint) ([]string, error)
 }
 
-// CPIClient defines the CPI operations needed by the service layer.
-type CPIClient interface {
+// IntegrationService defines the CPI operations needed by the service layer.
+type IntegrationService interface {
 	DeployArtifact(ctx context.Context, artifactID, artifactVersion string, artifactType consts.ArtifactType) (string, error)
 	RuntimeArtifact(ctx context.Context, artifactId string) (cpi.RuntimeArtifact, error)
 	GetDesignTimeIflow(ctx context.Context, iflowID string, iflowVersion string) (cpi.IflowItem, error)
 	GetDesignTimeScriptCollection(ctx context.Context, scriptCollectionID string, scriptCollectionVersion string) (cpi.ScriptCollectionItem, error)
 }
 
-// CPIFactory creates or retrieves a cached CPI client for a given tenant.
-type CPIFactory func(ctx context.Context, tenant string) (CPIClient, error)
+// IntegrationFactory creates or retrieves a cached CPI client for a given tenant.
+type IntegrationFactory func(ctx context.Context, tenant string) (IntegrationService, error)
 
 // Notifier abstracts notification operations (email, JIRA).
 type Notifier interface {
@@ -50,8 +50,8 @@ type Notifier interface {
 type Service struct {
 	DB           *gorm.DB
 	Logger       *zap.SugaredLogger
-	TMS          TMSClient
-	CPI          CPIFactory
+	TMS          TransportService
+	CPI          IntegrationFactory
 	GetUserEmail func(ctx context.Context, userID string) (string, error)
 	Notifier     Notifier
 }
