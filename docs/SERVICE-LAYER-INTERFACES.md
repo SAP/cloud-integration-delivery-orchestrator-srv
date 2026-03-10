@@ -1,68 +1,265 @@
 # Service-Layer Interfaces: TransportService & IntegrationService
 
-## 1. 为什么需要这两个接口
+## 目录
 
-`service.TransportService` 和 `service.IntegrationService` 是定义在 `service/service.go` 中的接口。它们的核心目的是：
+- [1. Go 的隐式接口：是的，这就是你理解的那样](#1-go-的隐式接口是的这就是你理解的那样)
+- [2. 为什么 Go 选择了隐式接口](#2-为什么-go-选择了隐式接口)
+  - [2.1 设计初衷：反对类型层级](#21-设计初衷反对类型层级)
+  - [2.2 核心优势：事后定义接口](#22-核心优势事后定义接口)
+  - [2.3 技术实现：静态检查的 Duck Typing](#23-技术实现静态检查的-duck-typing)
+  - [2.4 权威资料汇总](#24-权威资料汇总)
+  - [2.5 Go 接口 vs Java 接口](#25-go-接口-vs-java-接口)
+- [3. 隐式接口的核心用途（不仅仅是测试）](#3-隐式接口的核心用途不仅仅是测试)
+  - [3.1 标准库中的单方法接口](#31-标准库中的单方法接口)
+  - [3.2 事后定义接口](#32-事后定义接口after-the-fact-abstraction)
+  - [3.3 跨包解耦](#33-跨包解耦zero-import-decoupling)
+  - [3.4 "Accept interfaces, return structs" 模式](#34-accept-interfaces-return-structs-模式)
+  - [3.5 能力对比总结](#35-能力对比总结)
+- [4. 为什么接口只包含部分方法](#4-为什么接口只包含部分方法)
+  - [4.1 完整的方法调用映射](#41-完整的方法调用映射)
+- [5. 两层为什么使用不同的类型](#5-两层为什么使用不同的类型)
+- [6. 如果不用接口会怎样](#6-如果不用接口会怎样)
+- [7. 本工程的 Service 层设计评估](#7-本工程的-service-层设计评估)
+  - [7.1 设计原则](#71-设计原则)
+  - [7.2 当前做得好的部分](#72-当前做得好的部分)
+  - [7.3 需要改进的部分](#73-需要改进的部分)
+  - [7.4 改进建议总览](#74-改进建议总览)
+  - [7.5 判断标准：何时放 Service，何时放 Handler](#75-判断标准何时放-service何时放-handler)
+- [8. 总结](#8-总结)
 
-**将 Service 层与具体的 HTTP client 实现解耦，使 Service 层的业务逻辑可以独立测试。**
+## 1. Go 的隐式接口：是的，这就是你理解的那样
 
-没有这两个接口时，`Service` 结构体直接持有 `*tms.TmsClient` 和 `*cpi.CpiClient`。这意味着：
-- 测试任何 Service 方法都必须有真实的 HTTP 服务端（TMS API / CPI API）
-- 无法控制外部 API 的返回值来覆盖边界条件
-- 测试变得缓慢、不稳定、不可重复
-
-有了接口后，测试时可以注入 mock 实现，精确控制每个方法的返回值。
-
-## 2. 为什么接口只包含部分方法
-
-以 `TransportService` 为例：
-
-```
-tms.TmsClient 有 13 个方法（12 个导出 + 1 个未导出）
-TransportService 接口只定义了 6 个方法
-```
-
-**接口只包含 Service 层实际调用的方法。** 这是 Go 语言接口设计的核心原则。
-
-### 2.1 Go 的隐式接口（Implicit Interface）
-
-Go 的接口满足是**隐式**的——不需要 `implements` 关键字。只要一个类型实现了接口定义的所有方法，它就自动满足该接口：
+> **只要任何类型实现了一个接口定义的所有方法，它就自动满足该接口。不需要任何显式声明。**
+>
+> **必须是全部方法——少一个编译器就会报错。** 方法签名（名称、参数类型、返回类型）也必须完全一致。多实现额外的方法不影响。
 
 ```go
 // 接口定义（在 service 包）
 type TransportService interface {
     GetNodes(ctx context.Context) ([]db.TransportNode, error)
-    // ... 其他 5 个方法
+    GetRoutes(ctx context.Context) ([]db.TransportRoute, error)
+    // ... 共 6 个方法
 }
 
-// 具体类型（在 tms 包）——没有任何 "implements" 声明
+// 具体类型（在 tms 包）——没有 "implements" 声明
 type TmsClient struct { ... }
 func (t *TmsClient) GetNodes(ctx context.Context) ([]db.TransportNode, error) { ... }
-// ... TmsClient 还有很多其他方法
+func (t *TmsClient) GetRoutes(ctx context.Context) ([]db.TransportRoute, error) { ... }
+// ... TmsClient 有 13 个方法，其中 6 个签名恰好匹配 TransportService
 
-// TmsClient 自动满足 TransportService，因为它实现了接口要求的全部 6 个方法
-var _ TransportService = (*tms.TmsClient)(nil) // 编译期验证
+// 编译器自动识别：TmsClient 满足 TransportService
+var svc Service
+svc.TMS = tmsClient  // 合法——无需任何额外声明
 ```
 
-这与 Java/C# 的**显式接口**不同。Java 中必须声明 `class TmsClient implements TransportService`，且类必须实现接口的全部方法。Go 中接口是**由使用方定义的**，而不是由实现方声明的。
+这意味着：
+- `tms` 包完全不需要知道 `TransportService` 接口的存在
+- 接口是由**消费方**（`service` 包）定义的，不是由实现方声明的
+- 你甚至可以为标准库中的类型定义新接口，它们会自动满足
 
-### 2.2 Interface Segregation Principle（接口隔离原则）
+## 2. 为什么 Go 选择了隐式接口
 
-Go 社区推崇的设计原则：
+### 2.1 设计初衷：反对类型层级
 
-> **"Accept interfaces, return structs"**
+Go 的设计者（Rob Pike、Ken Thompson、Robert Griesemer）在 Google 内部大规模 C++/Java 项目中观察到一个反复出现的问题：**类型层级（type hierarchy）导致代码脆弱且难以演化。**
+
+Rob Pike 在 2012 年 SPLASH 大会的主题演讲中明确解释了这个设计选择：
+
+> "Type hierarchies result in brittle code. The hierarchy must be designed early, often as the first step of designing the program, and early decisions can be difficult to change once the program is written. As a consequence, the model encourages early overdesign as the programmer tries to predict every possible use the software might require, adding layers of type and abstraction just in case. This is upside down."
+>
+> "The way pieces of a system interact should adapt as it grows, not be fixed at the dawn of time."
+>
+> "Note too that the elimination of the type hierarchy also eliminates a form of dependency hierarchy. Interface satisfaction allows the program to grow organically without predetermined contracts."
+>
+> — Rob Pike, [Go at Google: Language Design in the Service of Software Engineering](https://go.dev/talks/2012/splash.article) (2012)
+
+### 2.2 核心优势：事后定义接口（After-the-fact Interfaces）
+
+Go 官方 FAQ 给出的直接解释：
+
+> "A Go type implements an interface by implementing the methods of that interface, nothing more. This property allows interfaces to be defined and used without needing to modify existing code. It enables a kind of structural typing that promotes separation of concerns and improves code re-use, and makes it easier to build on patterns that emerge as the code develops."
+>
+> — [Go FAQ: Why doesn't Go have "implements" declarations?](https://go.dev/doc/faq#implements_interface)
+
+关于为什么没有类型继承：
+
+> "Rather than requiring the programmer to declare ahead of time that two types are related, in Go a type automatically satisfies any interface that specifies a subset of its methods. Besides reducing the bookkeeping, this approach has real advantages... Interfaces can be added after the fact if a new idea comes along or for testing -- without annotating the original types. Because there are no explicit relationships between types and interfaces, there is no type hierarchy to manage or discuss."
+>
+> "It takes some getting used to but this implicit style of type dependency is one of the most productive things about Go."
+>
+> — [Go FAQ: Why is there no type inheritance?](https://go.dev/doc/faq#inheritance)
+
+### 2.3 技术实现：静态检查的 Duck Typing
+
+Russ Cox（Go 团队技术负责人）在他的经典文章中解释了底层机制：
+
+> "Go's interfaces let you use duck typing like you would in a purely dynamic language like Python but still have the compiler catch obvious mistakes like passing an int where an object with a Read method was expected."
+>
+> "A value of type Binary can be passed to ToString, which will format it using the String method, even though the program never says that Binary intends to implement Stringer. There's no need: the runtime can see that Binary has a String method, so it implements Stringer, even if the author of Binary has never heard of Stringer."
+>
+> — Russ Cox, [Go Data Structures: Interfaces](https://research.swtch.com/interfaces) (2009)
+
+### 2.4 权威资料汇总
+
+| 资料 | 作者 | 链接 |
+|------|------|------|
+| Go FAQ: 为什么没有 implements 声明 | Go Team | https://go.dev/doc/faq#implements_interface |
+| Go FAQ: 为什么没有类型继承 | Go Team | https://go.dev/doc/faq#inheritance |
+| Go 语言规范: Interface types | Go Team | https://go.dev/ref/spec#Interface_types |
+| Go Data Structures: Interfaces | Russ Cox | https://research.swtch.com/interfaces |
+| SPLASH 2012 Keynote | Rob Pike | https://go.dev/talks/2012/splash.article |
+| The Laws of Reflection | Rob Pike | https://go.dev/blog/laws-of-reflection |
+
+### 2.5 Go 接口 vs Java 接口
+
+| 特性 | Go | Java |
+|------|------|------|
+| 接口满足方式 | **隐式**（结构化类型） | **显式**（`implements` 关键字） |
+| 接口定义位置 | 通常在**消费方**包中 | 通常在**实现方**包或独立包中 |
+| 接口大小倾向 | 越小越好（1-5 个方法） | 经常是完整的 API 表面 |
+| 能否事后添加接口 | 可以，不需要修改已有代码 | 不行，必须回去修改类的声明 |
+| 类型能满足多少接口 | 无限个（只要方法签名匹配） | 必须显式声明每一个 |
+
+**根本区别**：Java 的接口是实现方的**承诺**（"我实现了这个接口"），Go 的接口是消费方的**要求**（"我需要这些能力"）。Go 的设计让系统可以在不修改已有代码的情况下自然演化。
+
+## 3. 隐式接口的核心用途（不仅仅是测试）
+
+可测试性只是隐式接口的用途之一。以下是它在 Go 生态中更广泛的核心应用：
+
+### 3.1 标准库中的单方法接口
+
+Go 标准库大量使用极小的隐式接口，它们是整个生态的基石：
+
+**`io.Reader` / `io.Writer`** — 通用 I/O 组合
+
+```go
+type Reader interface { Read(p []byte) (n int, err error) }
+type Writer interface { Write(p []byte) (n int, err error) }
+```
+
+`*os.File`、`*bytes.Buffer`、`*strings.Reader`、`net.Conn`、`*gzip.Writer`、`http.Response.Body` 全都自动满足这些接口。它们来自不同的包、不同的作者——但可以无缝组合：
+
+```go
+// 这一个函数适用于：文件到文件、网络到文件、HTTP body 到磁盘、gzip 流到 buffer...
+func ProcessData(src io.Reader, dst io.Writer) error {
+    _, err := io.Copy(dst, src)
+    return err
+}
+```
+
+**`error`** — Go 中最基本的隐式接口
+
+```go
+type error interface { Error() string }
+```
+
+任何类型只要有 `Error() string` 方法就是一个 error。你可以创建带有业务字段（错误码、字段名等）的自定义错误类型，它们自动被所有期望 `error` 的地方接受。
+
+**`fmt.Stringer`** — 跨包的字符串表示
+
+```go
+type Stringer interface { String() string }
+```
+
+任何类型实现了 `String() string`，`fmt.Println`、`fmt.Sprintf("%v", ...)` 就会自动调用它——你的类型不需要 import `fmt`，`fmt` 也不需要知道你的类型存在。
+
+### 3.2 事后定义接口（After-the-Fact Abstraction）
+
+这是 Go 隐式接口与 Java 显式接口的**根本能力差异**。你可以在具体类型已经存在之后，为它们定义新接口——不需要修改任何已有代码。
+
+```go
+// 两个来自不同第三方包的类型，各自独立开发：
+// package github:  func (c *Client) Get(url string) (*Response, error)
+// package gitlab:  func (c *APIClient) Get(url string) (*Response, error)
+
+// 你事后定义一个接口——两个已有类型自动满足它：
+type HTTPGetter interface {
+    Get(url string) (*Response, error)
+}
+
+func FetchREADME(client HTTPGetter, repo string) (string, error) { ... }
+
+// 两个都能直接传入，无需修改 github 或 gitlab 包：
+FetchREADME(&github.Client{}, "repo")
+FetchREADME(&gitlab.APIClient{}, "repo")
+```
+
+**在 Java 中这不可能**——你必须回去修改 `github.Client` 和 `gitlab.APIClient` 的源码，添加 `implements HTTPGetter`。如果它们是第三方库，你根本改不了。
+
+### 3.3 跨包解耦（Zero-Import Decoupling）
+
+包 A 定义接口，包 B 的类型满足它——**双方互不 import**：
+
+```go
+// package notifier — 定义它需要的能力，不 import email 或 slack
+type MessageSender interface {
+    Send(to, body string) error
+}
+
+// package email — 不知道 notifier 的存在
+type SMTPClient struct { Host string }
+func (c *SMTPClient) Send(to, body string) error { /* SMTP 逻辑 */ }
+
+// package slack — 也不知道 notifier 的存在
+type Webhook struct { URL string }
+func (w *Webhook) Send(to, body string) error { /* POST 到 Slack */ }
+
+// main — 唯一同时 import 三者的地方，负责组装
+svc := notifier.NewService(&email.SMTPClient{Host: "smtp.example.com"})
+svc := notifier.NewService(&slack.Webhook{URL: "https://hooks.slack.com/..."})
+```
+
+依赖方向：`main` → `notifier`、`email`、`slack`。但 `notifier` 不依赖 `email` 或 `slack`，`email`/`slack` 不依赖 `notifier`。
+
+### 3.4 "Accept interfaces, return structs" 模式
+
+Go 社区推崇的函数签名原则：**参数用接口（接受最小能力集），返回值用具体类型（给调用方完整能力）**。
+
+```go
+// 不好：接受具体类型，只能处理文件
+func CountWords(f *os.File) (int, error) { ... }
+
+// 好：接受 io.Reader，适用于文件、字符串、HTTP body、gzip 流...
+func CountWords(r io.Reader) (int, error) {
+    scanner := bufio.NewScanner(r)
+    count := 0
+    for scanner.Scan() {
+        count += len(strings.Fields(scanner.Text()))
+    }
+    return count, scanner.Err()
+}
+
+// 全部可用：
+CountWords(os.Stdin)
+CountWords(strings.NewReader("hello world"))
+CountWords(resp.Body)
+CountWords(gzipReader)
+```
+
+### 3.5 能力对比总结
+
+| 能力 | Go（隐式） | Java（显式） |
+|------|-----------|-------------|
+| 类型满足它不知道的接口 | 可以 | 不行 |
+| 类型已存在后定义新接口 | 可以，不改已有代码 | 不行，必须修改所有实现类 |
+| 包 A 使用包 B 的类型，B 不 import A | 可以 | 不行，B 必须 import A 的接口 |
+| 组合来自不相关包的类型 | 自动 | 需要 adapter 或共享接口 jar |
+| 消费方定义接口 | 自然惯用法 | 需要额外包装类 |
+
+## 4. 为什么接口只包含部分方法
+
+以 `TransportService` 为例：`tms.TmsClient` 有 13 个方法，但 `TransportService` 只定义了 6 个。
+
+**这是 Go 社区推崇的接口隔离原则（Interface Segregation Principle）**：
+
 > **"The bigger the interface, the weaker the abstraction"** — Rob Pike
 
-接口应该尽可能小，只包含消费方需要的方法。这被称为**接口隔离原则**（SOLID 的 I）。
-
-如果 `TransportService` 包含了 `TmsClient` 的全部 13 个方法：
+接口只包含消费方（Service 层）实际调用的方法。如果包含全部 13 个：
 - 写 mock 时需要实现 13 个方法，即使测试只关心其中 1-2 个
 - 接口变成了具体类型的 "镜像"，失去了抽象的意义
 - 新增一个 `TmsClient` 方法就需要同步修改接口，耦合度反而增加
 
-### 2.3 完整的方法调用映射
-
-下表展示了每个具体方法被谁调用、是否在接口中：
+### 4.1 完整的方法调用映射
 
 #### TMS 方法
 
@@ -110,7 +307,7 @@ Go 社区推崇的设计原则：
 
 **规律**：接口中的方法 = Service 层通过 `s.TMS` 或 `s.CPI` 调用的方法。Handler 层直接使用具体类型，不经过接口。
 
-## 3. 两层为什么使用不同的类型
+## 5. 两层为什么使用不同的类型
 
 ```
 ┌─────────────────────────────────────────────────┐
@@ -138,23 +335,9 @@ Go 社区推崇的设计原则：
 ```
 
 - **Service 层**持有**接口**：只暴露业务逻辑需要的方法子集，方便 mock 测试
-- **Handler 层**持有**具体类型**：因为 handler 很多路由只是简单的 passthrough（收到 HTTP 请求 → 调 client 方法 → 返回 JSON），不需要也不值得做 mock 测试
+- **Handler 层**持有**具体类型**：handler 很多路由只是 passthrough（收到 HTTP 请求 → 调 client → 返回 JSON），不需要 mock 测试
 
-这是一个 intentional 的设计选择——不是所有调用都需要通过接口。只在**需要可测试性**的地方引入接口抽象。
-
-## 4. Go 接口 vs Java/C# 接口的关键区别
-
-| 特性 | Go | Java / C# |
-|---|---|---|
-| 接口满足方式 | **隐式**（duck typing） | **显式**（`implements`/`:`） |
-| 接口定义位置 | 通常在**消费方**包中 | 通常在**实现方**包或独立包中 |
-| 接口大小倾向 | 越小越好（1-5 个方法） | 经常是完整的 API 表面 |
-| 一个类型能满足多少接口 | 无限个（只要方法匹配） | 必须显式声明每一个 |
-| 空接口 | `interface{}` / `any` | `Object` |
-
-Go 的隐式接口使得**在消费方按需定义小接口**成为自然且推荐的做法。你不需要在 `pkg/tms` 包中声明"我实现了 TransportService"——只要方法签名匹配，编译器自动完成关联。
-
-## 5. 如果不用接口会怎样
+## 6. 如果不用接口会怎样
 
 ```go
 // 假设 Service 直接持有具体类型
@@ -189,12 +372,104 @@ func TestDeliveryFlow(t *testing.T) {
 }
 ```
 
-## 6. 总结
+## 7. 本工程的 Service 层设计评估
+
+### 7.1 设计原则
+
+你对 `service/` 目录的设计初衷是正确的：
+
+> **将涉及调用多个 client 或 DB 的复杂业务逻辑放在 Service 层，简单的 passthrough 留在 Handler 层。**
+
+这是标准的分层架构模式，适用于 Go 项目。关键判断标准：**一个操作是否需要编排（orchestrate）多个外部依赖？**
+
+### 7.2 当前做得好的部分
+
+以下 Service 方法正确地体现了"编排多个依赖"的设计：
+
+| Service 方法 | 编排的依赖 | 复杂度 |
+|---|---|---|
+| `SourceAndRoute` (dr.go) | TMS (GetRoutes + GetNodes) + BFS 图算法 | 高 |
+| `InsertTenantOps` (dr.go) | DB + TMS (TrExist) + CPI (DeliveryRuleCheck) | 高 |
+| `BatchImportTenantOps` (deliver.go) | DB + TMS (Import) + CPI (版本检查) + Email | 高 |
+| `BatchDeployTenantOps` (deliver.go) | DB + CPI (DeployArtifact) + Email | 高 |
+| `SyncDeliveryStatus` (sync_status.go) | DB + TMS (TrNodeStatuses) + CPI (RuntimeArtifact) + JIRA | 最高 |
+| `RequestApproval` (approve.go) | DB + XSUAA (Email解析) + Notifier | 中 |
+| `CancelDeliveryRequest` (cancel.go) | DB + TMS + CPI (状态同步) + Notifier (JIRA + Email) | 高 |
+
+以下 Handler 正确地保持了 passthrough 的简洁：
+
+| Handler | 行为 |
+|---|---|
+| `GetPackagesHandler` | CPI GetPackages → JSON |
+| `GetTmsNodesHandler` | TMS GetNodes → JSON |
+| `HandleImportOps` | 参数校验 → `svc.BatchImportTenantOps()` |
+| `HandleApproveDeliveryRequest` | 参数校验 → `svc.Approve()` |
+
+### 7.3 需要改进的部分
+
+分析发现部分 Handler 包含了本该在 Service 层的业务逻辑：
+
+#### 严重：`handler/native_deliver.go` — `NativeDeliver`
+
+这是最大的违规。Handler 中包含了完整的多系统编排流水线：
+1. 创建源 CPI client
+2. 遍历 artifact，逐一调用 CPI 获取 designtime 元数据
+3. 下载 artifact → 同步到 GitHub
+4. 遍历目标 tenant，上传 artifact → 轮询部署状态（阻塞 `time.Sleep`，最多 50 秒）
+
+**应迁移到 `service/native_deliver.go`**，使 Handler 缩减为：
+```go
+func (h *Handler) NativeDeliver(ctx *gin.Context) {
+    var req NativeDeliverRequest
+    if err := ctx.BindJSON(&req); err != nil { ... }
+    if err := h.svc.NativeDeliver(ctx, req); err != nil { ... }
+    ctx.JSON(200, gin.H{"status": "success"})
+}
+```
+
+#### 中等：`CreateDr` / `UpdateDr`（delivery_request.go）
+
+包含 JIRA 格式校验、状态机检查、DeliveryRule 加载、DB 写入等业务逻辑。应提取为 `service.CreateDeliveryRequest()` / `service.UpdateDeliveryRequest()`。
+
+#### 中等：`UpsertDeliveryRule`（delivery_rule.go）
+
+包含 `SourceAndRoute()` 调用 + DB 事务 + 关联管理。事务逻辑应迁移到 Service 层。
+
+#### 轻微：`service/utils.go` 的位置
+
+`UserID(ctx *gin.Context)`、`UserEmail(ctx *gin.Context)` 等函数依赖 `gin.Context`，是 HTTP 层工具。放在 `service/` 中导致 service 层反向依赖 HTTP 框架。应迁移到 `handler/context.go`。
+
+### 7.4 改进建议总览
+
+| 问题 | 严重度 | 当前位置 | 建议迁移到 |
+|---|---|---|---|
+| `NativeDeliver` 编排逻辑 | **严重** | `handler/native_deliver.go` | `service/native_deliver.go` |
+| `CreateDr` 业务逻辑 | 中等 | `handler/delivery_request.go` | `service/dr.go` |
+| `UpdateDr` 业务逻辑 | 中等 | `handler/delivery_request.go` | `service/dr.go` |
+| `UpsertDeliveryRule` 事务 | 中等 | `handler/delivery_rule.go` | `service/dr.go` |
+| `preDeliverCheck` 状态校验 | 轻微 | `handler/delivery_request.go` | `service/deliver.go` |
+| `checkJIRA` 业务校验 | 轻微 | `handler/delivery_request.go` | `service/checks.go` |
+| gin.Context 工具函数 | 架构 | `service/utils.go` | `handler/context.go` |
+
+### 7.5 判断标准：何时放 Service，何时放 Handler
+
+| 条件 | 放在哪里 |
+|---|---|
+| 调用单个 client 方法，直接返回结果 | Handler (passthrough) |
+| 只有简单的 DB CRUD，没有业务校验 | Handler 可直接操作 |
+| 涉及多个外部依赖的编排 | **Service** |
+| 包含业务规则校验（状态机、版本比较、权限检查等） | **Service** |
+| 包含 DB 事务（需要原子性的多步操作） | **Service** |
+| 需要异步处理（goroutine + 状态回写） | **Service** |
+| 需要发送通知（邮件、JIRA） | **Service** |
+
+## 8. 总结
 
 | 问题 | 答案 |
 |---|---|
-| 接口的目的是什么？ | **Service 层可测试性**——通过接口注入 mock 来单元测试业务逻辑 |
+| Go 的接口满足规则？ | 任何类型实现了接口的全部方法就自动满足，无需显式声明 |
+| 为什么这样设计？ | 避免类型层级的脆弱性，支持事后定义接口，兼顾 duck typing 灵活性和编译期安全性 |
+| 接口的目的？ | Service 层可测试性——通过接口注入 mock 来单元测试业务逻辑 |
 | 为什么不包含所有方法？ | Go 接口隔离原则——只定义消费方需要的最小方法集 |
-| 和具体 Client 冲突吗？ | 不冲突。`TransportService` 是抽象（行为契约），`TmsClient` 是实现。命名已区分 |
-| Handler 层为什么不用接口？ | Handler 多为 passthrough，不需要 mock；直接用具体类型更简单直接 |
-| 底层是同一个实例吗？ | 是。`main.go` 中 `tmsClient` 同时赋值给 `svc.TMS`（接口）和 `h.tms`（具体类型） |
+| Service 层的设计原则是否是最佳实践？ | 是。"复杂编排逻辑放 Service，passthrough 留 Handler"是标准分层架构 |
+| 需要调整的地方？ | `NativeDeliver` 应迁到 Service（严重），`CreateDr`/`UpdateDr`/`UpsertDeliveryRule` 的业务逻辑应迁到 Service（中等） |
