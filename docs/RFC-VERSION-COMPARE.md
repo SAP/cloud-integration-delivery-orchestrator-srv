@@ -103,8 +103,8 @@ POST /api/v1/deliveryRule/:id/versionCompare/trigger
 ```
 
 - **无 Request Body** — 触发后自动采集该 Rule 下所有 Package 在所有 Tenant 上的全部 artifact 版本
-- 异步执行，立即返回当前快照状态
-- **Rate Limiting**: 每个 Rule 有可配置的冷却间隔（如 30 分钟），冷却期内重复触发返回现有快照而非重新采集
+- 异步执行，立即返回触发状态（不返回快照数据，快照数据由 Query 端点负责）
+- **Rate Limiting**: 每个 Rule 有可配置的冷却间隔（如 30 分钟），冷却期内重复触发仅返回 rate limiting 提示信息，引导用户通过 GET 端点查询已有快照
 
 #### Response (触发成功)
 
@@ -117,15 +117,14 @@ POST /api/v1/deliveryRule/:id/versionCompare/trigger
 }
 ```
 
-#### Response (冷却期内)
+#### Response (冷却期内 — 429 Too Many Requests)
 
 ```json
 {
-  "status": "completed",
-  "triggeredAt": "2026-03-10T09:45:00Z",
-  "triggeredBy": "user@example.com",
-  "completedAt": "2026-03-10T09:46:30Z",
-  "message": "Recent snapshot exists (triggered 15 minutes ago), use GET to query results"
+  "status": "rate_limited",
+  "lastTriggeredAt": "2026-03-10T09:45:00Z",
+  "cooldownRemaining": "15m",
+  "message": "Cooldown active, use GET /versionCompare to query existing snapshot"
 }
 ```
 
@@ -280,7 +279,7 @@ type ArtifactSnapshot struct {
 type ArtifactVersionInfo struct {
     DesignTimeVersion string `json:"designTimeVersion"`  // "active" 表示 DRAFT
     RuntimeVersion    string `json:"runtimeVersion"`
-    RuntimeStatus     string `json:"runtimeStatus"`      // STARTED / STARTING / ERROR 等
+    RuntimeStatus     string `json:"runtimeStatus"`      // 值应与 consts.RuntimeState 一致: STARTED / STARTING / ERROR
     Error             string `json:"error,omitempty"`
 }
 ```
@@ -294,6 +293,9 @@ type ArtifactVersionInfo struct {
 | 请求参数存 DB？ | 否 | Trigger 采集全量数据，Query 时再过滤 |
 | Source tenant 版本也存？ | 是 | `Versions` map 包含 source tenant ID 的 entry |
 | Tenant 信息存 DB？ | 只存 ID | 完整 tenant 信息查询时从 DB 关联加载 |
+| 并发触发防护 | DB 级原子 UPDATE（`WHERE status != 'running'`） | 防止两个请求同时触发同一 Rule 的采集，避免 goroutine 竞态 |
+| Goroutine Context | 使用 `context.Background()`，不使用请求 context | 请求返回后 request context 被取消，异步 goroutine 中的 API 调用会因 context.Canceled 失败 |
+| Package 列表来源 | Source Tenant 实时 API 调用（`GetPackages`） | 以 Source Tenant 为准；不存在于 Source 上的 Package 不出现在比较结果中 |
 
 ---
 
@@ -307,24 +309,36 @@ POST /trigger
   ├─ 1. 加载 DeliveryRule (含 SourceTenant + IncludedTenants)
   │
   ├─ 2. Rate Limit 检查: 最近 N 分钟内是否已有 completed 快照
-  │     ├─ 是 → 返回现有快照状态，不重新触发
+  │     ├─ 是 → 返回 rate_limited 状态 (429)，不重新触发
   │     └─ 否 → 继续
   │
-  ├─ 3. Upsert VersionCompareSnapshot: status="running"
+  ├─ 3. 原子 Upsert VersionCompareSnapshot: status="running"
+  │     使用 DB 级别原子操作防止并发触发:
+  │     UPDATE ... SET status='running' WHERE delivery_rule_id=? AND status != 'running'
+  │     如果 affected rows = 0 → 说明已有正在运行的采集，返回 running 状态 (409 Conflict)
   │
   ├─ 4. 启动 goroutine 异步执行:
   │     │
-  │     ├─ 4a. 获取 Source Tenant 的所有 Package 列表
+  │     │  ⚠️ 必须使用独立 context (context.Background())，不能使用请求 context
+  │     │  （请求返回后 request context 被取消，会导致所有 CPI API 调用失败）
   │     │
-  │     ├─ 4b. 对每个 Package (并发 — errgroup):
+  │     ├─ 4a. 获取 Source Tenant 的所有 Package 列表 (通过 CPI API: GetPackages)
+  │     │       注意: Package 列表来自 Source Tenant 的实时 API 调用，
+  │     │       不存在于 Source Tenant 上的 Package 不会出现在比较结果中。
+  │     │
+  │     ├─ 4b. 对每个 Tenant 预取 Runtime 数据 (并发 — errgroup):
+  │     │     └─ GetRuntimeArtifacts() → 建 map[artifactID]RuntimeArtifact
+  │     │        每个 Tenant 只调用一次，缓存在内存中供后续所有 Package 复用
+  │     │
+  │     ├─ 4c. 对每个 Package (并发 — errgroup):
   │     │     ├─ 对每个 Tenant (并发 — errgroup):
   │     │     │   ├─ FetchPackageArtifacts(packageID) → []db.Artifact (design time)
-  │     │     │   └─ GetRuntimeArtifacts() → 建 map[artifactID]RuntimeArtifact
+  │     │     │   └─ 从 4b 的 Runtime 缓存中按 artifactID 查找 Runtime 版本
   │     │     └─ 合并结果到 ArtifactSnapshot.Versions
   │     │
-  │     ├─ 4c. 组装 SnapshotData
+  │     ├─ 4d. 组装 SnapshotData
   │     │
-  │     └─ 4d. 更新 DB: status="completed", Data=snapshotData
+  │     └─ 4e. 更新 DB: status="completed", Data=snapshotData
   │           (失败时: status="failed", Error=errMsg)
   │
   └─ 5. 立即返回 { status: "running", ... }
@@ -417,6 +431,8 @@ func wrapArtifact(artifactType consts.ArtifactType, artifact any) db.Artifact { 
 
 ### 5.7 IntegrationService 接口扩展
 
+`IntegrationService` 的定位是 **CPI API 的抽象层**（facade），目的是让 service 层可以 mock CPI 调用进行单元测试。现有方法（`DeployArtifact`、`RuntimeArtifact` 等）同样是对 `CpiClient` 的直接透传，不包含编排逻辑。新增的三个方法性质相同——声明 service 层对 CPI API 的新依赖。
+
 ```go
 type IntegrationService interface {
     // 现有方法
@@ -425,7 +441,7 @@ type IntegrationService interface {
     GetDesignTimeIflow(ctx context.Context, iflowID string, iflowVersion string) (cpi.IflowItem, error)
     GetDesignTimeScriptCollection(ctx context.Context, scriptCollectionID string, scriptCollectionVersion string) (cpi.ScriptCollectionItem, error)
 
-    // 新增方法
+    // 新增: Version Compare 所需的批量查询能力
     GetPackageIflows(ctx context.Context, packageID string) ([]cpi.IflowItem, error)
     GetPackageScriptcollections(ctx context.Context, packageID string) ([]cpi.ScriptCollectionItem, error)
     GetRuntimeArtifacts(ctx context.Context) ([]cpi.RuntimeArtifact, error)
@@ -436,16 +452,67 @@ type IntegrationService interface {
 
 ## 6. 前端 UI 方案
 
-### 6.1 结论: 需要专用组件，但基于标准 table
+### 6.1 整体导航结构
+
+Version Compare 作为 `/jobs` 分组下的独立 AppCard，和 Delivery Requests 同级。采用**两级页面**结构，与 Delivery Request 的导航模式完全对称：
+
+```
+HomeView
+  └─ /jobs 分组
+       ├─ AppCard "Delivery Requests" → /jobs/delivery-request-list → /delivery-request/:planId
+       └─ AppCard "Version Compare"   → /jobs/version-compare       → /jobs/version-compare/:ruleId
+```
+
+**HomeView AppCard 信息**:
+- 标题: "Version Compare"
+- 描述: "Cross-Tenant Artifact Version Comparison"
+- statusCount: 调用后端新增接口 `GET /api/v1/versionCompare/counts`，展示 Rule 维度的 mismatch 统计（如 Total: 5, "3 with mismatches"）
+
+### 6.2 第一级: Rule 卡片列表页 (`/jobs/version-compare`)
+
+`VersionCompareView.vue` — 展示所有 Delivery Rule 的卡片，每张卡片显示：
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Version Compare                                    [Breadcrumb]│
+│                                                                 │
+│  ┌─ Rule: SAP-PO-Migration ─────┐  ┌─ Rule: EDI-Flows ───────┐ │
+│  │                               │  │                          │ │
+│  │  Source: DEV-01               │  │  Source: DEV-02          │ │
+│  │  Tenants: 12                  │  │  Tenants: 5             │ │
+│  │  Last Snapshot: 10 min ago    │  │  Last Snapshot: 2h ago  │ │
+│  │  ✓ 45 matched  ❌ 3 mismatch │  │  ✓ 20 matched  ❌ 0     │ │
+│  │                               │  │                          │ │
+│  └───────────────────────────────┘  └──────────────────────────┘ │
+│                                                                 │
+│  ┌─ Rule: Payment-Hub ──────────┐  ┌─ Rule: ... ──────────────┐ │
+│  │                               │  │                          │ │
+│  │  Source: DEV-01               │  │  No snapshot yet         │ │
+│  │  Tenants: 20                  │  │  Click to trigger        │ │
+│  │  Last Snapshot: 1d ago        │  │                          │ │
+│  │  ✓ 80 matched  ❌ 12 mismatch│  │                          │ │
+│  └───────────────────────────────┘  └──────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**卡片数据来源**: 新增后端接口 `GET /api/v1/versionCompare/summary`，返回所有 Rule 的快照摘要信息（rule name、source tenant、tenant count、last snapshot time、matched/mismatched counts）。
+
+**点击卡片** → 跳转到 `/jobs/version-compare/:ruleId`
+
+### 6.3 第二级: 比较结果详情页 (`/jobs/version-compare/:ruleId`)
+
+`VersionCompareDetailView.vue` — 展示单个 Rule 的完整比较结果。
+
+#### 6.3.1 结论: 需要专用组件，但基于标准 table
 
 普通的 `DataTable.vue`（flat 单层表格）**不能完全满足**此场景，原因:
 1. 结果按 **Package 分组**，需要 grouped/nested 展示
 2. Tenant 数量动态变化，列需要动态生成
 3. 版本匹配状态需要颜色编码的视觉反馈
 
-**推荐方案**: 基于 UI5 组件构建一个专用的 `VersionCompareView.vue`，内部使用标准 `ui5-table` + `ui5-panel`，不需要引入新的 UI 库。
+**推荐方案**: 基于 UI5 组件构建，内部使用标准 `ui5-table` + `ui5-panel`，不需要引入新的 UI 库。
 
-### 6.2 UI 布局
+#### 6.3.2 UI 布局
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -474,17 +541,18 @@ type IntegrationService interface {
 └─────────────────────────────────────────────────────────┘
 ```
 
-### 6.3 交互流程
+### 6.4 交互流程
 
-1. 用户从 Delivery Rule 列表页点击 "Version Compare" 按钮（新增 row action）
-2. 进入 Version Compare 页面
-3. 页面加载时调用 GET 查询是否有已有快照
-4. 如无快照或数据过旧，用户点击 "Refresh" 触发 POST trigger
-5. 前端轮询 GET 直到 status 变为 "completed"
-6. 用户通过 checkbox 切换 DT/RT、mismatchOnly、packageIDs 过滤（前端可本地过滤或重新调 GET）
-7. 展示分组比较结果
+1. 用户在 HomeView 点击 "Version Compare" AppCard → 进入 Rule 卡片列表页
+2. 页面加载时调用 `GET /api/v1/versionCompare/summary` 获取所有 Rule 的快照摘要
+3. 用户点击某 Rule 卡片 → 跳转到 `/jobs/version-compare/:ruleId`
+4. 详情页加载时调用 GET 查询该 Rule 是否有已有快照
+5. 如无快照或数据过旧，用户点击 "Refresh" 触发 POST trigger
+6. 前端轮询 GET 直到 status 变为 "completed"
+7. 用户通过 checkbox 切换 DT/RT、mismatchOnly、packageIDs 过滤（前端可本地过滤或重新调 GET）
+8. 展示分组比较结果
 
-### 6.4 视觉标记
+### 6.5 视觉标记
 
 - **匹配** (match=true): 绿色/UI5 Positive design（`ValueState.Positive`）
 - **不匹配** (match=false): 红色/UI5 Negative design（`ValueState.Negative`）
@@ -492,15 +560,15 @@ type IntegrationService interface {
 - **不存在/错误**: 灰色 + tooltip 显示 error 信息
 - **Runtime Status**: 额外的小标签显示 STARTED/ERROR 等状态
 
-### 6.5 前端文件变更
+### 6.6 前端文件变更
 
 | 文件 | 变更 |
 |------|------|
-| `src/service/api.ts` | 新增 `triggerVersionCompare(ruleId)` + `getVersionCompare(ruleId, params)` |
+| `src/router/index.ts` | `/jobs` children 新增 `version-compare` 路由 + 新增 `/jobs/version-compare/:ruleId` 路由 |
+| `src/service/api.ts` | 新增 `getVersionCompareSummary()`、`triggerVersionCompare(ruleId)`、`getVersionCompare(ruleId, params)`、`getVersionCompareCounts()` |
 | `src/service/model.ts` | 新增 request/response 类型定义 |
-| `src/views/VersionCompareView.vue` | **新建** — 专用视图组件 |
-| `src/router/index.ts` | 新增路由 `/config/delivery-rule/:id/version-compare` |
-| `src/views/DeliveryRuleView.vue` | 新增 row action "Version Compare" |
+| `src/views/VersionCompareView.vue` | **新建** — Rule 卡片列表页 |
+| `src/views/VersionCompareDetailView.vue` | **新建** — 单 Rule 比较结果详情页 |
 
 ---
 
@@ -532,9 +600,13 @@ type IntegrationService interface {
 - [ ] 实现 `handler/version_compare.go`:
   - [ ] `TriggerVersionCompareHandler` — POST trigger
   - [ ] `QueryVersionCompareHandler` — GET query with filters
+  - [ ] `VersionCompareSummaryHandler` — GET 所有 Rule 的快照摘要（供 Rule 卡片列表页使用）
+  - [ ] `VersionCompareCountsHandler` — GET Rule 维度的 mismatch 统计（供 HomeView AppCard 使用）
 - [ ] 注册路由:
   - [ ] `POST /api/v1/deliveryRule/:id/versionCompare/trigger`
   - [ ] `GET /api/v1/deliveryRule/:id/versionCompare`
+  - [ ] `GET /api/v1/versionCompare/summary`
+  - [ ] `GET /api/v1/versionCompare/counts`
 - [ ] 编写单元测试
 
 ### 阶段四: 前端 — API + 类型定义
@@ -544,9 +616,10 @@ type IntegrationService interface {
 
 ### 阶段五: 前端 — UI 组件
 
-- [ ] 实现 `VersionCompareView.vue`
-- [ ] 路由注册
-- [ ] Delivery Rule 列表页新增 "Version Compare" 入口
+- [ ] 实现 `VersionCompareView.vue`（Rule 卡片列表页）
+- [ ] 实现 `VersionCompareDetailView.vue`（比较结果详情页）
+- [ ] 路由注册（`/jobs/version-compare` + `/jobs/version-compare/:ruleId`）
+- [ ] HomeView AppCard 自动显示（由 router children 发现机制驱动）
 - [ ] 轮询机制（trigger 后等待 completed）
 
 ### 阶段六: 集成测试 + 优化
@@ -570,3 +643,6 @@ type IntegrationService interface {
 | 6 | Version 比较方式 | 字符串精确匹配 | semver 比较 | 跨 tenant 一致性检查，相等即可 |
 | 7 | DRAFT 处理 | `designTimeDraft: true` 标记 | 将 "active" 转为特殊版本号 | 保留原始信息，前端可自行决定展示方式 |
 | 8 | Artifact 类型合并 | 提取 `FetchPackageArtifacts` 中心函数到 service 层，复用 `wrapArtifact` | 在 version compare 中单独实现 | 单一职责，未来新增 artifact 类型只改一处；现有 handler 也受益于复用 |
+| 9 | 并发触发防护 | DB 原子 UPDATE（`WHERE status != 'running'`） | 应用层 sync.Mutex | DB 级别在多实例部署下也安全；Mutex 仅适用于单实例 |
+| 10 | Goroutine Context | `context.Background()` 独立 context | 复用请求 context | 请求返回后 request context 被取消，会导致异步 goroutine 中所有 API 调用失败 |
+| 11 | Package 列表来源 | Source Tenant 实时 API（`GetPackages`） | 从 DeliveryRule 配置获取 | 以 Source Tenant 实际内容为准，避免配置与实际不同步 |
