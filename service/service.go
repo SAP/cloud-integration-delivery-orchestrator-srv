@@ -26,11 +26,17 @@ type TransportService interface {
 }
 
 // IntegrationService defines the CPI operations needed by the service layer.
+// It is a facade over CpiClient for testability — all methods are direct pass-throughs.
 type IntegrationService interface {
 	DeployArtifact(ctx context.Context, artifactID, artifactVersion string, artifactType consts.ArtifactType) (string, error)
 	RuntimeArtifact(ctx context.Context, artifactId string) (cpi.RuntimeArtifact, error)
 	GetDesignTimeIflow(ctx context.Context, iflowID string, iflowVersion string) (cpi.IflowItem, error)
 	GetDesignTimeScriptCollection(ctx context.Context, scriptCollectionID string, scriptCollectionVersion string) (cpi.ScriptCollectionItem, error)
+
+	// Version Compare: batch query capabilities
+	GetPackageIflows(ctx context.Context, packageID string) ([]cpi.IflowItem, error)
+	GetPackageScriptcollections(ctx context.Context, packageID string) ([]cpi.ScriptCollectionItem, error)
+	GetRuntimeArtifacts(ctx context.Context) ([]cpi.RuntimeArtifact, error)
 }
 
 // IntegrationFactory creates or retrieves a cached CPI client for a given tenant.

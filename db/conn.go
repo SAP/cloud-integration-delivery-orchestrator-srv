@@ -57,7 +57,7 @@ func Connect() (*gorm.DB, error) {
 	// AutoMigrate core legacy models plus new lifecycle models
 	if err := db.AutoMigrate(
 		&CpiTenant{}, &DeliveryRule{}, &DeliveryRequest{}, &ArtifactTenantOperation{}, &BatchJob{},
-		&Artifact{}, &Condition{},
+		&Artifact{}, &Condition{}, &VersionCompareSnapshot{},
 	); err != nil {
 		return nil, fmt.Errorf("failed to migrate: %w", err)
 	}

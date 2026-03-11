@@ -27,6 +27,13 @@
   - [7.4 改进建议总览](#74-改进建议总览)
   - [7.5 判断标准：何时放 Service，何时放 Handler](#75-判断标准何时放-service何时放-handler)
 - [8. 总结](#8-总结)
+- [9. 接口化的核心场景：隔离 I/O 边界](#9-接口化的核心场景隔离-io-边界)
+  - [9.1 "副作用"还是"外部依赖"？](#91-副作用还是外部依赖)
+  - [9.2 更精确的判断标准：外部依赖](#92-更精确的判断标准外部依赖-external-dependency)
+  - [9.3 副作用 ⊃ 外部依赖](#93-副作用--外部依赖)
+  - [9.4 本工程的验证](#94-本工程的验证)
+  - [9.5 务实的例外：为什么 DB 没有被接口化](#95-务实的例外为什么-db-没有被接口化)
+  - [9.6 一句话总结](#96-一句话总结)
 
 ## 1. Go 的隐式接口：是的，这就是你理解的那样
 
@@ -224,7 +231,16 @@ svc := notifier.NewService(&slack.Webhook{URL: "https://hooks.slack.com/..."})
 
 ### 3.4 "Accept interfaces, return structs" 模式
 
+> **这是 Go 函数签名设计中最重要的一条原则。**
+
 Go 社区推崇的函数签名原则：**参数用接口（接受最小能力集），返回值用具体类型（给调用方完整能力）**。
+
+为什么这条原则如此重要？因为它同时解决了两个方向的问题：
+
+- **参数用接口** → 调用方灵活：任何满足接口的类型都能传入，函数的适用范围最大化
+- **返回值用具体类型** → 调用方强大：拿到完整类型，可以访问所有字段和方法，不丢失信息
+
+如果反过来做（参数用具体类型，返回值用接口），两边都会受限：调用方必须构造特定类型，拿到的返回值又只有接口定义的子集能力。
 
 ```go
 // 不好：接受具体类型，只能处理文件
@@ -246,6 +262,22 @@ CountWords(strings.NewReader("hello world"))
 CountWords(resp.Body)
 CountWords(gzipReader)
 ```
+
+#### 本工程实例：`FetchPackageArtifacts`
+
+阶段一重构产生的 `service/artifacts.go:FetchPackageArtifacts` 正是这条原则的体现：
+
+```go
+// 参数: IntegrationService（接口）— 接受任何满足接口的 CPI client
+// 返回: []db.Artifact（具体类型）— 给调用方完整的 Artifact 结构体
+func FetchPackageArtifacts(ctx context.Context, client IntegrationService, packageID string) ([]db.Artifact, error)
+```
+
+- Handler 层传入 `*cpi.CpiClient`（通过 `cpi.Manager.Get()` 获得）→ 满足 `IntegrationService`
+- Version Compare 的 Trigger 通过 `IntegrationFactory` 获得的 client → 同样满足 `IntegrationService`
+- 测试时传入 mock → 同样满足 `IntegrationService`
+
+**一个函数，三个完全不同的调用场景，零代码修改。** 这就是"参数用接口"的威力。
 
 ### 3.5 能力对比总结
 
@@ -481,6 +513,174 @@ func (h *Handler) NativeDeliver(ctx *gin.Context) {
 | Go 的接口满足规则？ | 任何类型实现了接口的全部方法就自动满足，无需显式声明 |
 | 为什么这样设计？ | 避免类型层级的脆弱性，支持事后定义接口，兼顾 duck typing 灵活性和编译期安全性 |
 | 接口的目的？ | Service 层可测试性——通过接口注入 mock 来单元测试业务逻辑 |
+| 什么方法需要接口化？ | 跨越 I/O 边界的外部依赖调用（非"副作用"——后者是超集，日志等副作用通常不值得接口化） |
+| DB 为什么没有接口化？ | GORM 链式 API 表面太大，接口化成本过高；SQLite 内存 DB 提供了可接受的测试方案（务实的 trade-off） |
+| 函数签名原则？ | **参数用接口，返回值用具体类型**——调用方灵活性最大化，返回信息无损失 |
 | 为什么不包含所有方法？ | Go 接口隔离原则——只定义消费方需要的最小方法集 |
 | Service 层的设计原则是否是最佳实践？ | 是。"复杂编排逻辑放 Service，passthrough 留 Handler"是标准分层架构 |
 | 需要调整的地方？ | `NativeDeliver` 应迁到 Service（严重），`CreateDr`/`UpdateDr`/`UpsertDeliveryRule` 的业务逻辑应迁到 Service（中等） |
+
+## 9. 接口化的核心场景：隔离 I/O 边界
+
+### 9.1 "副作用"还是"外部依赖"？
+
+一个自然的直觉是：**需要被接口化的方法都是具有副作用的。** 这个观察方向正确，但不够精确。
+
+在函数式编程语境下，"副作用"(side effect) 指函数除了返回值以外对外部世界产生的任何可观察影响：网络请求、磁盘 I/O、数据库写入、修改全局状态等。按这个定义，`IntegrationService` 的所有方法确实都有副作用——它们全部发 HTTP 请求到 CPI API。
+
+但问题在于：
+
+| 方法 | 副作用类型 | 改变了外部状态？ |
+|---|---|---|
+| `DeployArtifact` | HTTP POST | 是（触发部署） |
+| `GetPackageIflows` | HTTP GET | 否（只读） |
+| `GetRuntimeArtifacts` | HTTP GET | 否（只读） |
+| `RuntimeArtifact` | HTTP GET | 否（只读） |
+
+GET 请求是幂等的读操作，在日常理解中通常不被认为是"副作用"。但在 FP 严格定义下它们确实是（非纯函数，结果依赖外部状态，不可预测）。所以"副作用"这个词**方向正确但容易引起歧义**。
+
+### 9.2 更精确的判断标准：外部依赖 (External Dependency)
+
+需要被接口化的方法的真正共同特征是：**依赖外部系统，其行为在测试环境中不可控。**
+
+```
+需要接口化（跨越 I/O 边界）:
+  CpiClient.GetPackageIflows()       → 依赖 CPI API（外部 HTTP 服务）
+  CpiClient.DeployArtifact()         → 依赖 CPI API（外部 HTTP 服务）
+  TmsClient.ImportTransportRequest() → 依赖 TMS API（外部 HTTP 服务）
+  DB 操作                             → 依赖 PostgreSQL（外部数据库）
+
+不需要接口化（纯内存计算）:
+  WrapArtifact(type, item)            → 输入确定，输出确定，无外部依赖
+  SourceAndRoute() 的 BFS 图算法部分   → 纯计算逻辑
+  strings.ToUpper("hello")            → 标准库纯函数
+```
+
+`WrapArtifact` 没有副作用（纯函数），也不需要接口化——因为它没有外部依赖，测试时直接调用即可，结果完全可预测。这就是为什么在阶段一重构中，`WrapArtifact` 被提取为一个**导出函数**而非**接口方法**。
+
+### 9.3 副作用 ⊃ 外部依赖
+
+"副作用"是"外部依赖"的超集：
+
+```
+┌─────────────────────────────────────────┐
+│ 副作用 (Side Effects)                    │
+│                                          │
+│  ┌──────────────────────────────────┐    │
+│  │ 外部依赖 (External Dependencies) │    │
+│  │                                   │    │
+│  │  CPI API 调用  ← 已接口化        │    │
+│  │  TMS API 调用  ← 已接口化        │    │
+│  │  Email/JIRA    ← 已接口化        │    │
+│  │  DB 读写       ← 未接口化*       │    │
+│  │                                   │    │
+│  └──────────────────────────────────┘    │
+│                                          │
+│  写日志     ← 通常不值得接口化            │
+│  修改局部变量 ← 不需要接口化              │
+│  读环境变量   ← 视情况而定                │
+│                                          │
+└─────────────────────────────────────────┘
+
+* DB 是外部依赖但未接口化——这是务实的 trade-off，详见 9.5 节。
+```
+
+所有外部依赖调用都有副作用，但并非所有有副作用的代码都需要接口化。写日志也是副作用，但通常不值得为它定义接口。
+
+### 9.4 本工程的验证
+
+回看本工程的外部依赖，每一个都跨越了 I/O 边界：
+
+| 外部依赖 | I/O 边界 | 是否接口化 | 方式 |
+|---|---|---|---|
+| CPI API | HTTP REST | 是 | `IntegrationService` (7 方法) |
+| TMS API | HTTP REST | 是 | `TransportService` (6 方法) |
+| Email / JIRA | SMTP / HTTP | 是 | `Notifier` (3 方法) |
+| PostgreSQL | TCP/SQL | **否** | 直接持有 `*gorm.DB` |
+
+前三者通过接口隔离，DB 直接持有具体类型——这不是疏忽，而是务实的 trade-off。
+
+而不在接口中的方法（如 Handler 层的 passthrough 调用）同样跨越 I/O 边界，但它们不需要接口化——因为 Handler 层的设计目标不是可单元测试的业务逻辑，而是薄薄的 HTTP 胶水层。
+
+**结论**：接口化 = I/O 边界隔离 + 消费方需要可测试性 + 抽象成本合理。三个条件需综合权衡。
+
+### 9.5 务实的例外：为什么 DB 没有被接口化
+
+`Service` struct 直接持有 `*gorm.DB`，而 TMS、CPI、Notifier 全部通过接口注入。这确实打破了"外部依赖应接口化"的一致性。但这是 Go 社区广泛接受的 trade-off，原因有三：
+
+#### 原因一：GORM 的 API 表面太大
+
+`*gorm.DB` 不是一个简单的 CRUD client。它是 query builder + ORM，调用方式是链式的：
+
+```go
+s.DB.Where("delivery_rule_id = ?", ruleID).
+    Preload("SourceTenant").
+    Preload("IncludedTenants").
+    First(&rule)
+```
+
+要把这接口化，需要抽象 `Where`、`Preload`、`First`、`Create`、`Save`、`Delete`、`Model`、`Association`、`Transaction` 等几十个方法的组合行为。定义一个 `DatabaseService` 接口要么变成 `gorm.DB` 的完整镜像（违反接口隔离原则），要么只覆盖部分查询模式的 Repository 接口（需要为每个实体写一套方法）。
+
+对比 TMS/CPI：它们的 API 是**离散的、可枚举的方法调用**（`GetNodes`、`DeployArtifact`），天然适合接口抽象。
+
+#### 原因二：GORM 自身提供了测试方案
+
+GORM 支持 SQLite 内存数据库：
+
+```go
+db, _ := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+db.AutoMigrate(&DeliveryRule{}, &VersionCompareSnapshot{}, ...)
+svc := &Service{DB: db}  // 用真实的 gorm.DB，但后端是内存 SQLite
+```
+
+这给了接近真实行为的测试，不需要 mock。而 CPI/TMS 没有这种内存替代——它们是远程 HTTP 服务，**必须**通过接口 mock。
+
+#### 原因三：Go 社区的主流实践
+
+| 策略 | 适用场景 | 代价 |
+|---|---|---|
+| 直接持有 `*gorm.DB` | 中小型项目，GORM 用得深 | 零额外抽象，SQLite 内存测试 |
+| Repository 接口 | 大型项目，需要切换存储后端 | 每实体写接口 + 实现 + mock |
+| `sqlc` 生成类型安全查询 | 偏好 SQL 优先 | 需要维护 SQL 文件 |
+
+Repository 模式大概长这样：
+
+```go
+type DeliveryRuleRepository interface {
+    GetByID(ctx context.Context, id uint) (*db.DeliveryRule, error)
+    GetWithTenants(ctx context.Context, id uint) (*db.DeliveryRule, error)
+    List(ctx context.Context) ([]db.DeliveryRule, error)
+}
+
+type VersionCompareRepository interface {
+    GetSnapshot(ctx context.Context, ruleID uint) (*db.VersionCompareSnapshot, error)
+    UpsertSnapshot(ctx context.Context, snapshot *db.VersionCompareSnapshot) error
+    AtomicSetRunning(ctx context.Context, ruleID uint, ...) (bool, error)
+}
+```
+
+能让 service 层完全不依赖 GORM，测试时用纯内存 map 实现。但代价是**每个实体、每种查询模式都要写接口方法 + 实现**，对本项目规模来说工程量不成比例。
+
+#### 判断标准：何时该考虑 Repository 抽象
+
+如果未来出现以下信号，再引入 Repository 接口：
+
+- 需要切换数据库引擎（PostgreSQL → MySQL / MongoDB）
+- Service 层需要纯 mock 级别的 DB 测试（不想依赖 SQLite 行为差异）
+- 查询逻辑重复严重，需要集中管理和复用
+- 团队规模增大，需要更严格的分层边界
+
+#### 对 9.3 图的修正
+
+这个例外意味着 9.3 的集合关系图需要补充一个维度——**不是所有外部依赖都值得接口化**，决策取决于抽象成本与收益的比较：
+
+| 外部依赖 | API 形状 | 内存替代方案 | 接口化成本 | 决策 |
+|---|---|---|---|---|
+| CPI API | 离散方法调用 | 无 | 低（7 个方法） | **接口化** |
+| TMS API | 离散方法调用 | 无 | 低（6 个方法） | **接口化** |
+| Email/JIRA | 离散方法调用 | 无 | 低（3 个方法） | **接口化** |
+| PostgreSQL (GORM) | 链式 query builder | SQLite 内存 | 高（几十个组合） | **直接持有** |
+
+### 9.6 一句话总结
+
+> **接口化的核心场景是隔离 I/O 边界（外部系统依赖），使 service 层的业务逻辑可以独立于具体实现进行测试和演化。DB 是一个务实的例外——GORM 的链式 API 使接口抽象成本过高，而 SQLite 内存数据库提供了可接受的替代测试方案。**

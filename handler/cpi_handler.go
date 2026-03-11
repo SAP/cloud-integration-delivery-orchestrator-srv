@@ -5,9 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	. "mmt-delivery/consts"
-	"mmt-delivery/db"
-	"mmt-delivery/pkg/cpi"
+	"mmt-delivery/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -59,7 +57,7 @@ func (h *Handler) GetPackageIflowsHandler(ctx *gin.Context) {
 }
 
 // include type: script collection, iflow artifacts
-// TODO: may call cpi-cookie-service to get all artifacts in one call
+// Delegates to service.FetchPackageArtifacts for unified artifact retrieval.
 func (h *Handler) GetPackageArtifactsHandler(ctx *gin.Context) {
 	cpi_tenant := ctx.Query("tenant")
 	packageID := ctx.Query("package")
@@ -68,62 +66,14 @@ func (h *Handler) GetPackageArtifactsHandler(ctx *gin.Context) {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"status": http.StatusInternalServerError, "result": fmt.Sprintf("failed to create cpi client: %s", err)})
 		return
 	}
-	artifactResp := make([]db.Artifact, 0)
-	iflows, err := client.GetPackageIflows(ctx, packageID)
+	artifacts, err := service.FetchPackageArtifacts(ctx, client, packageID)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"status": http.StatusInternalServerError, "result": fmt.Sprintf("failed to get iflows: %s", err)})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"status": http.StatusInternalServerError, "result": fmt.Sprintf("failed to get artifacts: %s", err)})
 		return
-	}
-	scriptColls, err := client.GetPackageScriptcollections(ctx, packageID)
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"status": http.StatusInternalServerError, "result": fmt.Sprintf("failed to get script collections: %s", err)})
-		return
-	}
-	for _, v := range scriptColls {
-		artifactResp = append(artifactResp, wrapArtifact(Artifact_Type_Sc, v))
-	}
-	for _, v := range iflows {
-		artifactResp = append(artifactResp, wrapArtifact("Integration Flow", v))
 	}
 	ctx.JSON(http.StatusOK, gin.H{
-		"result": artifactResp,
+		"result": artifacts,
 	})
-
-}
-
-// wrapArtifact normalizes CPI items (script collection or iflow) into a db.Artifact DTO (not persisted here).
-// Both ScriptCollectionItem and IflowItem embed ArtifactCommonItem so we only need those fields.
-func wrapArtifact(artifactType ArtifactType, artifact any) db.Artifact {
-	switch v := artifact.(type) {
-	case cpi.ScriptCollectionItem:
-		return db.Artifact{
-			TechID:      v.ID,
-			Version:     v.Version,
-			PackageID:   v.PackageID,
-			Name:        v.Name,
-			Description: v.Description,
-			Type:        artifactType,
-			CreatedBy:   v.CreatedBy,
-			CreatedAt:   v.CreatedAt,
-			ModifiedBy:  v.ModifiedBy,
-			ModifiedAt:  v.ModifiedAt,
-		}
-	case cpi.IflowItem:
-		return db.Artifact{
-			TechID:      v.ID,
-			Version:     v.Version,
-			PackageID:   v.PackageID,
-			Name:        v.Name,
-			Description: v.Description,
-			Type:        artifactType,
-			CreatedBy:   v.CreatedBy,
-			CreatedAt:   v.CreatedAt,
-			ModifiedBy:  v.ModifiedBy,
-			ModifiedAt:  v.ModifiedAt,
-		}
-	default:
-		return db.Artifact{Type: artifactType}
-	}
 }
 
 // do not return entire destination instance, hide credentials

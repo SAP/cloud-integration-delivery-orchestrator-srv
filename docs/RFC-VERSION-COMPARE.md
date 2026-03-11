@@ -424,8 +424,8 @@ func wrapArtifact(artifactType consts.ArtifactType, artifact any) db.Artifact { 
 | `handler/handler.go` | 注册新路由（2 个端点） |
 | `handler/version_compare.go` | **新建** — Trigger + Query handler |
 | `handler/cpi_handler.go` | 移除 `wrapArtifact`，`GetPackageArtifactsHandler` 改为调用 `service.FetchPackageArtifacts` |
-| `pkg/cpi/tenant_compare.go` | 重写 — 定义 SnapshotData 等数据结构 |
-| `db/version_compare.go` | **新建** — `VersionCompareSnapshot` model |
+| `pkg/cpi/tenant_compare.go` | 清理空桩代码，数据结构统一定义在 `db/version_compare.go` |
+| `db/version_compare.go` | **新建** — `VersionCompareSnapshot` model + `SnapshotData` 等 JSON 序列化类型 |
 | `db/conn.go` | AutoMigrate 新增 model |
 | `service/version_compare_test.go` | **新建** — 单元测试 |
 
@@ -574,15 +574,20 @@ HomeView
 
 ## 7. 执行阶段
 
-### 阶段一: 后端 — 接口扩展 + 数据结构 + Artifact 中心函数
+### 阶段一: 后端 — 接口扩展 + 数据结构 + Artifact 中心函数 ✅
 
-- [ ] 扩展 `IntegrationService` 接口（新增 3 个方法）
-- [ ] 定义数据结构: `VersionCompareSnapshot`, `SnapshotData`, `PackageSnapshot`, `ArtifactSnapshot`, `ArtifactVersionInfo`
-- [ ] 定义 DB model 并注册 AutoMigrate
-- [ ] 将 `wrapArtifact` 从 `handler/cpi_handler.go` 迁移到 `service/artifacts.go`
-- [ ] 实现 `FetchPackageArtifacts` 中心函数（`service/artifacts.go`）
-- [ ] 回改 `GetPackageArtifactsHandler` 调用 `service.FetchPackageArtifacts`
-- [ ] 确保现有测试通过
+- [x] 扩展 `IntegrationService` 接口（新增 3 个方法）— `service/service.go:29-41`
+- [x] 定义数据结构: `VersionCompareSnapshot`, `SnapshotData`, `PackageSnapshot`, `ArtifactSnapshot`, `ArtifactVersionInfo` — `db/version_compare.go`
+- [x] 定义 DB model 并注册 AutoMigrate — `db/conn.go:59`
+- [x] 将 `wrapArtifact` 从 `handler/cpi_handler.go` 迁移到 `service/artifacts.go`（导出为 `WrapArtifact`）
+- [x] 实现 `FetchPackageArtifacts` 中心函数（`service/artifacts.go`，使用 errgroup 并发获取 iflow + SC）
+- [x] 回改 `GetPackageArtifactsHandler` 调用 `service.FetchPackageArtifacts` — `handler/cpi_handler.go:61-77`
+- [x] 确保编译通过（`go build ./...` + `go vet ./...` 零错误）
+
+> **实现备注**:
+> - `CpiClient` 已实现全部 7 个 `IntegrationService` 方法，无需额外 adapter struct
+> - 数据结构统一放在 `db/version_compare.go`（而非 `pkg/cpi/tenant_compare.go`），因为 `SnapshotData` 等类型通过 `gorm:"serializer:json"` 与 DB model 紧耦合
+> - `pkg/cpi/tenant_compare.go` 原有的空桩代码已清理，仅保留 package comment 指向新位置
 
 ### 阶段二: 后端 — Service 层实现
 
