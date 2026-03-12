@@ -30,6 +30,11 @@ type DeliveryRequest struct {
 
 	Conditions []Condition `gorm:"foreignKey:DeliveryRequestID"`
 
+	// Optional FK to VersionCompareSnapshot — set when DR is auto-created from version compare mismatch.
+	// nil for manually created DRs.
+	VersionCompareSnapshotID *uint                   `json:"versionCompareSnapshotID,omitempty"`
+	VersionCompareSnapshot   *VersionCompareSnapshot `gorm:"foreignKey:VersionCompareSnapshotID" json:"-"`
+
 	CreatedBy string
 	UpdatedBy string
 }

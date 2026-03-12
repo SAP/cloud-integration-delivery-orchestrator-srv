@@ -14,8 +14,8 @@ import (
 // add approvers
 // currentUserID, approvers: subject/user_id in JWT claim
 func (s *Service) RequestApproval(drID uint, currentUserID string, approvers []string, comment string) error {
-	var dr db.DeliveryRequest
-	if err := s.DB.First(&dr, drID).Error; err != nil {
+	dr, err := s.QueryDrWithAssociations(drID)
+	if err != nil {
 		return fmt.Errorf("delivery request #%d not found", drID)
 	}
 
@@ -25,6 +25,12 @@ func (s *Service) RequestApproval(drID uint, currentUserID string, approvers []s
 	if dr.AggregateStatus != lifecycle.AggPending && dr.AggregateStatus != lifecycle.AggWaitingApprove {
 		return fmt.Errorf("only pending delivery request can be submitted for approval, current status: %s", dr.AggregateStatus)
 	}
+
+	// Validate all ops have valid TRs before submitting for approval
+	if _, err := s.BatchTrExist(dr.ArtifactTenantOperations, &dr.SourceTenant); err != nil {
+		return err
+	}
+
 	requesterEmail, err := s.GetUserEmail(context.Background(), currentUserID)
 	if err != nil {
 		return err
@@ -46,7 +52,7 @@ func (s *Service) RequestApproval(drID uint, currentUserID string, approvers []s
 			}
 		}()
 	}
-	if err := s.DB.Model(&dr).Updates(db.DeliveryRequest{
+	if err := s.DB.Model(dr).Updates(db.DeliveryRequest{
 		AggregateStatus: lifecycle.AggWaitingApprove,
 		Approvers:       approvers,
 		UpdatedBy:       currentUserID,
@@ -82,6 +88,12 @@ func (s *Service) Approve(drID uint, approverID string) (*db.DeliveryRequest, er
 	if dr.CreatedBy == approverID && !dr.DeliveryRule.SkipApprove {
 		return nil, fmt.Errorf("cannot approve your own delivery request")
 	}
+
+	// Validate all ops have valid TRs before approving
+	if _, err := s.BatchTrExist(dr.ArtifactTenantOperations, &dr.SourceTenant); err != nil {
+		return nil, err
+	}
+
 	now := time.Now()
 	// send email notification asynchronously
 	go func() {
@@ -100,7 +112,7 @@ func (s *Service) Approve(drID uint, approverID string) (*db.DeliveryRequest, er
 			})
 		}
 	}()
-	// no need to call TrExist, for it will be done in update/insert ops.
+	// TR validation is done via BatchTrExist above, before setting approved status.
 	if err := s.DB.Model(&dr).Updates(db.DeliveryRequest{
 		AggregateStatus: lifecycle.AggAwaitingImport,
 		ApprovedBy:      approverID,

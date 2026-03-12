@@ -261,10 +261,12 @@ func (s *Service) InsertTenantOps(drID uint, ops []db.ArtifactTenantOperation, u
 			errOps[op.ID] = err
 			continue
 		}
-		// check TR
-		if _, err := s.TrExist(op, &sourceTenant); err != nil {
-			errOps[op.ID] = fmt.Errorf("transport request check failed for artifact %s: %s", op.ArtifactTechID, err)
-			continue
+		// check TR — skip when TR is empty (allows auto-created ops from version compare to be saved without TR)
+		if op.TransportRequestNumber != "" {
+			if _, err := s.TrExist(op, &sourceTenant); err != nil {
+				errOps[op.ID] = fmt.Errorf("transport request check failed for artifact %s: %s", op.ArtifactTechID, err)
+				continue
+			}
 		}
 		op.CreatedAt, op.CreatedBy = time.Now(), user
 		op.Artifact = a
@@ -309,10 +311,14 @@ func (s *Service) UpdateTenantOps(drID uint, ops []db.ArtifactTenantOperation, u
 			continue
 		}
 		if existingOp.TransportRequestNumber != draftOp.TransportRequestNumber {
-			if _, err := s.TrExist(draftOp, &sourceTenant); err != nil {
-				errOps[draftOp.ID] = fmt.Errorf("transport request check failed for artifact %s, new %s, old: %s: %s",
-					draftOp.ArtifactTechID, draftOp.TransportRequestNumber, existingOp.TransportRequestNumber, err)
-				continue
+			// Only validate TR when the new value is non-empty (empty→non-empty or non-empty→different non-empty).
+			// Skip when new TR is empty (allows clearing TR or keeping it empty for auto-created ops).
+			if draftOp.TransportRequestNumber != "" {
+				if _, err := s.TrExist(draftOp, &sourceTenant); err != nil {
+					errOps[draftOp.ID] = fmt.Errorf("transport request check failed for artifact %s, new %s, old: %s: %s",
+						draftOp.ArtifactTechID, draftOp.TransportRequestNumber, existingOp.TransportRequestNumber, err)
+					continue
+				}
 			}
 		}
 		existingOp.UpdatedBy = user
