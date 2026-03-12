@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"mmt-delivery/consts"
 	"mmt-delivery/db"
 	"mmt-delivery/pkg/cpi"
 
@@ -21,7 +22,7 @@ const versionCompareCooldown = 5 * time.Minute
 
 // TriggerResult is returned immediately by TriggerVersionCompare.
 type TriggerResult struct {
-	Status string `json:"status"` // "running" | "rate_limited" | "conflict"
+	Status consts.TriggerStatus `json:"status"`
 }
 
 // TriggerVersionCompare starts an asynchronous version snapshot collection for a Delivery Rule.
@@ -52,9 +53,9 @@ func (s *Service) TriggerVersionCompare(ruleID uint, triggeredBy string) (Trigge
 	// 2. Rate-limit check
 	var existing db.VersionCompareSnapshot
 	found := s.DB.Where("delivery_rule_id = ?", ruleID).First(&existing).Error == nil
-	if found && existing.Status == "completed" && existing.CompletedAt != nil {
+	if found && existing.Status == consts.SnapshotStatusCompleted && existing.CompletedAt != nil {
 		if time.Since(*existing.CompletedAt) < versionCompareCooldown {
-			return TriggerResult{Status: "rate_limited"}, nil
+			return TriggerResult{Status: consts.TriggerStatusRateLimited}, nil
 		}
 	}
 
@@ -64,9 +65,9 @@ func (s *Service) TriggerVersionCompare(ruleID uint, triggeredBy string) (Trigge
 		// Try to update only if NOT already running
 		emptyDataJSON, _ := json.Marshal(db.SnapshotData{})
 		result := s.DB.Model(&db.VersionCompareSnapshot{}).
-			Where("delivery_rule_id = ? AND status != ?", ruleID, "running").
+			Where("delivery_rule_id = ? AND status != ?", ruleID, consts.SnapshotStatusRunning).
 			Updates(map[string]any{
-				"status":       "running",
+				"status":       consts.SnapshotStatusRunning,
 				"triggered_at": now,
 				"triggered_by": triggeredBy,
 				"completed_at": nil,
@@ -78,13 +79,13 @@ func (s *Service) TriggerVersionCompare(ruleID uint, triggeredBy string) (Trigge
 		}
 		if result.RowsAffected == 0 {
 			// Already running
-			return TriggerResult{Status: "conflict"}, nil
+			return TriggerResult{Status: consts.TriggerStatusConflict}, nil
 		}
 	} else {
 		// First trigger for this rule — create new record
 		snapshot := db.VersionCompareSnapshot{
 			DeliveryRuleID: ruleID,
-			Status:         "running",
+			Status:         consts.SnapshotStatusRunning,
 			TriggeredAt:    now,
 			TriggeredBy:    triggeredBy,
 		}
@@ -97,7 +98,7 @@ func (s *Service) TriggerVersionCompare(ruleID uint, triggeredBy string) (Trigge
 	go s.collectVersionSnapshot(rule)
 
 	// 5. Return immediately
-	return TriggerResult{Status: "running"}, nil
+	return TriggerResult{Status: consts.TriggerStatusRunning}, nil
 }
 
 // collectVersionSnapshot is the background worker that fetches all artifact versions
@@ -110,7 +111,7 @@ func (s *Service) collectVersionSnapshot(rule db.DeliveryRule) {
 		s.DB.Model(&db.VersionCompareSnapshot{}).
 			Where("delivery_rule_id = ?", rule.ID).
 			Updates(map[string]any{
-				"status":       "failed",
+				"status":       consts.SnapshotStatusFailed,
 				"completed_at": &now,
 				"error":        errMsg,
 			})
@@ -229,7 +230,7 @@ func (s *Service) collectVersionSnapshot(rule db.DeliveryRule) {
 	s.DB.Model(&db.VersionCompareSnapshot{}).
 		Where("delivery_rule_id = ?", rule.ID).
 		Updates(map[string]any{
-			"status":       "completed",
+			"status":       consts.SnapshotStatusCompleted,
 			"completed_at": &now,
 			"data":         string(dataJSON),
 			"error":        "",
@@ -335,7 +336,7 @@ type VersionCompareQueryParams struct {
 
 // VersionCompareResponse is the response for the query endpoint.
 type VersionCompareResponse struct {
-	Status      string                     `json:"status"` // "none" | "running" | "completed" | "failed"
+	Status      consts.SnapshotStatus      `json:"status"`
 	TriggeredAt *time.Time                 `json:"triggeredAt,omitempty"`
 	CompletedAt *time.Time                 `json:"completedAt,omitempty"`
 	TriggeredBy string                     `json:"triggeredBy,omitempty"`
@@ -381,7 +382,7 @@ func (s *Service) QueryVersionCompare(ruleID uint, params VersionCompareQueryPar
 	var snapshot db.VersionCompareSnapshot
 	if err := s.DB.Where("delivery_rule_id = ?", ruleID).First(&snapshot).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return VersionCompareResponse{Status: "none"}, nil
+			return VersionCompareResponse{Status: consts.SnapshotStatusNone}, nil
 		}
 		return VersionCompareResponse{}, fmt.Errorf("failed to query snapshot: %w", err)
 	}
@@ -395,7 +396,7 @@ func (s *Service) QueryVersionCompare(ruleID uint, params VersionCompareQueryPar
 	}
 
 	// If not completed, return status only (no data)
-	if snapshot.Status != "completed" {
+	if snapshot.Status != consts.SnapshotStatusCompleted {
 		return resp, nil
 	}
 
@@ -500,16 +501,16 @@ func (s *Service) QueryVersionCompare(ruleID uint, params VersionCompareQueryPar
 
 // VersionCompareSummaryItem represents one rule's snapshot summary (for the card list page).
 type VersionCompareSummaryItem struct {
-	DeliveryRuleID   uint       `json:"deliveryRuleID"`
-	DeliveryRuleName string     `json:"deliveryRuleName"`
-	SourceTenantName string     `json:"sourceTenantName"`
-	TenantCount      int        `json:"tenantCount"`
-	Status           string     `json:"status"`
-	TriggeredAt      *time.Time `json:"triggeredAt,omitempty"`
-	CompletedAt      *time.Time `json:"completedAt,omitempty"`
-	MatchedCount     int        `json:"matchedCount"`
-	MismatchedCount  int        `json:"mismatchedCount"`
-	TotalArtifacts   int        `json:"totalArtifacts"`
+	DeliveryRuleID   uint                  `json:"deliveryRuleID"`
+	DeliveryRuleName string                `json:"deliveryRuleName"`
+	SourceTenantName string                `json:"sourceTenantName"`
+	TenantCount      int                   `json:"tenantCount"`
+	Status           consts.SnapshotStatus `json:"status"`
+	TriggeredAt      *time.Time            `json:"triggeredAt,omitempty"`
+	CompletedAt      *time.Time            `json:"completedAt,omitempty"`
+	MatchedCount     int                   `json:"matchedCount"`
+	MismatchedCount  int                   `json:"mismatchedCount"`
+	TotalArtifacts   int                   `json:"totalArtifacts"`
 }
 
 // GetVersionCompareSummary returns snapshot summaries for all delivery rules (for the card list).
@@ -548,14 +549,14 @@ func (s *Service) GetVersionCompareSummary() ([]VersionCompareSummaryItem, error
 			item.TriggeredAt = &snap.TriggeredAt
 			item.CompletedAt = snap.CompletedAt
 
-			if snap.Status == "completed" {
+			if snap.Status == consts.SnapshotStatusCompleted {
 				matched, mismatched, total := computeMismatchCounts(snap.Data)
 				item.MatchedCount = matched
 				item.MismatchedCount = mismatched
 				item.TotalArtifacts = total
 			}
 		} else {
-			item.Status = "none"
+			item.Status = consts.SnapshotStatusNone
 		}
 
 		items = append(items, item)
@@ -594,11 +595,11 @@ func (s *Service) GetVersionCompareCounts() (VersionCompareCounts, error) {
 	for _, rule := range rules {
 		snap, ok := snapshotMap[rule.ID]
 		if !ok {
-			counts.StatusCounts["no_data"]++
+			counts.StatusCounts[string(consts.SnapshotStatusNone)]++
 			continue
 		}
-		if snap.Status != "completed" {
-			counts.StatusCounts[snap.Status]++
+		if snap.Status != consts.SnapshotStatusCompleted {
+			counts.StatusCounts[string(snap.Status)]++
 			continue
 		}
 
@@ -648,8 +649,8 @@ func computeMismatchCounts(data db.SnapshotData) (matched, mismatched, total int
 	return
 }
 
-// parsePackageIDs splits a comma-separated string into a slice of package IDs.
-func parsePackageIDs(raw string) []string {
+// ParsePackageIDs splits a comma-separated string into a slice of package IDs.
+func ParsePackageIDs(raw string) []string {
 	if raw == "" {
 		return nil
 	}

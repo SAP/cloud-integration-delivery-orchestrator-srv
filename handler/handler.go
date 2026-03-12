@@ -101,6 +101,12 @@ func (h *Handler) SetupRoutes(v1 *gin.RouterGroup, v2 *gin.RouterGroup, router *
 	v1.GET("/deliveryRequest/counts", h.DeliveryRequestCounts)
 	v1.GET("/cpiTenant/counts", h.CpiTenantCounts)
 	v1.GET("/deliveryRule/counts", h.DeliveryRuleCounts)
+	v1.GET("/versionCompare/counts", h.VersionCompareCountsHandler)
+
+	// Version Compare
+	v1.POST("/deliveryRule/:id/versionCompare/trigger", h.TriggerVersionCompareHandler)
+	v1.GET("/deliveryRule/:id/versionCompare", h.QueryVersionCompareHandler)
+	v1.GET("/versionCompare/summary", h.VersionCompareSummaryHandler)
 
 	// v2
 	v2.POST("/deliver", h.NativeDeliver)

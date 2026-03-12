@@ -56,3 +56,24 @@ const (
 	LongRequestTimeout    = 60 * time.Second // GET 请求（大数据量，如日志、文件下载）
 	ImportTimeout         = 60 * time.Second // POST/DELETE 请求（Import、Deploy、Upload、Undeploy）
 )
+
+// --- Version Compare ---
+
+// SnapshotStatus represents the state of a VersionCompareSnapshot record.
+type SnapshotStatus string
+
+const (
+	SnapshotStatusRunning   SnapshotStatus = "running"
+	SnapshotStatusCompleted SnapshotStatus = "completed"
+	SnapshotStatusFailed    SnapshotStatus = "failed"
+	SnapshotStatusNone      SnapshotStatus = "none" // virtual: no DB record exists
+)
+
+// TriggerStatus represents the outcome of a TriggerVersionCompare call.
+type TriggerStatus string
+
+const (
+	TriggerStatusRunning     TriggerStatus = "running"
+	TriggerStatusRateLimited TriggerStatus = "rate_limited"
+	TriggerStatusConflict    TriggerStatus = "conflict"
+)

@@ -3,6 +3,7 @@ package db
 import (
 	"encoding/json"
 	"fmt"
+	"mmt-delivery/consts"
 	"testing"
 	"time"
 )
@@ -15,7 +16,7 @@ func TestVersionCompareSnapshot_CreateAndRead(t *testing.T) {
 	now := time.Now().Truncate(time.Microsecond) // pg precision: microsecond
 	snap := VersionCompareSnapshot{
 		DeliveryRuleID: 100,
-		Status:         "running",
+		Status:         consts.SnapshotStatusRunning,
 		TriggeredAt:    now,
 		TriggeredBy:    "user@example.com",
 	}
@@ -33,8 +34,8 @@ func TestVersionCompareSnapshot_CreateAndRead(t *testing.T) {
 	if loaded.DeliveryRuleID != 100 {
 		t.Errorf("DeliveryRuleID: got %d, want 100", loaded.DeliveryRuleID)
 	}
-	if loaded.Status != "running" {
-		t.Errorf("Status: got %q, want %q", loaded.Status, "running")
+	if loaded.Status != consts.SnapshotStatusRunning {
+		t.Errorf("Status: got %q, want %q", loaded.Status, consts.SnapshotStatusRunning)
 	}
 	if loaded.TriggeredBy != "user@example.com" {
 		t.Errorf("TriggeredBy: got %q, want %q", loaded.TriggeredBy, "user@example.com")
@@ -54,7 +55,7 @@ func TestVersionCompareSnapshot_UniqueIndex(t *testing.T) {
 
 	snap1 := VersionCompareSnapshot{
 		DeliveryRuleID: 200,
-		Status:         "completed",
+		Status:         consts.SnapshotStatusCompleted,
 		TriggeredAt:    time.Now(),
 		TriggeredBy:    "user1",
 	}
@@ -64,7 +65,7 @@ func TestVersionCompareSnapshot_UniqueIndex(t *testing.T) {
 
 	snap2 := VersionCompareSnapshot{
 		DeliveryRuleID: 200,
-		Status:         "running",
+		Status:         consts.SnapshotStatusRunning,
 		TriggeredAt:    time.Now(),
 		TriggeredBy:    "user2",
 	}
@@ -121,7 +122,7 @@ func TestVersionCompareSnapshot_JSONRoundTrip(t *testing.T) {
 
 	snap := VersionCompareSnapshot{
 		DeliveryRuleID: 300,
-		Status:         "completed",
+		Status:         consts.SnapshotStatusCompleted,
 		TriggeredAt:    time.Now().Truncate(time.Microsecond),
 		CompletedAt:    &completedAt,
 		TriggeredBy:    "test-user",
@@ -226,7 +227,7 @@ func TestVersionCompareSnapshot_EmptyData(t *testing.T) {
 
 	snap := VersionCompareSnapshot{
 		DeliveryRuleID: 400,
-		Status:         "running",
+		Status:         consts.SnapshotStatusRunning,
 		TriggeredAt:    time.Now(),
 		TriggeredBy:    "user",
 		Data:           SnapshotData{},
@@ -257,7 +258,7 @@ func TestVersionCompareSnapshot_StatusTransition(t *testing.T) {
 
 	snap := VersionCompareSnapshot{
 		DeliveryRuleID: 500,
-		Status:         "running",
+		Status:         consts.SnapshotStatusRunning,
 		TriggeredAt:    time.Now().Truncate(time.Microsecond),
 		TriggeredBy:    "trigger-user",
 	}
@@ -278,7 +279,7 @@ func TestVersionCompareSnapshot_StatusTransition(t *testing.T) {
 	result := testDB.Model(&VersionCompareSnapshot{}).
 		Where("delivery_rule_id = ?", uint(500)).
 		Updates(map[string]any{
-			"status":       "completed",
+			"status":       consts.SnapshotStatusCompleted,
 			"completed_at": &completedAt,
 			"data":         string(dataJSON),
 		})
@@ -293,8 +294,8 @@ func TestVersionCompareSnapshot_StatusTransition(t *testing.T) {
 	if err := testDB.Where("delivery_rule_id = ?", uint(500)).First(&loaded).Error; err != nil {
 		t.Fatalf("First failed: %v", err)
 	}
-	if loaded.Status != "completed" {
-		t.Errorf("Status: got %q, want %q", loaded.Status, "completed")
+	if loaded.Status != consts.SnapshotStatusCompleted {
+		t.Errorf("Status: got %q, want %q", loaded.Status, consts.SnapshotStatusCompleted)
 	}
 	if loaded.CompletedAt == nil {
 		t.Fatal("CompletedAt: expected non-nil")
@@ -315,7 +316,7 @@ func TestVersionCompareSnapshot_AtomicConcurrentProtection(t *testing.T) {
 	// Create a snapshot in "running" state
 	snap := VersionCompareSnapshot{
 		DeliveryRuleID: 600,
-		Status:         "running",
+		Status:         consts.SnapshotStatusRunning,
 		TriggeredAt:    time.Now(),
 		TriggeredBy:    "user1",
 	}
@@ -325,9 +326,9 @@ func TestVersionCompareSnapshot_AtomicConcurrentProtection(t *testing.T) {
 
 	// Try to update where status != 'running' — should affect 0 rows
 	result := testDB.Model(&VersionCompareSnapshot{}).
-		Where("delivery_rule_id = ? AND status != ?", uint(600), "running").
+		Where("delivery_rule_id = ? AND status != ?", uint(600), consts.SnapshotStatusRunning).
 		Updates(map[string]any{
-			"status":       "running",
+			"status":       consts.SnapshotStatusRunning,
 			"triggered_at": time.Now(),
 			"triggered_by": "user2",
 		})
@@ -343,15 +344,15 @@ func TestVersionCompareSnapshot_AtomicConcurrentProtection(t *testing.T) {
 	testDB.Model(&VersionCompareSnapshot{}).
 		Where("delivery_rule_id = ?", uint(600)).
 		Updates(map[string]any{
-			"status":       "completed",
+			"status":       consts.SnapshotStatusCompleted,
 			"completed_at": &completedAt,
 		})
 
 	// Now retry — should succeed since status is "completed"
 	result = testDB.Model(&VersionCompareSnapshot{}).
-		Where("delivery_rule_id = ? AND status != ?", uint(600), "running").
+		Where("delivery_rule_id = ? AND status != ?", uint(600), consts.SnapshotStatusRunning).
 		Updates(map[string]any{
-			"status":       "running",
+			"status":       consts.SnapshotStatusRunning,
 			"triggered_at": time.Now(),
 			"triggered_by": "user2",
 		})
@@ -373,7 +374,7 @@ func TestVersionCompareSnapshot_FailedWithError(t *testing.T) {
 
 	snap := VersionCompareSnapshot{
 		DeliveryRuleID: 700,
-		Status:         "failed",
+		Status:         consts.SnapshotStatusFailed,
 		TriggeredAt:    now,
 		CompletedAt:    &completedAt,
 		TriggeredBy:    "user",
@@ -387,8 +388,8 @@ func TestVersionCompareSnapshot_FailedWithError(t *testing.T) {
 	if err := testDB.First(&loaded, snap.ID).Error; err != nil {
 		t.Fatalf("First failed: %v", err)
 	}
-	if loaded.Status != "failed" {
-		t.Errorf("Status: got %q, want %q", loaded.Status, "failed")
+	if loaded.Status != consts.SnapshotStatusFailed {
+		t.Errorf("Status: got %q, want %q", loaded.Status, consts.SnapshotStatusFailed)
 	}
 	if loaded.Error != "failed to get source tenant CPI client: tenant not found" {
 		t.Errorf("Error: got %q, want full error message", loaded.Error)
@@ -404,7 +405,7 @@ func TestVersionCompareSnapshot_LookupByDeliveryRuleID(t *testing.T) {
 	for _, ruleID := range []uint{801, 802} {
 		snap := VersionCompareSnapshot{
 			DeliveryRuleID: ruleID,
-			Status:         "completed",
+			Status:         consts.SnapshotStatusCompleted,
 			TriggeredAt:    time.Now(),
 			TriggeredBy:    "user",
 			Data: SnapshotData{
@@ -462,7 +463,7 @@ func TestVersionCompareSnapshot_DataOverwriteOnRetrigger(t *testing.T) {
 	completedAt1 := time.Now().Truncate(time.Microsecond)
 	snap := VersionCompareSnapshot{
 		DeliveryRuleID: 900,
-		Status:         "completed",
+		Status:         consts.SnapshotStatusCompleted,
 		TriggeredAt:    time.Now().Truncate(time.Microsecond),
 		CompletedAt:    &completedAt1,
 		TriggeredBy:    "user1",
@@ -475,9 +476,9 @@ func TestVersionCompareSnapshot_DataOverwriteOnRetrigger(t *testing.T) {
 	// Second trigger — simulate the re-trigger flow: reset to running, then complete with new data
 	emptyDataJSON, _ := json.Marshal(SnapshotData{})
 	result := testDB.Model(&VersionCompareSnapshot{}).
-		Where("delivery_rule_id = ? AND status != ?", uint(900), "running").
+		Where("delivery_rule_id = ? AND status != ?", uint(900), consts.SnapshotStatusRunning).
 		Updates(map[string]any{
-			"status":       "running",
+			"status":       consts.SnapshotStatusRunning,
 			"triggered_at": time.Now(),
 			"triggered_by": "user2",
 			"completed_at": nil,
@@ -514,7 +515,7 @@ func TestVersionCompareSnapshot_DataOverwriteOnRetrigger(t *testing.T) {
 	testDB.Model(&VersionCompareSnapshot{}).
 		Where("delivery_rule_id = ?", uint(900)).
 		Updates(map[string]any{
-			"status":       "completed",
+			"status":       consts.SnapshotStatusCompleted,
 			"completed_at": &completedAt2,
 			"data":         string(data2JSON),
 		})
@@ -588,7 +589,7 @@ func TestVersionCompareSnapshot_LargePayload(t *testing.T) {
 
 	snap := VersionCompareSnapshot{
 		DeliveryRuleID: 1000,
-		Status:         "completed",
+		Status:         consts.SnapshotStatusCompleted,
 		TriggeredAt:    time.Now(),
 		TriggeredBy:    "user",
 		Data: SnapshotData{
@@ -623,7 +624,7 @@ func TestVersionCompareSnapshot_SoftDelete(t *testing.T) {
 
 	snap := VersionCompareSnapshot{
 		DeliveryRuleID: 1100,
-		Status:         "completed",
+		Status:         consts.SnapshotStatusCompleted,
 		TriggeredAt:    time.Now(),
 		TriggeredBy:    "user",
 	}

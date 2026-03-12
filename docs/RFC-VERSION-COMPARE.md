@@ -612,19 +612,26 @@ HomeView
 > - `computeMismatchCounts` 辅助函数被 Summary 和 Counts 两个端点复用
 > - `parsePackageIDs` 辅助函数用于 Handler 层解析 query 参数（Phase 3 使用）
 
-### 阶段三: 后端 — Handler + 路由
+### 阶段三: 后端 — Handler + 路由 ✅
 
-- [ ] 实现 `handler/version_compare.go`:
-  - [ ] `TriggerVersionCompareHandler` — POST trigger
-  - [ ] `QueryVersionCompareHandler` — GET query with filters
-  - [ ] `VersionCompareSummaryHandler` — GET 所有 Rule 的快照摘要（供 Rule 卡片列表页使用）
-  - [ ] `VersionCompareCountsHandler` — GET Rule 维度的 mismatch 统计（供 HomeView AppCard 使用）
-- [ ] 注册路由:
-  - [ ] `POST /api/v1/deliveryRule/:id/versionCompare/trigger`
-  - [ ] `GET /api/v1/deliveryRule/:id/versionCompare`
-  - [ ] `GET /api/v1/versionCompare/summary`
-  - [ ] `GET /api/v1/versionCompare/counts`
+- [x] 实现 `handler/version_compare.go`:
+  - [x] `TriggerVersionCompareHandler` — POST trigger
+  - [x] `QueryVersionCompareHandler` — GET query with filters
+  - [x] `VersionCompareSummaryHandler` — GET 所有 Rule 的快照摘要（供 Rule 卡片列表页使用）
+  - [x] `VersionCompareCountsHandler` — GET Rule 维度的 mismatch 统计（供 HomeView AppCard 使用）
+- [x] 注册路由:
+  - [x] `POST /api/v1/deliveryRule/:id/versionCompare/trigger`
+  - [x] `GET /api/v1/deliveryRule/:id/versionCompare`
+  - [x] `GET /api/v1/versionCompare/summary`
+  - [x] `GET /api/v1/versionCompare/counts`
 - [ ] 编写单元测试
+
+> **实现备注**:
+> - `handler/version_compare.go` (~85 行): 4 个 handler 函数，遵循项目现有模式
+> - `parsePackageIDs` 导出为 `ParsePackageIDs` 供 handler 层调用
+> - Query 参数默认值: `designTime`/`runTime` 默认 `true`（仅当显式传 `"false"` 时关闭）；`mismatchOnly` 默认 `false`
+> - Trigger handler 根据 `TriggerResult.Status` 返回不同 HTTP 状态码: `running`→200, `rate_limited`→429, `conflict`→409
+> - `triggeredBy` 使用 `service.UserEmail(ctx)` 获取当前用户邮箱
 
 ### 阶段四: 前端 — API + 类型定义
 

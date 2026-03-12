@@ -187,7 +187,7 @@ func TestComputeMismatchCounts_NoSourceVersion(t *testing.T) {
 	}
 }
 
-// --- parsePackageIDs ---
+// --- ParsePackageIDs ---
 
 func TestParsePackageIDs(t *testing.T) {
 	tests := []struct {
@@ -203,7 +203,7 @@ func TestParsePackageIDs(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(fmt.Sprintf("input=%q", tt.input), func(t *testing.T) {
-			got := parsePackageIDs(tt.input)
+			got := ParsePackageIDs(tt.input)
 			if tt.want == nil {
 				if got != nil && len(got) != 0 {
 					t.Errorf("got %v, want nil/empty", got)
@@ -238,7 +238,7 @@ func setupQueryTestData(t *testing.T) (ruleID uint, sourceTenantID uint, compare
 
 	snap := db.VersionCompareSnapshot{
 		DeliveryRuleID: rule.ID,
-		Status:         "completed",
+		Status:         consts.SnapshotStatusCompleted,
 		TriggeredAt:    time.Now(),
 		TriggeredBy:    "test",
 		Data: db.SnapshotData{
@@ -296,8 +296,8 @@ func TestQueryVersionCompare_NoSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if resp.Status != "none" {
-		t.Errorf("status: got %q, want %q", resp.Status, "none")
+	if resp.Status != consts.SnapshotStatusNone {
+		t.Errorf("status: got %q, want %q", resp.Status, consts.SnapshotStatusNone)
 	}
 }
 
@@ -307,7 +307,7 @@ func TestQueryVersionCompare_RunningStatus(t *testing.T) {
 	rule := seedRule(t, "running-rule", source, []db.CpiTenant{source}, true)
 	seedSnapshot(t, db.VersionCompareSnapshot{
 		DeliveryRuleID: rule.ID,
-		Status:         "running",
+		Status:         consts.SnapshotStatusRunning,
 		TriggeredAt:    time.Now(),
 		TriggeredBy:    "user",
 	})
@@ -317,8 +317,8 @@ func TestQueryVersionCompare_RunningStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if resp.Status != "running" {
-		t.Errorf("status: got %q, want %q", resp.Status, "running")
+	if resp.Status != consts.SnapshotStatusRunning {
+		t.Errorf("status: got %q, want %q", resp.Status, consts.SnapshotStatusRunning)
 	}
 	if resp.Packages != nil {
 		t.Errorf("packages should be nil for running status, got %d", len(resp.Packages))
@@ -336,8 +336,8 @@ func TestQueryVersionCompare_FullResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if resp.Status != "completed" {
-		t.Fatalf("status: got %q, want %q", resp.Status, "completed")
+	if resp.Status != consts.SnapshotStatusCompleted {
+		t.Fatalf("status: got %q, want %q", resp.Status, consts.SnapshotStatusCompleted)
 	}
 
 	// Tenants
@@ -623,8 +623,8 @@ func TestTriggerVersionCompare_FirstTrigger(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.Status != "running" {
-		t.Errorf("status: got %q, want %q", result.Status, "running")
+	if result.Status != consts.TriggerStatusRunning {
+		t.Errorf("status: got %q, want %q", result.Status, consts.TriggerStatusRunning)
 	}
 
 	// Verify DB record was created with "running" status
@@ -632,7 +632,7 @@ func TestTriggerVersionCompare_FirstTrigger(t *testing.T) {
 	if err := testDB.Where("delivery_rule_id = ?", rule.ID).First(&snap).Error; err != nil {
 		t.Fatalf("snapshot not found: %v", err)
 	}
-	if snap.Status != "running" && snap.Status != "completed" {
+	if snap.Status != consts.SnapshotStatusRunning && snap.Status != consts.SnapshotStatusCompleted {
 		t.Errorf("snapshot status: got %q, want running or completed", snap.Status)
 	}
 	if snap.TriggeredBy != "test-user" {
@@ -651,7 +651,7 @@ func TestTriggerVersionCompare_Conflict(t *testing.T) {
 	// Pre-create a running snapshot
 	seedSnapshot(t, db.VersionCompareSnapshot{
 		DeliveryRuleID: rule.ID,
-		Status:         "running",
+		Status:         consts.SnapshotStatusRunning,
 		TriggeredAt:    time.Now(),
 		TriggeredBy:    "user1",
 	})
@@ -661,8 +661,8 @@ func TestTriggerVersionCompare_Conflict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.Status != "conflict" {
-		t.Errorf("status: got %q, want %q", result.Status, "conflict")
+	if result.Status != consts.TriggerStatusConflict {
+		t.Errorf("status: got %q, want %q", result.Status, consts.TriggerStatusConflict)
 	}
 }
 
@@ -675,7 +675,7 @@ func TestTriggerVersionCompare_RateLimited(t *testing.T) {
 	recentTime := time.Now().Add(-1 * time.Minute) // 1 min ago, within 5 min cooldown
 	seedSnapshot(t, db.VersionCompareSnapshot{
 		DeliveryRuleID: rule.ID,
-		Status:         "completed",
+		Status:         consts.SnapshotStatusCompleted,
 		TriggeredAt:    recentTime,
 		CompletedAt:    &recentTime,
 		TriggeredBy:    "user1",
@@ -686,8 +686,8 @@ func TestTriggerVersionCompare_RateLimited(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.Status != "rate_limited" {
-		t.Errorf("status: got %q, want %q", result.Status, "rate_limited")
+	if result.Status != consts.TriggerStatusRateLimited {
+		t.Errorf("status: got %q, want %q", result.Status, consts.TriggerStatusRateLimited)
 	}
 }
 
@@ -700,7 +700,7 @@ func TestTriggerVersionCompare_CooldownExpired(t *testing.T) {
 	oldTime := time.Now().Add(-10 * time.Minute)
 	seedSnapshot(t, db.VersionCompareSnapshot{
 		DeliveryRuleID: rule.ID,
-		Status:         "completed",
+		Status:         consts.SnapshotStatusCompleted,
 		TriggeredAt:    oldTime,
 		CompletedAt:    &oldTime,
 		TriggeredBy:    "user1",
@@ -719,8 +719,8 @@ func TestTriggerVersionCompare_CooldownExpired(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.Status != "running" {
-		t.Errorf("status: got %q, want %q", result.Status, "running")
+	if result.Status != consts.TriggerStatusRunning {
+		t.Errorf("status: got %q, want %q", result.Status, consts.TriggerStatusRunning)
 	}
 
 	// Wait for background goroutine to finish
@@ -740,7 +740,7 @@ func TestCollectVersionSnapshot_Success(t *testing.T) {
 	// Create initial running snapshot
 	seedSnapshot(t, db.VersionCompareSnapshot{
 		DeliveryRuleID: rule.ID,
-		Status:         "running",
+		Status:         consts.SnapshotStatusRunning,
 		TriggeredAt:    time.Now(),
 		TriggeredBy:    "test",
 	})
@@ -802,8 +802,8 @@ func TestCollectVersionSnapshot_Success(t *testing.T) {
 	if err := testDB.Where("delivery_rule_id = ?", rule.ID).First(&snap).Error; err != nil {
 		t.Fatalf("snapshot not found: %v", err)
 	}
-	if snap.Status != "completed" {
-		t.Fatalf("status: got %q, want %q", snap.Status, "completed")
+	if snap.Status != consts.SnapshotStatusCompleted {
+		t.Fatalf("status: got %q, want %q", snap.Status, consts.SnapshotStatusCompleted)
 	}
 	if snap.CompletedAt == nil {
 		t.Fatal("CompletedAt should not be nil")
@@ -869,7 +869,7 @@ func TestCollectVersionSnapshot_CPIClientError(t *testing.T) {
 
 	seedSnapshot(t, db.VersionCompareSnapshot{
 		DeliveryRuleID: rule.ID,
-		Status:         "running",
+		Status:         consts.SnapshotStatusRunning,
 		TriggeredAt:    time.Now(),
 		TriggeredBy:    "test",
 	})
@@ -885,8 +885,8 @@ func TestCollectVersionSnapshot_CPIClientError(t *testing.T) {
 
 	var snap db.VersionCompareSnapshot
 	testDB.Where("delivery_rule_id = ?", rule.ID).First(&snap)
-	if snap.Status != "failed" {
-		t.Errorf("status: got %q, want %q", snap.Status, "failed")
+	if snap.Status != consts.SnapshotStatusFailed {
+		t.Errorf("status: got %q, want %q", snap.Status, consts.SnapshotStatusFailed)
 	}
 	if snap.Error == "" {
 		t.Error("expected non-empty error message")
@@ -900,7 +900,7 @@ func TestCollectVersionSnapshot_GetPackagesError(t *testing.T) {
 
 	seedSnapshot(t, db.VersionCompareSnapshot{
 		DeliveryRuleID: rule.ID,
-		Status:         "running",
+		Status:         consts.SnapshotStatusRunning,
 		TriggeredAt:    time.Now(),
 		TriggeredBy:    "test",
 	})
@@ -916,8 +916,8 @@ func TestCollectVersionSnapshot_GetPackagesError(t *testing.T) {
 
 	var snap db.VersionCompareSnapshot
 	testDB.Where("delivery_rule_id = ?", rule.ID).First(&snap)
-	if snap.Status != "failed" {
-		t.Errorf("status: got %q, want %q", snap.Status, "failed")
+	if snap.Status != consts.SnapshotStatusFailed {
+		t.Errorf("status: got %q, want %q", snap.Status, consts.SnapshotStatusFailed)
 	}
 }
 
@@ -929,7 +929,7 @@ func TestCollectVersionSnapshot_PartialTenantFailure(t *testing.T) {
 
 	seedSnapshot(t, db.VersionCompareSnapshot{
 		DeliveryRuleID: rule.ID,
-		Status:         "running",
+		Status:         consts.SnapshotStatusRunning,
 		TriggeredAt:    time.Now(),
 		TriggeredBy:    "test",
 	})
@@ -963,8 +963,8 @@ func TestCollectVersionSnapshot_PartialTenantFailure(t *testing.T) {
 	// Should still complete (error tolerance), but target tenant artifacts may be partial
 	var snap db.VersionCompareSnapshot
 	testDB.Where("delivery_rule_id = ?", rule.ID).First(&snap)
-	if snap.Status != "completed" {
-		t.Errorf("status: got %q, want %q (error tolerance)", snap.Status, "completed")
+	if snap.Status != consts.SnapshotStatusCompleted {
+		t.Errorf("status: got %q, want %q (error tolerance)", snap.Status, consts.SnapshotStatusCompleted)
 	}
 	// Source artifacts should still be collected
 	if len(snap.Data.Packages) == 0 {
@@ -989,7 +989,7 @@ func TestGetVersionCompareSummary(t *testing.T) {
 	// rule1 has completed snapshot with 1 matched + 1 mismatched
 	seedSnapshot(t, db.VersionCompareSnapshot{
 		DeliveryRuleID: rule1.ID,
-		Status:         "completed",
+		Status:         consts.SnapshotStatusCompleted,
 		TriggeredAt:    time.Now(),
 		TriggeredBy:    "user",
 		Data: db.SnapshotData{
@@ -1028,8 +1028,8 @@ func TestGetVersionCompareSummary(t *testing.T) {
 
 	// rule1
 	s1 := itemMap[rule1.ID]
-	if s1.Status != "completed" {
-		t.Errorf("rule1 status: got %q, want %q", s1.Status, "completed")
+	if s1.Status != consts.SnapshotStatusCompleted {
+		t.Errorf("rule1 status: got %q, want %q", s1.Status, consts.SnapshotStatusCompleted)
 	}
 	if s1.MatchedCount != 1 {
 		t.Errorf("rule1 matched: got %d, want 1", s1.MatchedCount)
@@ -1049,8 +1049,8 @@ func TestGetVersionCompareSummary(t *testing.T) {
 
 	// rule2 — no snapshot
 	s2 := itemMap[rule2.ID]
-	if s2.Status != "none" {
-		t.Errorf("rule2 status: got %q, want %q", s2.Status, "none")
+	if s2.Status != consts.SnapshotStatusNone {
+		t.Errorf("rule2 status: got %q, want %q", s2.Status, consts.SnapshotStatusNone)
 	}
 }
 
@@ -1071,7 +1071,7 @@ func TestGetVersionCompareCounts(t *testing.T) {
 	// rule1: mismatched
 	seedSnapshot(t, db.VersionCompareSnapshot{
 		DeliveryRuleID: rule1.ID,
-		Status:         "completed",
+		Status:         consts.SnapshotStatusCompleted,
 		TriggeredAt:    time.Now(),
 		TriggeredBy:    "u",
 		Data: db.SnapshotData{
@@ -1091,7 +1091,7 @@ func TestGetVersionCompareCounts(t *testing.T) {
 	// rule2: all matched
 	seedSnapshot(t, db.VersionCompareSnapshot{
 		DeliveryRuleID: rule2.ID,
-		Status:         "completed",
+		Status:         consts.SnapshotStatusCompleted,
 		TriggeredAt:    time.Now(),
 		TriggeredBy:    "u",
 		Data: db.SnapshotData{
@@ -1125,8 +1125,8 @@ func TestGetVersionCompareCounts(t *testing.T) {
 	if counts.StatusCounts["matched"] != 1 {
 		t.Errorf("matched: got %d, want 1", counts.StatusCounts["matched"])
 	}
-	if counts.StatusCounts["no_data"] != 1 {
-		t.Errorf("no_data: got %d, want 1", counts.StatusCounts["no_data"])
+	if counts.StatusCounts[string(consts.SnapshotStatusNone)] != 1 {
+		t.Errorf("none: got %d, want 1", counts.StatusCounts[string(consts.SnapshotStatusNone)])
 	}
 }
 
@@ -1137,11 +1137,11 @@ func TestGetVersionCompareCounts_RunningAndFailed(t *testing.T) {
 	rule2 := seedRule(t, "cnt2-failed", src, []db.CpiTenant{src}, true)
 
 	seedSnapshot(t, db.VersionCompareSnapshot{
-		DeliveryRuleID: rule1.ID, Status: "running", TriggeredAt: time.Now(), TriggeredBy: "u",
+		DeliveryRuleID: rule1.ID, Status: consts.SnapshotStatusRunning, TriggeredAt: time.Now(), TriggeredBy: "u",
 	})
 	now := time.Now()
 	seedSnapshot(t, db.VersionCompareSnapshot{
-		DeliveryRuleID: rule2.ID, Status: "failed", TriggeredAt: time.Now(), CompletedAt: &now,
+		DeliveryRuleID: rule2.ID, Status: consts.SnapshotStatusFailed, TriggeredAt: time.Now(), CompletedAt: &now,
 		TriggeredBy: "u", Error: "something broke",
 	})
 
@@ -1153,10 +1153,10 @@ func TestGetVersionCompareCounts_RunningAndFailed(t *testing.T) {
 	if counts.Total != 2 {
 		t.Errorf("Total: got %d, want 2", counts.Total)
 	}
-	if counts.StatusCounts["running"] != 1 {
-		t.Errorf("running: got %d, want 1", counts.StatusCounts["running"])
+	if counts.StatusCounts[string(consts.SnapshotStatusRunning)] != 1 {
+		t.Errorf("running: got %d, want 1", counts.StatusCounts[string(consts.SnapshotStatusRunning)])
 	}
-	if counts.StatusCounts["failed"] != 1 {
-		t.Errorf("failed: got %d, want 1", counts.StatusCounts["failed"])
+	if counts.StatusCounts[string(consts.SnapshotStatusFailed)] != 1 {
+		t.Errorf("failed: got %d, want 1", counts.StatusCounts[string(consts.SnapshotStatusFailed)])
 	}
 }

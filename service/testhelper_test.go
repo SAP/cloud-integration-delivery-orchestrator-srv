@@ -177,14 +177,14 @@ func seedSnapshot(t *testing.T, snap db.VersionCompareSnapshot) db.VersionCompar
 }
 
 // waitForSnapshotComplete polls the DB until the snapshot for ruleID reaches a terminal
-// status ("completed" or "failed") or the timeout expires.
+// status (completed or failed) or the timeout expires.
 func waitForSnapshotComplete(t *testing.T, ruleID uint, timeout time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		var snap db.VersionCompareSnapshot
 		if err := testDB.Where("delivery_rule_id = ?", ruleID).First(&snap).Error; err == nil {
-			if snap.Status == "completed" || snap.Status == "failed" {
+			if snap.Status == consts.SnapshotStatusCompleted || snap.Status == consts.SnapshotStatusFailed {
 				return
 			}
 		}

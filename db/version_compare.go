@@ -1,6 +1,7 @@
 package db
 
 import (
+	"mmt-delivery/consts"
 	"time"
 
 	"gorm.io/gorm"
@@ -10,8 +11,8 @@ import (
 // At most one record per DeliveryRuleID (upsert pattern).
 type VersionCompareSnapshot struct {
 	gorm.Model
-	DeliveryRuleID uint   `gorm:"uniqueIndex"`
-	Status         string // "running" | "completed" | "failed"
+	DeliveryRuleID uint `gorm:"uniqueIndex"`
+	Status         consts.SnapshotStatus
 	TriggeredAt    time.Time
 	CompletedAt    *time.Time
 	TriggeredBy    string
