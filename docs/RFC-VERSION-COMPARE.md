@@ -643,12 +643,23 @@ HomeView
 
 列表页 header 区域新增 **"Manage Included Packages"** 按钮（因为是全局配置，放在列表页而非详情页）。
 
-点击打开一个 dialog，用于管理全局 Package 白名单：
-- 显示当前 include 列表（Package ID + Description）
-- 可以添加新的 Package ID（手动输入）
-- 可以移除已有条目
+点击打开一个 dialog，用于管理全局 Package 白名单。Dialog 分为两个区域：
+
+**上方：已选列表**
+- 显示当前 include 列表（Package ID + Description），每项有删除按钮
 - 空列表时显示提示："When the list is empty, all packages are compared."
-- 保存时调用 `PUT /api/v1/versionCompare/includedPackages` 批量替换
+
+**下方：从 Tenant 添加**
+- `<ui5-select>` 租户下拉框（数据来源：`GET /api/v1/cpiTenant`，复用已有 API）
+- 选择租户后自动调用 `GET /api/v1/tanant/packages?tenant={tenantId}` 拉取该租户的 Package 列表
+- 以 checkbox 列表展示可选 Package（自动排除已在白名单中的条目）
+- 每个 checkbox 显示 `Package ID` + `Name`（帮助用户识别）
+- **"Add Selected"** 按钮将勾选的 Package 加入上方列表
+- `Description` 字段自动填充为 Package 的 `Name`（用户可在保存前修改）
+
+**Footer**: Save + Cancel（不变，PUT 整体替换）
+
+> **注意**: 不需要新增任何后端 API。`GetCpiTenants` 和 `GetPackages` 均为已有接口。
 
 ### 6.3 第二级: 比较结果详情页 (`/jobs/version-compare/:ruleId`)
 
@@ -710,7 +721,7 @@ HomeView
 - **不匹配** (match=false): 红色/UI5 Negative design（`ValueState.Negative`）
 - **DRAFT** (designTimeDraft=true): 特殊标签/badge 标记（如 "DRAFT" 文字 + 不同颜色）
 - **不存在/错误**: 灰色 + tooltip 显示 error 信息
-- **Runtime Status**: 额外的小标签显示 STARTED/ERROR 等状态
+- **Runtime Status**: 仅在非 STARTED 状态时显示标签（如 ERROR）。有 Runtime 版本即隐含 STARTED，无需额外标记
 
 ### 6.6 前端文件变更
 
@@ -820,7 +831,7 @@ HomeView
 > - Source 列无 match 标记；Target 列每行背景色标识匹配状态（绿/红）
 > - **Modified By / Modified At 列**（表格最后两列）：仅显示 Source Tenant 的 design-time 最后修改人和修改时间。注意：SAP CPI API 仅 Integration Flow 返回 `ModifiedBy`/`ModifiedAt`，Script Collection 不返回这两个字段（显示 `-`）
 > - DRAFT 标签: `designTimeDraft` 时显示 `<ui5-tag>DRAFT</ui5-tag>`
-> - RuntimeStatus 标签: 显示 STARTED/ERROR 等状态
+> - RuntimeStatus 标签: 仅在非 STARTED 状态（如 ERROR）时显示，有 Runtime 版本即隐含 STARTED 无需冗余标记
 > - 错误信息: `error` 字段通过 `title` 属性作为 tooltip
 > - N/A: artifact 在 tenant 上不存在时显示灰色斜体 "N/A" + tooltip
 > - `onUnmounted` 清理 poll timer，防止组件销毁后继续轮询
@@ -862,7 +873,35 @@ HomeView
 > - `loadIncludedPackageFilter()` 内部 helper：空表返回 `nil`（表示不过滤），非空返回 `map[string]bool`
 > - `collectVersionSnapshot` 在 `GetPackages()` 之后调用 `loadIncludedPackageFilter()`，若返回非 nil 则过滤
 > - 前端 dialog 使用 `ui5-dialog` + `ui5-toolbar` footer 模式，与项目其他 dialog 一致
-> - 前端 dialog 支持手动输入 Package ID + Description，添加/移除后点 Save 批量提交
+> - ~~前端 dialog 支持手动输入 Package ID + Description，添加/移除后点 Save 批量提交~~ → 已由 Phase 7a 替换为 tenant 选择模式
+
+### 阶段 7a: Included Packages — Tenant 选择模式 UX 改进
+
+**背景**: Phase 7 的手动输入 Package ID 方式不够友好，用户需要准确记住 Package ID。改为从 Tenant 的 Package 列表中选择，更直观。
+
+**变更范围**: 纯前端（`VersionCompareView.vue` dialog 重写），无后端改动。
+
+- [ ] 前端 — 重写 dialog 状态管理:
+  - [ ] 移除手动输入状态: `newPackageID`, `newPackageDesc`
+  - [ ] 新增 tenant 选择状态: `tenants` (租户列表), `selectedTenantId` (选中的租户), `tenantPackages` (该租户的 Package 列表), `loadingPackages` (加载中标志), `selectedNewPkgIds` (checkbox 选中的 Package ID Set)
+- [ ] 前端 — 重写 dialog 逻辑:
+  - [ ] `openIncludedDialog()`: 除加载白名单外，同时调用 `GetCpiTenants()` 加载租户列表
+  - [ ] `onTenantChange(tenantId)`: 调用 `GetPackages(tenantId)` 加载 Package 列表，自动排除已在白名单中的条目
+  - [ ] `addSelectedPackages()`: 将 checkbox 勾选的 Package 加入 `includedPackages`（`Description` 自动填充为 `Name`），清空 checkbox 选中状态，并从可选列表中移除已添加项
+  - [ ] 保留 `removePackage(index)` 和 `saveIncludedPackages()` 逻辑不变
+- [ ] 前端 — 重写 dialog 模板:
+  - [ ] 上方: 已选 Package 列表（保留现有删除按钮样式）
+  - [ ] 下方: `<ui5-select>` 租户下拉 + Package checkbox 列表 + "Add Selected" 按钮
+  - [ ] Package checkbox 每项显示 `Id` + `Name`
+  - [ ] 加载状态: tenant packages 加载时显示 `<ui5-busy-indicator>`
+  - [ ] 空状态处理: 无可选 Package 时提示 "All packages from this tenant are already included"
+- [ ] 编译验证: `vite build` 通过
+
+> **实现备注**:
+> - `GetCpiTenants` 和 `GetPackages` 是已有 API，直接复用
+> - `<ui5-select>` 需要导入 `@ui5/webcomponents/dist/Select.js` 和 `@ui5/webcomponents/dist/Option.js`
+> - checkbox 过滤逻辑: `tenantPackages.filter(p => !includedSet.has(p.Id))`，其中 `includedSet` 由当前 `includedPackages` 的 `packageID` 构建
+> - 移除白名单项时需同步更新可选列表（重新应用排除逻辑）
 
 ---
 
@@ -915,8 +954,35 @@ PUT 使用整体替换而非逐条 CRUD，原因：
 详见 [Section 6.2.1](#621-included-packages-管理)。
 
 - "Manage Included Packages" 按钮位于 VersionCompareView（列表页）header
-- 点击打开 dialog，管理 Package ID 列表
+- 点击打开 dialog，分为 **已选列表** 和 **从 Tenant 添加** 两个区域
+- 已选列表区域显示当前白名单条目，支持逐条删除
+- 添加区域通过 tenant 下拉选择 → 加载该 tenant 的 Package 列表 → checkbox 多选 → "Add Selected"
 - 空列表提示用户当前为"全部比较"模式
+- 保存时调用 `PUT /api/v1/versionCompare/includedPackages` 批量替换
+
+#### 8.5.1 不需要新增后端 API
+
+| 需求 | 已有 API | 说明 |
+|------|----------|------|
+| 获取 Tenant 列表 | `GET /api/v1/cpiTenant` | 返回所有 `CpiTenant`，提供 `ID` 和 `Name` |
+| 获取 Tenant 的 Package 列表 | `GET /api/v1/tanant/packages?tenant={tenantId}` | 返回 `Package[]`，包含 `Id`、`Name`、`Description` |
+| 读取白名单 | `GET /api/v1/versionCompare/includedPackages` | 已实现 |
+| 保存白名单 | `PUT /api/v1/versionCompare/includedPackages` | 已实现，整体替换 |
+
+#### 8.5.2 UX 流程
+
+```
+用户点击 "Manage Included Packages"
+  → 打开 dialog
+  → 上方显示已选列表（从 GET includedPackages 加载）
+  → 下方: 用户从 <ui5-select> 选择一个 Tenant
+  → 自动调用 GetPackages(tenantId) 加载该 Tenant 的 Package 列表
+  → 展示为 checkbox 列表（排除已在白名单中的条目）
+  → 用户勾选需要的 Package → 点击 "Add Selected"
+  → 选中项添加到上方已选列表（Description 自动填充为 Package Name）
+  → 用户可以从已选列表中删除不需要的条目
+  → 点击 Save → PUT 整体替换
+```
 
 ---
 
@@ -944,3 +1010,5 @@ PUT 使用整体替换而非逐条 CRUD，原因：
 | 18 | 空白名单语义 | 空 = 比较所有 Package | 空 = 不比较任何 Package | 向后兼容，不影响现有功能 |
 | 19 | 白名单存储位置 | 独立表 `VersionCompareIncludedPackage` | `DeliveryRule` 字段 | 全局配置不应绑定到单个 Rule；独立表语义清晰 |
 | 20 | 白名单更新 API | PUT 整体替换 | 逐条 CRUD (POST/DELETE) | 配置场景下"查看→编辑→保存"更自然；单事务保证一致性 |
+| 21 | 白名单添加方式 | 从 Tenant Package 列表选择 | 手动输入 Package ID | 用户无需记忆 Package ID；直接从 CPI 实时数据选择更直观、减少输入错误；不需要新增后端 API（复用 `GetCpiTenants` + `GetPackages`） |
+| 22 | Runtime STARTED 标签 | 有 RT 版本时不显示 STARTED 标签 | 始终显示 STARTED/ERROR 标签 | 有 Runtime 版本即隐含 STARTED 状态，显示 STARTED 标签是冗余信息；仅显示异常状态（如 ERROR）减少视觉噪音 |

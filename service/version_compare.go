@@ -464,7 +464,7 @@ func (s *Service) QueryVersionCompare(ruleID uint, params VersionCompareQueryPar
 
 				if params.DesignTime {
 					info.DesignTimeVersion = vi.DesignTimeVersion
-					info.DesignTimeDraft = vi.DesignTimeVersion == "active"
+					info.DesignTimeDraft = strings.EqualFold(vi.DesignTimeVersion, "active")
 					if tenantID == snapshot.Data.SourceTenantID {
 						info.ModifiedBy = vi.ModifiedBy
 						info.ModifiedAt = vi.ModifiedAt
@@ -656,8 +656,8 @@ func (s *Service) UpdateIncludedPackages(inputs []IncludedPackageInput, updatedB
 	var result []db.VersionCompareIncludedPackage
 
 	err := s.DB.Transaction(func(tx *gorm.DB) error {
-		// Delete all existing entries
-		if err := tx.Where("1 = 1").Delete(&db.VersionCompareIncludedPackage{}).Error; err != nil {
+		// Hard-delete all existing entries (must bypass soft-delete so the unique index on PackageID is freed)
+		if err := tx.Unscoped().Where("1 = 1").Delete(&db.VersionCompareIncludedPackage{}).Error; err != nil {
 			return fmt.Errorf("failed to clear included packages: %w", err)
 		}
 
