@@ -291,6 +291,8 @@ func (s *Service) collectPackageSnapshot(
 
 			versionInfo := db.ArtifactVersionInfo{
 				DesignTimeVersion: art.Version,
+				ModifiedBy:        art.ModifiedBy,
+				ModifiedAt:        art.ModifiedAt,
 			}
 
 			// Enrich with runtime info
@@ -372,6 +374,8 @@ type VersionCompareArtifactTenantInfo struct {
 	DesignTimeVersion string `json:"designTimeVersion,omitempty"`
 	DesignTimeMatch   *bool  `json:"designTimeMatch,omitempty"` // nil if designTime filter off
 	DesignTimeDraft   bool   `json:"designTimeDraft,omitempty"`
+	ModifiedBy        string `json:"modifiedBy,omitempty"` // source tenant only: last design-time committer
+	ModifiedAt        string `json:"modifiedAt,omitempty"` // source tenant only: last design-time modification time
 	RuntimeVersion    string `json:"runtimeVersion,omitempty"`
 	RuntimeMatch      *bool  `json:"runtimeMatch,omitempty"` // nil if runTime filter off
 	RuntimeStatus     string `json:"runtimeStatus,omitempty"`
@@ -450,6 +454,10 @@ func (s *Service) QueryVersionCompare(ruleID uint, params VersionCompareQueryPar
 				if params.DesignTime {
 					info.DesignTimeVersion = vi.DesignTimeVersion
 					info.DesignTimeDraft = vi.DesignTimeVersion == "active"
+					if tenantID == snapshot.Data.SourceTenantID {
+						info.ModifiedBy = vi.ModifiedBy
+						info.ModifiedAt = vi.ModifiedAt
+					}
 					if tenantID != snapshot.Data.SourceTenantID && sourceHasData {
 						match := vi.DesignTimeVersion == sourceVersion.DesignTimeVersion
 						info.DesignTimeMatch = &match

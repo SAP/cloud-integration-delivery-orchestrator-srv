@@ -278,6 +278,8 @@ type ArtifactSnapshot struct {
 
 type ArtifactVersionInfo struct {
     DesignTimeVersion string `json:"designTimeVersion"`  // "active" 表示 DRAFT
+    ModifiedBy        string `json:"modifiedBy,omitempty"`  // 最后 design-time 修改人（CPI API 返回；仅 Integration Flow 有值，Script Collection 无此字段）
+    ModifiedAt        string `json:"modifiedAt,omitempty"`  // 最后 design-time 修改时间（同上）
     RuntimeVersion    string `json:"runtimeVersion"`
     RuntimeStatus     string `json:"runtimeStatus"`      // 值应与 consts.RuntimeState 一致: STARTED / STARTING / ERROR
     Error             string `json:"error,omitempty"`
@@ -296,6 +298,8 @@ type ArtifactVersionInfo struct {
 | 并发触发防护 | DB 级原子 UPDATE（`WHERE status != 'running'`） | 防止两个请求同时触发同一 Rule 的采集，避免 goroutine 竞态 |
 | Goroutine Context | 使用 `context.Background()`，不使用请求 context | 请求返回后 request context 被取消，异步 goroutine 中的 API 调用会因 context.Canceled 失败 |
 | Package 列表来源 | Source Tenant 实时 API 调用（`GetPackages`） | 以 Source Tenant 为准；不存在于 Source 上的 Package 不出现在比较结果中 |
+| ModifiedBy/ModifiedAt | 仅存储 + 仅对 Source Tenant 返回 | 用户关注"谁在源端做了最后一次提交"；Target Tenant 版本会被覆盖，修改人无意义 |
+| SC 缺少 ModifiedBy | 接受 API 限制，显示 `-` | SAP CPI `ScriptCollectionDesigntimeArtifacts` 端点（list 和 single-item）均不返回 `ModifiedBy`/`ModifiedAt`，属于 API 设计缺陷，无法绕过 |
 
 ---
 
@@ -698,7 +702,8 @@ HomeView
 > - Package Filter: 当有多个 Package 时显示 checkbox 列表，前端本地过滤；带 Select All / Deselect All 按钮；checkbox 区域有 `max-height: 6rem` 限高滚动
 > - 比较表格按 Package 分组，每个 Package 一个 `<ui5-panel>`（可折叠），内含 `<ui5-table>`
 > - **每个 Tenant 一列**（非 DT/RT 分两列）：单元格内 DT/RT 上下堆叠
-> - Source 列无 match 标记；Target 列每行带 ✓/✗ 图标 + 背景色（绿/红）
+> - Source 列无 match 标记；Target 列每行背景色标识匹配状态（绿/红）
+> - **Modified By / Modified At 列**（表格最后两列）：仅显示 Source Tenant 的 design-time 最后修改人和修改时间。注意：SAP CPI API 仅 Integration Flow 返回 `ModifiedBy`/`ModifiedAt`，Script Collection 不返回这两个字段（显示 `-`）
 > - DRAFT 标签: `designTimeDraft` 时显示 `<ui5-tag>DRAFT</ui5-tag>`
 > - RuntimeStatus 标签: 显示 STARTED/ERROR 等状态
 > - 错误信息: `error` 字段通过 `title` 属性作为 tooltip

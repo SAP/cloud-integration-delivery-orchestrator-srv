@@ -44,7 +44,9 @@ type ArtifactSnapshot struct {
 
 // ArtifactVersionInfo holds the design-time and runtime version for one artifact on one tenant.
 type ArtifactVersionInfo struct {
-	DesignTimeVersion string `json:"designTimeVersion"` // "active" means DRAFT
+	DesignTimeVersion string `json:"designTimeVersion"`    // "active" means DRAFT
+	ModifiedBy        string `json:"modifiedBy,omitempty"` // last design-time committer (from CPI API)
+	ModifiedAt        string `json:"modifiedAt,omitempty"` // last design-time modification time (from CPI API)
 	RuntimeVersion    string `json:"runtimeVersion"`
 	RuntimeStatus     string `json:"runtimeStatus"` // STARTED | STARTING | ERROR
 	Error             string `json:"error,omitempty"`
