@@ -67,23 +67,44 @@ func newTestService(factory IntegrationFactory) *Service {
 	}
 }
 
-// cleanAll truncates all tables used by version compare tests.
-// Call at the start of each test for isolation.
-func cleanAll(t *testing.T) {
-	t.Helper()
-	// Use TRUNCATE CASCADE to handle FK dependencies from other tables
-	// (e.g. delivery_requests → delivery_rules).
-	for _, stmt := range []string{
-		"TRUNCATE TABLE version_compare_snapshots CASCADE",
-		"TRUNCATE TABLE delivery_rules CASCADE",
-		"TRUNCATE TABLE cpi_tenants CASCADE",
-	} {
-		if err := testDB.Exec(stmt).Error; err != nil {
-			// Table may not exist; log but don't fail.
-			t.Logf("cleanAll: %s → %v", stmt, err)
-		}
-	}
+// --- testCleanup tracks IDs created during a test and deletes them on t.Cleanup ---
+
+type testCleanup struct {
+	t         *testing.T
+	tenantIDs []uint
+	ruleIDs   []uint
 }
+
+// newTestCleanup registers a t.Cleanup that deletes all tracked records
+// in the correct order (snapshots → rules → tenants) to respect FK constraints.
+// It uses Unscoped to also remove soft-deleted records.
+func newTestCleanup(t *testing.T) *testCleanup {
+	t.Helper()
+	tc := &testCleanup{t: t}
+	t.Cleanup(func() {
+		// Delete snapshots for tracked rules
+		if len(tc.ruleIDs) > 0 {
+			testDB.Unscoped().Where("delivery_rule_id IN ?", tc.ruleIDs).Delete(&db.VersionCompareSnapshot{})
+		}
+		// Delete rules (also clears the delivery_rule_included_tenants join table via GORM association)
+		if len(tc.ruleIDs) > 0 {
+			for _, id := range tc.ruleIDs {
+				var rule db.DeliveryRule
+				rule.ID = id
+				testDB.Model(&rule).Association("IncludedTenants").Clear()
+			}
+			testDB.Unscoped().Where("id IN ?", tc.ruleIDs).Delete(&db.DeliveryRule{})
+		}
+		// Delete tenants
+		if len(tc.tenantIDs) > 0 {
+			testDB.Unscoped().Where("id IN ?", tc.tenantIDs).Delete(&db.CpiTenant{})
+		}
+	})
+	return tc
+}
+
+func (tc *testCleanup) trackTenant(id uint) { tc.tenantIDs = append(tc.tenantIDs, id) }
+func (tc *testCleanup) trackRule(id uint)   { tc.ruleIDs = append(tc.ruleIDs, id) }
 
 // --- Mock CPI Client ---
 
@@ -136,8 +157,8 @@ func (m *mockCPIClient) GetDesignTimeScriptCollection(ctx context.Context, scrip
 
 // --- Seed Helpers ---
 
-// seedTenant creates a CpiTenant in the test DB and returns it with populated ID.
-func seedTenant(t *testing.T, name string) db.CpiTenant {
+// seedTenant creates a CpiTenant in the test DB, tracks it for cleanup, and returns it.
+func seedTenant(t *testing.T, tc *testCleanup, name string) db.CpiTenant {
 	t.Helper()
 	tenant := db.CpiTenant{
 		Name: name,
@@ -148,11 +169,12 @@ func seedTenant(t *testing.T, name string) db.CpiTenant {
 	if err := testDB.Create(&tenant).Error; err != nil {
 		t.Fatalf("seedTenant(%s) failed: %v", name, err)
 	}
+	tc.trackTenant(tenant.ID)
 	return tenant
 }
 
-// seedRule creates a DeliveryRule with the given source and included tenants.
-func seedRule(t *testing.T, name string, source db.CpiTenant, included []db.CpiTenant, active bool) db.DeliveryRule {
+// seedRule creates a DeliveryRule, tracks it for cleanup, and returns it.
+func seedRule(t *testing.T, tc *testCleanup, name string, source db.CpiTenant, included []db.CpiTenant, active bool) db.DeliveryRule {
 	t.Helper()
 	rule := db.DeliveryRule{
 		Name:            name,
@@ -164,10 +186,12 @@ func seedRule(t *testing.T, name string, source db.CpiTenant, included []db.CpiT
 	if err := testDB.Create(&rule).Error; err != nil {
 		t.Fatalf("seedRule(%s) failed: %v", name, err)
 	}
+	tc.trackRule(rule.ID)
 	return rule
 }
 
 // seedSnapshot creates a VersionCompareSnapshot directly in the DB.
+// The snapshot's DeliveryRuleID should belong to a rule already tracked by tc.
 func seedSnapshot(t *testing.T, snap db.VersionCompareSnapshot) db.VersionCompareSnapshot {
 	t.Helper()
 	if err := testDB.Create(&snap).Error; err != nil {

@@ -44,19 +44,14 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
-	code := m.Run()
-
-	// Cleanup: drop the test table after all tests
-	testDB.Exec("DROP TABLE IF EXISTS version_compare_snapshots")
-
-	os.Exit(code)
+	os.Exit(m.Run())
 }
 
-// cleanSnapshots deletes all rows from version_compare_snapshots.
-// Call at the start of each test for isolation.
-func cleanSnapshots(t *testing.T) {
+// cleanSnapshotsByRuleIDs registers a t.Cleanup that deletes only snapshots with
+// the given DeliveryRuleIDs, avoiding interference with other data in the shared DB.
+func cleanSnapshotsByRuleIDs(t *testing.T, ruleIDs ...uint) {
 	t.Helper()
-	if err := testDB.Exec("DELETE FROM version_compare_snapshots").Error; err != nil {
-		t.Fatalf("failed to clean snapshots: %v", err)
-	}
+	t.Cleanup(func() {
+		testDB.Unscoped().Where("delivery_rule_id IN ?", ruleIDs).Delete(&VersionCompareSnapshot{})
+	})
 }

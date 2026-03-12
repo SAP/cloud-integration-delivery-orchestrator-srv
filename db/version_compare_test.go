@@ -10,7 +10,7 @@ import (
 // --- Create & Read ---
 
 func TestVersionCompareSnapshot_CreateAndRead(t *testing.T) {
-	cleanSnapshots(t)
+	cleanSnapshotsByRuleIDs(t, 100)
 
 	now := time.Now().Truncate(time.Microsecond) // pg precision: microsecond
 	snap := VersionCompareSnapshot{
@@ -50,7 +50,7 @@ func TestVersionCompareSnapshot_CreateAndRead(t *testing.T) {
 // --- UniqueIndex on DeliveryRuleID ---
 
 func TestVersionCompareSnapshot_UniqueIndex(t *testing.T) {
-	cleanSnapshots(t)
+	cleanSnapshotsByRuleIDs(t, 200)
 
 	snap1 := VersionCompareSnapshot{
 		DeliveryRuleID: 200,
@@ -77,7 +77,7 @@ func TestVersionCompareSnapshot_UniqueIndex(t *testing.T) {
 // --- SnapshotData JSON Serialization Round-Trip ---
 
 func TestVersionCompareSnapshot_JSONRoundTrip(t *testing.T) {
-	cleanSnapshots(t)
+	cleanSnapshotsByRuleIDs(t, 300)
 
 	completedAt := time.Now().Truncate(time.Microsecond)
 	data := SnapshotData{
@@ -222,7 +222,7 @@ func TestVersionCompareSnapshot_JSONRoundTrip(t *testing.T) {
 // --- Empty SnapshotData ---
 
 func TestVersionCompareSnapshot_EmptyData(t *testing.T) {
-	cleanSnapshots(t)
+	cleanSnapshotsByRuleIDs(t, 400)
 
 	snap := VersionCompareSnapshot{
 		DeliveryRuleID: 400,
@@ -253,7 +253,7 @@ func TestVersionCompareSnapshot_EmptyData(t *testing.T) {
 // --- Update (status transition running → completed) ---
 
 func TestVersionCompareSnapshot_StatusTransition(t *testing.T) {
-	cleanSnapshots(t)
+	cleanSnapshotsByRuleIDs(t, 500)
 
 	snap := VersionCompareSnapshot{
 		DeliveryRuleID: 500,
@@ -310,7 +310,7 @@ func TestVersionCompareSnapshot_StatusTransition(t *testing.T) {
 // --- Atomic Concurrent Protection (UPDATE WHERE status != 'running') ---
 
 func TestVersionCompareSnapshot_AtomicConcurrentProtection(t *testing.T) {
-	cleanSnapshots(t)
+	cleanSnapshotsByRuleIDs(t, 600)
 
 	// Create a snapshot in "running" state
 	snap := VersionCompareSnapshot{
@@ -371,7 +371,7 @@ func TestVersionCompareSnapshot_AtomicConcurrentProtection(t *testing.T) {
 // --- Failed status with error message ---
 
 func TestVersionCompareSnapshot_FailedWithError(t *testing.T) {
-	cleanSnapshots(t)
+	cleanSnapshotsByRuleIDs(t, 700)
 
 	now := time.Now().Truncate(time.Microsecond)
 	completedAt := now.Add(5 * time.Second).Truncate(time.Microsecond)
@@ -403,7 +403,7 @@ func TestVersionCompareSnapshot_FailedWithError(t *testing.T) {
 // --- Lookup by DeliveryRuleID (the primary query pattern) ---
 
 func TestVersionCompareSnapshot_LookupByDeliveryRuleID(t *testing.T) {
-	cleanSnapshots(t)
+	cleanSnapshotsByRuleIDs(t, 801, 802)
 
 	// Create snapshots for two different rules
 	for _, ruleID := range []uint{801, 802} {
@@ -442,7 +442,7 @@ func TestVersionCompareSnapshot_LookupByDeliveryRuleID(t *testing.T) {
 // --- Upsert pattern: data overwrite on re-trigger ---
 
 func TestVersionCompareSnapshot_DataOverwriteOnRetrigger(t *testing.T) {
-	cleanSnapshots(t)
+	cleanSnapshotsByRuleIDs(t, 900)
 
 	// First trigger — create with initial data
 	data1 := SnapshotData{
@@ -564,7 +564,7 @@ func TestVersionCompareSnapshot_DataOverwriteOnRetrigger(t *testing.T) {
 // --- Large snapshot with many packages/artifacts ---
 
 func TestVersionCompareSnapshot_LargePayload(t *testing.T) {
-	cleanSnapshots(t)
+	cleanSnapshotsByRuleIDs(t, 1000)
 
 	// Build a snapshot with 20 packages, 50 artifacts each, 5 tenants
 	packages := make([]PackageSnapshot, 20)
@@ -625,7 +625,7 @@ func TestVersionCompareSnapshot_LargePayload(t *testing.T) {
 // --- GORM soft delete: deleted snapshot should not appear in normal queries ---
 
 func TestVersionCompareSnapshot_SoftDelete(t *testing.T) {
-	cleanSnapshots(t)
+	cleanSnapshotsByRuleIDs(t, 1100)
 
 	snap := VersionCompareSnapshot{
 		DeliveryRuleID: 1100,
