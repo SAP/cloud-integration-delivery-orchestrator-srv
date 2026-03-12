@@ -110,6 +110,10 @@ func (h *Handler) SetupRoutes(v1 *gin.RouterGroup, v2 *gin.RouterGroup, router *
 	v1.GET("/versionCompare/includedPackages", h.IncludedPackagesHandler)
 	v1.PUT("/versionCompare/includedPackages", h.UpdateIncludedPackagesHandler)
 
+	// Auto-Create DR from Version Compare Mismatch
+	v1.GET("/deliveryRule/:id/versionCompare/previewDR", h.HandlePreviewDRFromMismatch)
+	v1.POST("/deliveryRule/:id/versionCompare/createDR", h.HandleCreateDRFromMismatch)
+
 	// v2
 	v2.POST("/deliver", h.NativeDeliver)
 

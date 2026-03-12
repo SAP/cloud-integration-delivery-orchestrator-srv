@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"mmt-delivery/consts"
 	"mmt-delivery/service"
@@ -112,4 +113,67 @@ func (h *Handler) UpdateIncludedPackagesHandler(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": gin.H{"packages": packages}})
+}
+
+// HandlePreviewDRFromMismatch handles GET /api/v1/deliveryRule/:id/versionCompare/previewDR
+func (h *Handler) HandlePreviewDRFromMismatch(ctx *gin.Context) {
+	idStr := ctx.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil || id <= 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "invalid id"})
+		return
+	}
+
+	resp, err := h.svc.PreviewDRFromMismatch(uint(id))
+	if err != nil {
+		errMsg := err.Error()
+		switch {
+		case strings.Contains(errMsg, "not found"):
+			ctx.JSON(http.StatusNotFound, gin.H{"status": "fail", "code": 404, "error": errMsg})
+		case strings.Contains(errMsg, "no design-time mismatches"):
+			ctx.JSON(http.StatusConflict, gin.H{"status": "fail", "code": 409, "error": errMsg})
+		default:
+			ctx.JSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": errMsg})
+		}
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": resp})
+}
+
+// HandleCreateDRFromMismatch handles POST /api/v1/deliveryRule/:id/versionCompare/createDR
+func (h *Handler) HandleCreateDRFromMismatch(ctx *gin.Context) {
+	idStr := ctx.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil || id <= 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "invalid id"})
+		return
+	}
+
+	var req service.CreateDRFromMismatchRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "invalid request body: " + err.Error()})
+		return
+	}
+
+	user := service.UserID(ctx)
+	resp, err := h.svc.CreateDRFromMismatch(uint(id), req, user)
+	if err != nil {
+		errMsg := err.Error()
+		switch {
+		case strings.Contains(errMsg, "not found"):
+			ctx.JSON(http.StatusNotFound, gin.H{"status": "fail", "code": 404, "error": errMsg})
+		case strings.Contains(errMsg, "completedAt mismatch"):
+			ctx.JSON(http.StatusConflict, gin.H{"status": "fail", "code": 409, "error": errMsg})
+		case strings.Contains(errMsg, "artifactKeys must not be empty"),
+			strings.Contains(errMsg, "jira link is required"),
+			strings.Contains(errMsg, "no artifacts passed validation"):
+			ctx.JSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": errMsg, "result": resp.Summary})
+		default:
+			ctx.JSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": errMsg})
+		}
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": resp})
 }

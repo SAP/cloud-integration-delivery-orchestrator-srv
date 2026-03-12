@@ -871,15 +871,20 @@ v1.POST("/deliveryRule/:id/versionCompare/createDR",  h.HandleCreateDRFromMismat
 - AutoMigrate 无需额外修改（`DeliveryRequest` 已在 `db/conn.go` 中注册）
 - 原设计中的 `validateAllOpsHaveTR` 包装函数经代码审查后移除，改为直接调用 `BatchTrExist`（因 `TrExist` 内部已处理空 TR 检查）
 
-### Phase 2: Preview + Create Service 实现 — ⏳ TODO
+### Phase 2: Preview + Create Service 实现 — ✅ COMPLETE
 
 **范围**：Backend
+**状态**：已完成
+**变更文件**：
+- `service/version_compare.go` — 新增类型定义（`PreviewDRArtifact`, `PreviewDRResponse`, `ArtifactKey`, `CreateDRFromMismatchRequest`, `CreateDRFromMismatchResponse` 等）+ 实现 `PreviewDRFromMismatch` 和 `CreateDRFromMismatch`
+- `service/checks.go` — 提取 `matchVersionPattern(version, pattern) bool` 公共函数，`checkVersionPattern` 改为调用它（消除 glob 重复逻辑）
+- `handler/version_compare.go` — 新增 `HandlePreviewDRFromMismatch`（GET）和 `HandleCreateDRFromMismatch`（POST）
+- `handler/handler.go` — 注册 `GET /deliveryRule/:id/versionCompare/previewDR` 和 `POST /deliveryRule/:id/versionCompare/createDR`
 
-1. `service/version_compare.go` — 新增所有类型定义
-2. `service/version_compare.go` — 实现 `PreviewDRFromMismatch`
-3. `service/version_compare.go` — 实现 `CreateDRFromMismatch`
-4. `handler/version_compare.go` — 两个新 Handler
-5. `handler/handler.go` — 注册路由
+**备注**：
+- 自动生成的 DR 名称格式：`Auto DR - <rule name> - VC <snapshot completion time>`
+- Preview 和 QueryVersionCompare 的 mismatch 语义不同（Preview 将 target 缺失视为 mismatch），经分析不适合合并
+- `matchVersionPattern` 从 `version_compare.go` 移至 `checks.go` 统一管理，`checkVersionPattern` 复用之
 
 ### Phase 3: 后端测试 — ⏳ TODO
 

@@ -11,6 +11,7 @@ import (
 	"mmt-delivery/consts"
 	"mmt-delivery/db"
 	"mmt-delivery/pkg/cpi"
+	"mmt-delivery/pkg/lifecycle"
 
 	"golang.org/x/sync/errgroup"
 	"gorm.io/gorm"
@@ -696,6 +697,396 @@ func (s *Service) loadIncludedPackageFilter() map[string]bool {
 		includeSet[inc.PackageID] = true
 	}
 	return includeSet
+}
+
+// --- Auto-Create DR from Version Compare Mismatch ---
+
+// PreviewDRArtifact represents one artifact in the Preview response, categorized by eligibility.
+type PreviewDRArtifact struct {
+	ArtifactID    string          `json:"artifactID"`
+	ArtifactName  string          `json:"artifactName"`
+	PackageID     string          `json:"packageID"`
+	Type          string          `json:"type"`
+	SourceVersion string          `json:"sourceVersion"`
+	Category      string          `json:"category"` // "includable" | "draft" | "versionPattern" | "duplicate"
+	Reason        string          `json:"reason,omitempty"`
+	ExistingDR    *ExistingDRInfo `json:"existingDR,omitempty"`
+}
+
+// ExistingDRInfo holds info about an active DR that already contains a given artifact.
+type ExistingDRInfo struct {
+	ID   uint   `json:"id"`
+	Name string `json:"name"`
+}
+
+// PreviewDRSummary provides counts per category for the Preview response.
+type PreviewDRSummary struct {
+	TotalMismatch  int `json:"totalMismatch"`
+	Includable     int `json:"includable"`
+	Draft          int `json:"draft"`
+	VersionPattern int `json:"versionPattern"`
+	Duplicate      int `json:"duplicate"`
+}
+
+// PreviewDRResponse is the response for the Preview API.
+type PreviewDRResponse struct {
+	SnapshotID          uint                `json:"snapshotID"`
+	SnapshotCompletedAt time.Time           `json:"snapshotCompletedAt"`
+	RuleName            string              `json:"ruleName"`
+	RequireJira         bool                `json:"requireJira"`
+	Artifacts           []PreviewDRArtifact `json:"artifacts"`
+	Summary             PreviewDRSummary    `json:"summary"`
+}
+
+// ArtifactKey uniquely identifies an artifact within a snapshot (artifactID + packageID).
+type ArtifactKey struct {
+	ArtifactID string `json:"artifactID"`
+	PackageID  string `json:"packageID"`
+}
+
+// CreateDRFromMismatchRequest is the request body for the Create API.
+type CreateDRFromMismatchRequest struct {
+	Name                string        `json:"name"`
+	JiraLink            string        `json:"jiraLink"`
+	SnapshotID          uint          `json:"snapshotID"`
+	SnapshotCompletedAt time.Time     `json:"snapshotCompletedAt"`
+	ArtifactKeys        []ArtifactKey `json:"artifactKeys"`
+}
+
+// MismatchSkipError records an artifact that was skipped during Create due to validation failure.
+type MismatchSkipError struct {
+	ArtifactID string `json:"artifactID"`
+	PackageID  string `json:"packageID"`
+	Reason     string `json:"reason"`
+}
+
+// CreateDRFromMismatchSummary provides counts for the Create response.
+type CreateDRFromMismatchSummary struct {
+	Requested int                 `json:"requested"`
+	Created   int                 `json:"created"`
+	Errors    []MismatchSkipError `json:"errors"`
+}
+
+// CreateDRFromMismatchResponse is the response for the Create API.
+type CreateDRFromMismatchResponse struct {
+	DeliveryRequest db.DeliveryRequest          `json:"deliveryRequest"`
+	Summary         CreateDRFromMismatchSummary `json:"summary"`
+}
+
+// PreviewDRFromMismatch analyzes a completed snapshot and returns categorized DT-mismatch artifacts.
+//
+// Classification priority (mutually exclusive): DRAFT > VersionPattern > Duplicate > Includable.
+func (s *Service) PreviewDRFromMismatch(ruleID uint) (PreviewDRResponse, error) {
+	// 1. Load delivery rule with associations
+	rule, err := s.GetDeliveryRuleWithAcc(ruleID)
+	if err != nil {
+		return PreviewDRResponse{}, err
+	}
+
+	// 2. Load completed snapshot
+	var snapshot db.VersionCompareSnapshot
+	if err := s.DB.
+		Where(&db.VersionCompareSnapshot{DeliveryRuleID: ruleID, Status: consts.SnapshotStatusCompleted}).
+		First(&snapshot).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return PreviewDRResponse{}, fmt.Errorf("no completed version compare snapshot found for rule %d", ruleID)
+		}
+		return PreviewDRResponse{}, fmt.Errorf("failed to query snapshot: %w", err)
+	}
+	if snapshot.CompletedAt == nil {
+		return PreviewDRResponse{}, fmt.Errorf("snapshot %d has no completion timestamp", snapshot.ID)
+	}
+
+	// 3. Query active DRs for duplicate detection
+	// Active = NOT IN (CANCELED, DEPLOYED)
+	var activeDRs []db.DeliveryRequest
+	if err := s.DB.
+		Where("delivery_rule_id = ? AND aggregate_status NOT IN ?", ruleID,
+			[]lifecycle.AggregateStatus{lifecycle.AggCanceled, lifecycle.AggDeployed}).
+		Preload("ArtifactTenantOperations").
+		Find(&activeDRs).Error; err != nil {
+		return PreviewDRResponse{}, fmt.Errorf("failed to query active delivery requests: %w", err)
+	}
+
+	// Build existing ops index: (artifactTechID, artifactVersion) → DR info
+	type dupKey struct {
+		techID  string
+		version string
+	}
+	existingOps := make(map[dupKey]ExistingDRInfo)
+	for _, dr := range activeDRs {
+		for _, op := range dr.ArtifactTenantOperations {
+			k := dupKey{techID: op.ArtifactTechID, version: op.ArtifactVersion}
+			if _, exists := existingOps[k]; !exists {
+				existingOps[k] = ExistingDRInfo{ID: dr.ID, Name: dr.Name}
+			}
+		}
+	}
+
+	// 4. Iterate snapshot data, classify DT-mismatch artifacts
+	var artifacts []PreviewDRArtifact
+	var summary PreviewDRSummary
+	sourceTenantID := snapshot.Data.SourceTenantID
+
+	for _, pkg := range snapshot.Data.Packages {
+		for _, art := range pkg.Artifacts {
+			sourceVI, sourceHasData := art.Versions[sourceTenantID]
+
+			// Skip artifacts where source has no data
+			if !sourceHasData || sourceVI.DesignTimeVersion == "" {
+				continue
+			}
+
+			// Check DT mismatch: any compared tenant differs from source
+			hasMismatch := false
+			for _, targetID := range snapshot.Data.ComparedTenants {
+				targetVI, targetHasData := art.Versions[targetID]
+				if !targetHasData || targetVI.DesignTimeVersion != sourceVI.DesignTimeVersion {
+					hasMismatch = true
+					break
+				}
+			}
+			if !hasMismatch {
+				continue
+			}
+
+			summary.TotalMismatch++
+			pa := PreviewDRArtifact{
+				ArtifactID:    art.ID,
+				ArtifactName:  art.Name,
+				PackageID:     pkg.PackageID,
+				Type:          art.Type,
+				SourceVersion: sourceVI.DesignTimeVersion,
+			}
+
+			// Classify (mutually exclusive, priority order)
+			if strings.EqualFold(sourceVI.DesignTimeVersion, "active") {
+				pa.Category = "draft"
+				summary.Draft++
+			} else if !matchVersionPattern(sourceVI.DesignTimeVersion, rule.VersionPattern) {
+				pa.Category = "versionPattern"
+				pa.Reason = fmt.Sprintf("version %s does not match pattern %s", sourceVI.DesignTimeVersion, rule.VersionPattern)
+				summary.VersionPattern++
+			} else if drInfo, isDup := existingOps[dupKey{techID: art.ID, version: sourceVI.DesignTimeVersion}]; isDup {
+				pa.Category = "duplicate"
+				pa.Reason = fmt.Sprintf("already in active DR #%d \"%s\"", drInfo.ID, drInfo.Name)
+				pa.ExistingDR = &drInfo
+				summary.Duplicate++
+			} else {
+				pa.Category = "includable"
+				summary.Includable++
+			}
+
+			artifacts = append(artifacts, pa)
+		}
+	}
+
+	if summary.TotalMismatch == 0 {
+		return PreviewDRResponse{}, fmt.Errorf("no design-time mismatches found in snapshot")
+	}
+
+	return PreviewDRResponse{
+		SnapshotID:          snapshot.ID,
+		SnapshotCompletedAt: *snapshot.CompletedAt,
+		RuleName:            rule.Name,
+		RequireJira:         rule.RequireJira,
+		Artifacts:           artifacts,
+		Summary:             summary,
+	}, nil
+}
+
+// CreateDRFromMismatch creates a DR pre-filled with user-selected mismatch artifacts.
+//
+// It validates snapshot staleness, runs version downgrade checks (with tolerance),
+// and only creates the DR if at least one artifact passes all checks.
+func (s *Service) CreateDRFromMismatch(ruleID uint, req CreateDRFromMismatchRequest, user string) (CreateDRFromMismatchResponse, error) {
+	// 1. Load delivery rule
+	rule, err := s.GetDeliveryRuleWithAcc(ruleID)
+	if err != nil {
+		return CreateDRFromMismatchResponse{}, err
+	}
+
+	// 2. Load snapshot and validate consistency
+	var snapshot db.VersionCompareSnapshot
+	if err := s.DB.
+		First(&snapshot, req.SnapshotID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return CreateDRFromMismatchResponse{}, fmt.Errorf("snapshot %d not found or not completed for rule %d", req.SnapshotID, ruleID)
+		}
+		return CreateDRFromMismatchResponse{}, fmt.Errorf("failed to query snapshot: %w", err)
+	}
+	if snapshot.DeliveryRuleID != ruleID || snapshot.Status != consts.SnapshotStatusCompleted {
+		return CreateDRFromMismatchResponse{}, fmt.Errorf("snapshot %d not found or not completed for rule %d", req.SnapshotID, ruleID)
+	}
+	if snapshot.CompletedAt == nil {
+		return CreateDRFromMismatchResponse{}, fmt.Errorf("snapshot %d has no completion timestamp", snapshot.ID)
+	}
+	// Staleness check: compare CompletedAt timestamps
+	if !snapshot.CompletedAt.Equal(req.SnapshotCompletedAt) {
+		return CreateDRFromMismatchResponse{}, fmt.Errorf("snapshot data has changed since preview (completedAt mismatch): preview saw %s, current is %s",
+			req.SnapshotCompletedAt.Format(time.RFC3339), snapshot.CompletedAt.Format(time.RFC3339))
+	}
+
+	// 3. Validate artifactKeys non-empty
+	if len(req.ArtifactKeys) == 0 {
+		return CreateDRFromMismatchResponse{}, fmt.Errorf("artifactKeys must not be empty")
+	}
+
+	// 4. JIRA validation
+	if rule.RequireJira && req.JiraLink == "" {
+		return CreateDRFromMismatchResponse{}, fmt.Errorf("jira link is required for delivery rule \"%s\"", rule.Name)
+	}
+
+	// 5. Auto-generate name if not provided
+	// Format: "Auto DR - <rule name> - VC <snapshot completion time>"
+	if req.Name == "" {
+		req.Name = fmt.Sprintf("Auto DR - %s - VC %s", rule.Name, snapshot.CompletedAt.Format("2006-01-02 15:04"))
+	}
+
+	// 6. Build artifact key lookup set
+	artifactKeySet := make(map[ArtifactKey]bool, len(req.ArtifactKeys))
+	for _, k := range req.ArtifactKeys {
+		artifactKeySet[k] = true
+	}
+
+	// 7. Find selected artifacts in snapshot
+	type artifactWithPkg struct {
+		art db.ArtifactSnapshot
+		pkg string // packageID
+	}
+	var selectedArtifacts []artifactWithPkg
+	for _, pkg := range snapshot.Data.Packages {
+		for _, art := range pkg.Artifacts {
+			key := ArtifactKey{ArtifactID: art.ID, PackageID: pkg.PackageID}
+			if artifactKeySet[key] {
+				selectedArtifacts = append(selectedArtifacts, artifactWithPkg{art: art, pkg: pkg.PackageID})
+			}
+		}
+	}
+
+	// 8. Build ops with tolerance for individual failures
+	var validOps []db.ArtifactTenantOperation
+	var skipErrors []MismatchSkipError
+	sourceTenantID := snapshot.Data.SourceTenantID
+
+	for _, item := range selectedArtifacts {
+		art := item.art
+		sourceVI, sourceHasData := art.Versions[sourceTenantID]
+		if !sourceHasData || sourceVI.DesignTimeVersion == "" {
+			skipErrors = append(skipErrors, MismatchSkipError{
+				ArtifactID: art.ID,
+				PackageID:  item.pkg,
+				Reason:     "source tenant has no data for this artifact",
+			})
+			continue
+		}
+
+		// Build the operation struct
+		op := db.ArtifactTenantOperation{
+			TenantID:        rule.SourceTenantID,
+			ArtifactTechID:  art.ID,
+			ArtifactVersion: sourceVI.DesignTimeVersion,
+			Artifact: db.Artifact{
+				TechID:    art.ID,
+				Version:   sourceVI.DesignTimeVersion,
+				Name:      art.Name,
+				Type:      consts.ArtifactType(art.Type),
+				PackageID: item.pkg,
+			},
+			TransportRequestNumber: "", // empty — to be filled later
+		}
+
+		// LoadArtifact (FirstOrCreate)
+		a, err := s.LoadArtifact(op)
+		if err != nil {
+			skipErrors = append(skipErrors, MismatchSkipError{
+				ArtifactID: art.ID,
+				PackageID:  item.pkg,
+				Reason:     fmt.Sprintf("failed to load artifact: %s", err),
+			})
+			continue
+		}
+		op.Artifact = a
+		op.ArtifactID = a.ID
+
+		// Version downgrade check (tolerant — skip this artifact, don't block others)
+		downgradeErr := false
+		for i := range rule.IncludedTenants {
+			tenant := &rule.IncludedTenants[i]
+			if tenant.ID == rule.SourceTenantID {
+				continue
+			}
+			if err := s.checkVersionDowngradeInTenant(&op, tenant); err != nil {
+				skipErrors = append(skipErrors, MismatchSkipError{
+					ArtifactID: art.ID,
+					PackageID:  item.pkg,
+					Reason:     err.Error(),
+				})
+				downgradeErr = true
+				break
+			}
+		}
+		if downgradeErr {
+			continue
+		}
+
+		// Set initial lifecycle states
+		op.ImportState = lifecycle.ImportNotStarted
+		op.DeployState = lifecycle.DeployNotStarted
+		op.RequestState = lifecycle.RequestPending
+		op.CreatedBy = user
+
+		validOps = append(validOps, op)
+	}
+
+	// 9. If no valid ops, don't create an empty DR
+	if len(validOps) == 0 {
+		return CreateDRFromMismatchResponse{
+			Summary: CreateDRFromMismatchSummary{
+				Requested: len(req.ArtifactKeys),
+				Created:   0,
+				Errors:    skipErrors,
+			},
+		}, fmt.Errorf("no artifacts passed validation checks")
+	}
+
+	// 10. Create DR with VersionCompareSnapshotID
+	dr := db.DeliveryRequest{
+		Name:                     req.Name,
+		JiraLink:                 req.JiraLink,
+		DeliveryRuleID:           rule.ID,
+		SourceTenantID:           rule.SourceTenantID,
+		AggregateStatus:          lifecycle.AggPending,
+		VersionCompareSnapshotID: &snapshot.ID,
+		CreatedBy:                user,
+		UpdatedBy:                user,
+	}
+	if err := s.DB.Create(&dr).Error; err != nil {
+		return CreateDRFromMismatchResponse{}, fmt.Errorf("failed to create delivery request: %w", err)
+	}
+
+	// 11. Set DeliveryRequestID on all ops and batch create
+	for i := range validOps {
+		validOps[i].DeliveryRequestID = dr.ID
+	}
+	if err := s.DB.Create(&validOps).Error; err != nil {
+		return CreateDRFromMismatchResponse{}, fmt.Errorf("failed to create artifact tenant operations: %w", err)
+	}
+
+	// 12. Reload DR with all associations for the response
+	drLoaded, err := s.QueryDrWithAssociations(dr.ID)
+	if err != nil {
+		return CreateDRFromMismatchResponse{}, fmt.Errorf("failed to reload created delivery request: %w", err)
+	}
+
+	return CreateDRFromMismatchResponse{
+		DeliveryRequest: *drLoaded,
+		Summary: CreateDRFromMismatchSummary{
+			Requested: len(req.ArtifactKeys),
+			Created:   len(validOps),
+			Errors:    skipErrors,
+		},
+	}, nil
 }
 
 // --- Helpers ---

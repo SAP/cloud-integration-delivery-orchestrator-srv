@@ -29,14 +29,23 @@ func (s *Service) DeliveryRuleCheck(op *db.ArtifactTenantOperation, rule *db.Del
 	return nil
 }
 
-// artifact version matches pattern in delivery rule.
-// 5.2.2 - 5.2.* -> true
-// 6.1.3 - 6.2.* -> false
+// matchVersionPattern checks if a version string matches a glob pattern.
+// Returns true if pattern is empty or if the version matches.
+//
+// Examples: 5.2.2 matches 5.2.* → true; 6.1.3 matches 6.2.* → false
+func matchVersionPattern(version, pattern string) bool {
+	if pattern == "" {
+		return true
+	}
+	g := glob.MustCompile(pattern)
+	return g.Match(version)
+}
+
+// checkVersionPattern validates that an artifact's version matches the delivery rule's pattern.
+// Used in InsertTenantOps / DeliveryRuleCheck for per-op validation.
 func checkVersionPattern(op *db.ArtifactTenantOperation, rule *db.DeliveryRule) error {
-	version := op.ArtifactVersion
-	g := glob.MustCompile(rule.VersionPattern)
-	if !g.Match(version) {
-		return fmt.Errorf("artifact %s has version %s not match pattern %s(delivery rule: %s)", op.ArtifactTechID, version, rule.VersionPattern, rule.Name)
+	if !matchVersionPattern(op.ArtifactVersion, rule.VersionPattern) {
+		return fmt.Errorf("artifact %s has version %s not match pattern %s(delivery rule: %s)", op.ArtifactTechID, op.ArtifactVersion, rule.VersionPattern, rule.Name)
 	}
 	return nil
 }
