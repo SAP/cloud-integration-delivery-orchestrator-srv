@@ -881,21 +881,21 @@ HomeView
 
 **变更范围**: 纯前端（`VersionCompareView.vue` dialog 重写），无后端改动。
 
-- [ ] 前端 — 重写 dialog 状态管理:
-  - [ ] 移除手动输入状态: `newPackageID`, `newPackageDesc`
-  - [ ] 新增 tenant 选择状态: `tenants` (租户列表), `selectedTenantId` (选中的租户), `tenantPackages` (该租户的 Package 列表), `loadingPackages` (加载中标志), `selectedNewPkgIds` (checkbox 选中的 Package ID Set)
-- [ ] 前端 — 重写 dialog 逻辑:
-  - [ ] `openIncludedDialog()`: 除加载白名单外，同时调用 `GetCpiTenants()` 加载租户列表
-  - [ ] `onTenantChange(tenantId)`: 调用 `GetPackages(tenantId)` 加载 Package 列表，自动排除已在白名单中的条目
-  - [ ] `addSelectedPackages()`: 将 checkbox 勾选的 Package 加入 `includedPackages`（`Description` 自动填充为 `Name`），清空 checkbox 选中状态，并从可选列表中移除已添加项
-  - [ ] 保留 `removePackage(index)` 和 `saveIncludedPackages()` 逻辑不变
-- [ ] 前端 — 重写 dialog 模板:
-  - [ ] 上方: 已选 Package 列表（保留现有删除按钮样式）
-  - [ ] 下方: `<ui5-select>` 租户下拉 + Package checkbox 列表 + "Add Selected" 按钮
-  - [ ] Package checkbox 每项显示 `Id` + `Name`
-  - [ ] 加载状态: tenant packages 加载时显示 `<ui5-busy-indicator>`
-  - [ ] 空状态处理: 无可选 Package 时提示 "All packages from this tenant are already included"
-- [ ] 编译验证: `vite build` 通过
+- [x] 前端 — 重写 dialog 状态管理:
+  - [x] 移除手动输入状态: `newPackageID`, `newPackageDesc`
+  - [x] 新增 tenant 选择状态: `tenants` (租户列表), `selectedTenantId` (选中的租户), `tenantPackages` (该租户的 Package 列表), `loadingPackages` (加载中标志), `selectedNewPkgIds` (checkbox 选中的 Package ID Set)
+- [x] 前端 — 重写 dialog 逻辑:
+  - [x] `openIncludedDialog()`: 除加载白名单外，同时调用 `GetCpiTenants()` 加载租户列表
+  - [x] `onTenantChange(tenantId)`: 调用 `GetPackages(tenantId)` 加载 Package 列表，自动排除已在白名单中的条目
+  - [x] `addSelectedPackages()`: 将 checkbox 勾选的 Package 加入 `includedPackages`（`Description` 自动填充为 `Name`），清空 checkbox 选中状态，并从可选列表中移除已添加项
+  - [x] 保留 `removePackage(index)` 和 `saveIncludedPackages()` 逻辑不变
+- [x] 前端 — 重写 dialog 模板:
+  - [x] 上方: 已选 Package 列表（保留现有删除按钮样式）
+  - [x] 下方: `<ui5-select>` 租户下拉 + Package checkbox 列表 + "Add Selected" 按钮
+  - [x] Package checkbox 每项显示 `Id` + `Name`
+  - [x] 加载状态: tenant packages 加载时显示 `<ui5-busy-indicator>`
+  - [x] 空状态处理: 无可选 Package 时提示 "All packages from this tenant are already included"
+- [x] 编译验证: `vite build` 通过
 
 > **实现备注**:
 > - `GetCpiTenants` 和 `GetPackages` 是已有 API，直接复用
