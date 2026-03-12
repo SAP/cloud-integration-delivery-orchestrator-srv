@@ -34,6 +34,7 @@ type IntegrationService interface {
 	GetDesignTimeScriptCollection(ctx context.Context, scriptCollectionID string, scriptCollectionVersion string) (cpi.ScriptCollectionItem, error)
 
 	// Version Compare: batch query capabilities
+	GetPackages(ctx context.Context) ([]cpi.CPIPackage, error)
 	GetPackageIflows(ctx context.Context, packageID string) ([]cpi.IflowItem, error)
 	GetPackageScriptcollections(ctx context.Context, packageID string) ([]cpi.ScriptCollectionItem, error)
 	GetRuntimeArtifacts(ctx context.Context) ([]cpi.RuntimeArtifact, error)

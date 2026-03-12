@@ -418,11 +418,11 @@ func wrapArtifact(artifactType consts.ArtifactType, artifact any) db.Artifact { 
 
 | 文件 | 变更 |
 |------|------|
-| `service/service.go` | `IntegrationService` 接口新增 3 个方法 |
-| `service/artifacts.go` | **新建** — `FetchPackageArtifacts` 中心函数 + `wrapArtifact`（从 handler 迁移） |
-| `service/version_compare.go` | **新建** — Trigger + Query service 逻辑 |
-| `handler/handler.go` | 注册新路由（2 个端点） |
-| `handler/version_compare.go` | **新建** — Trigger + Query handler |
+| `service/service.go` | `IntegrationService` 接口新增 4 个方法（含 `GetPackages`） |
+| `service/artifacts.go` | **新建** — `FetchPackageArtifacts` 中心函数 + `WrapArtifact`（从 handler 迁移） |
+| `service/version_compare.go` | **新建** — Trigger + Query + Summary + Counts service 逻辑 + 响应类型定义 |
+| `handler/handler.go` | 注册新路由（4 个端点） |
+| `handler/version_compare.go` | **新建** — Trigger + Query + Summary + Counts handler |
 | `handler/cpi_handler.go` | 移除 `wrapArtifact`，`GetPackageArtifactsHandler` 改为调用 `service.FetchPackageArtifacts` |
 | `pkg/cpi/tenant_compare.go` | 清理空桩代码，数据结构统一定义在 `db/version_compare.go` |
 | `db/version_compare.go` | **新建** — `VersionCompareSnapshot` model + `SnapshotData` 等 JSON 序列化类型 |
@@ -431,7 +431,7 @@ func wrapArtifact(artifactType consts.ArtifactType, artifact any) db.Artifact { 
 
 ### 5.7 IntegrationService 接口扩展
 
-`IntegrationService` 的定位是 **CPI API 的抽象层**（facade），目的是让 service 层可以 mock CPI 调用进行单元测试。现有方法（`DeployArtifact`、`RuntimeArtifact` 等）同样是对 `CpiClient` 的直接透传，不包含编排逻辑。新增的三个方法性质相同——声明 service 层对 CPI API 的新依赖。
+`IntegrationService` 的定位是 **CPI API 的抽象层**（facade），目的是让 service 层可以 mock CPI 调用进行单元测试。现有方法（`DeployArtifact`、`RuntimeArtifact` 等）同样是对 `CpiClient` 的直接透传，不包含编排逻辑。新增的四个方法性质相同——声明 service 层对 CPI API 的新依赖。
 
 ```go
 type IntegrationService interface {
@@ -442,6 +442,7 @@ type IntegrationService interface {
     GetDesignTimeScriptCollection(ctx context.Context, scriptCollectionID string, scriptCollectionVersion string) (cpi.ScriptCollectionItem, error)
 
     // 新增: Version Compare 所需的批量查询能力
+    GetPackages(ctx context.Context) ([]cpi.CPIPackage, error)
     GetPackageIflows(ctx context.Context, packageID string) ([]cpi.IflowItem, error)
     GetPackageScriptcollections(ctx context.Context, packageID string) ([]cpi.ScriptCollectionItem, error)
     GetRuntimeArtifacts(ctx context.Context) ([]cpi.RuntimeArtifact, error)
@@ -589,16 +590,27 @@ HomeView
 > - 数据结构统一放在 `db/version_compare.go`（而非 `pkg/cpi/tenant_compare.go`），因为 `SnapshotData` 等类型通过 `gorm:"serializer:json"` 与 DB model 紧耦合
 > - `pkg/cpi/tenant_compare.go` 原有的空桩代码已清理，仅保留 package comment 指向新位置
 
-### 阶段二: 后端 — Service 层实现
+### 阶段二: 后端 — Service 层实现 ✅
 
-- [ ] 实现 `service/version_compare.go`:
-  - [ ] `TriggerVersionCompare` — 异步触发快照采集（调用 `FetchPackageArtifacts` 获取 design time）
-  - [ ] `QueryVersionCompare` — 读取缓存 + 实时计算 match + 过滤
-- [ ] 并发获取各 tenant 的 artifact 版本（errgroup）
-- [ ] Runtime 优化: 每 tenant 一次 `GetRuntimeArtifacts()` + 内存索引
-- [ ] 版本比对逻辑（字符串精确匹配）
-- [ ] 错误容忍：单个 tenant/artifact 失败不阻断整体
-- [ ] Rate limiting: 可配置的冷却间隔
+- [x] 实现 `service/version_compare.go`:
+  - [x] `TriggerVersionCompare` — 异步触发快照采集（`context.Background()` goroutine，DB 原子并发保护）
+  - [x] `QueryVersionCompare` — 读取缓存 + 实时计算 match + 过滤（packageIDs / designTime / runTime / mismatchOnly）
+  - [x] `GetVersionCompareSummary` — 所有 Rule 的快照摘要（含 matched/mismatched/total 计数）
+  - [x] `GetVersionCompareCounts` — Rule 维度 mismatch 统计（matched / mismatched / no_data / running / failed）
+- [x] 并发获取各 tenant 的 artifact 版本（errgroup，`SetLimit(10)` 限流）
+- [x] Runtime 优化: 每 tenant 一次 `GetRuntimeArtifacts()` + `map[artifactID]RuntimeArtifact` 内存索引
+- [x] 版本比对逻辑（字符串精确匹配，DT + RT 独立比对）
+- [x] 错误容忍：单个 tenant/artifact 失败记录 warn 日志但不阻断整体采集
+- [x] Rate limiting: 5 分钟冷却间隔（`versionCompareCooldown` 常量）
+- [x] 扩展 `IntegrationService` 新增 `GetPackages` 方法（Trigger 需要从 Source Tenant 获取包列表）
+
+> **实现备注**:
+> - 新建 `service/version_compare.go`（约 440 行）：4 个 Service 方法 + 1 个内部采集函数 + 响应类型定义 + 辅助函数
+> - Trigger 流程: 加载 Rule → 冷却检查 → DB 原子 UPDATE (WHERE status != 'running') → goroutine 采集
+> - 采集流程: GetPackages (source) → per-tenant GetRuntimeArtifacts (errgroup) → per-package×per-tenant FetchPackageArtifacts (errgroup, limit=10) → 组装 SnapshotData → DB 更新
+> - Query 响应包含 `tenants` 数组（携带 name + isSource 元数据），避免前端额外查询
+> - `computeMismatchCounts` 辅助函数被 Summary 和 Counts 两个端点复用
+> - `parsePackageIDs` 辅助函数用于 Handler 层解析 query 参数（Phase 3 使用）
 
 ### 阶段三: 后端 — Handler + 路由
 
@@ -651,3 +663,7 @@ HomeView
 | 9 | 并发触发防护 | DB 原子 UPDATE（`WHERE status != 'running'`） | 应用层 sync.Mutex | DB 级别在多实例部署下也安全；Mutex 仅适用于单实例 |
 | 10 | Goroutine Context | `context.Background()` 独立 context | 复用请求 context | 请求返回后 request context 被取消，会导致异步 goroutine 中所有 API 调用失败 |
 | 11 | Package 列表来源 | Source Tenant 实时 API（`GetPackages`） | 从 DeliveryRule 配置获取 | 以 Source Tenant 实际内容为准，避免配置与实际不同步 |
+| 12 | 测试文件位置 | 与被测代码同 package 目录 | 集中 `test/` 目录 | Go 约定：`_test.go` 与实现文件同目录，`go test ./...` 自动发现；集中测试目录是 Java/JS 惯例，在 Go 中为反模式 |
+| 13 | 测试框架 | 标准库 `testing`（`t.Errorf`/`t.Fatalf`） | testify | 减少外部依赖，与项目现有风格一致 |
+| 14 | 测试数据库 | 本地 PostgreSQL（`LOCAL_POSTGRES_URI`） | SQLite | 保证 GORM 行为一致（JSON 序列化、`TRUNCATE CASCADE` 等 PostgreSQL 特有语义） |
+| 15 | 测试隔离 | `TRUNCATE CASCADE` per test | `DELETE FROM` | FK 约束阻止 DELETE（如 `delivery_requests` → `delivery_rules`），CASCADE 确保清理 |
