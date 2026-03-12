@@ -1,7 +1,6 @@
 package db
 
 import (
-	"encoding/json"
 	"fmt"
 	"mmt-delivery/consts"
 	"testing"
@@ -275,13 +274,13 @@ func TestVersionCompareSnapshot_StatusTransition(t *testing.T) {
 			{PackageID: "pkg1", Artifacts: []ArtifactSnapshot{}},
 		},
 	}
-	dataJSON, _ := json.Marshal(data)
 	result := testDB.Model(&VersionCompareSnapshot{}).
-		Where("delivery_rule_id = ?", uint(500)).
-		Updates(map[string]any{
-			"status":       consts.SnapshotStatusCompleted,
-			"completed_at": &completedAt,
-			"data":         string(dataJSON),
+		Where(&VersionCompareSnapshot{DeliveryRuleID: 500}).
+		Select("Status", "CompletedAt", "Data").
+		Updates(VersionCompareSnapshot{
+			Status:      consts.SnapshotStatusCompleted,
+			CompletedAt: &completedAt,
+			Data:        data,
 		})
 	if result.Error != nil {
 		t.Fatalf("Update failed: %v", result.Error)
@@ -291,7 +290,7 @@ func TestVersionCompareSnapshot_StatusTransition(t *testing.T) {
 	}
 
 	var loaded VersionCompareSnapshot
-	if err := testDB.Where("delivery_rule_id = ?", uint(500)).First(&loaded).Error; err != nil {
+	if err := testDB.Where(&VersionCompareSnapshot{DeliveryRuleID: 500}).First(&loaded).Error; err != nil {
 		t.Fatalf("First failed: %v", err)
 	}
 	if loaded.Status != consts.SnapshotStatusCompleted {
@@ -326,11 +325,13 @@ func TestVersionCompareSnapshot_AtomicConcurrentProtection(t *testing.T) {
 
 	// Try to update where status != 'running' — should affect 0 rows
 	result := testDB.Model(&VersionCompareSnapshot{}).
-		Where("delivery_rule_id = ? AND status != ?", uint(600), consts.SnapshotStatusRunning).
-		Updates(map[string]any{
-			"status":       consts.SnapshotStatusRunning,
-			"triggered_at": time.Now(),
-			"triggered_by": "user2",
+		Where(&VersionCompareSnapshot{DeliveryRuleID: 600}).
+		Where("status != ?", consts.SnapshotStatusRunning).
+		Select("Status", "TriggeredAt", "TriggeredBy").
+		Updates(VersionCompareSnapshot{
+			Status:      consts.SnapshotStatusRunning,
+			TriggeredAt: time.Now(),
+			TriggeredBy: "user2",
 		})
 	if result.Error != nil {
 		t.Fatalf("Update failed: %v", result.Error)
@@ -342,19 +343,22 @@ func TestVersionCompareSnapshot_AtomicConcurrentProtection(t *testing.T) {
 	// Complete the first snapshot
 	completedAt := time.Now()
 	testDB.Model(&VersionCompareSnapshot{}).
-		Where("delivery_rule_id = ?", uint(600)).
-		Updates(map[string]any{
-			"status":       consts.SnapshotStatusCompleted,
-			"completed_at": &completedAt,
+		Where(&VersionCompareSnapshot{DeliveryRuleID: 600}).
+		Select("Status", "CompletedAt").
+		Updates(VersionCompareSnapshot{
+			Status:      consts.SnapshotStatusCompleted,
+			CompletedAt: &completedAt,
 		})
 
 	// Now retry — should succeed since status is "completed"
 	result = testDB.Model(&VersionCompareSnapshot{}).
-		Where("delivery_rule_id = ? AND status != ?", uint(600), consts.SnapshotStatusRunning).
-		Updates(map[string]any{
-			"status":       consts.SnapshotStatusRunning,
-			"triggered_at": time.Now(),
-			"triggered_by": "user2",
+		Where(&VersionCompareSnapshot{DeliveryRuleID: 600}).
+		Where("status != ?", consts.SnapshotStatusRunning).
+		Select("Status", "TriggeredAt", "TriggeredBy").
+		Updates(VersionCompareSnapshot{
+			Status:      consts.SnapshotStatusRunning,
+			TriggeredAt: time.Now(),
+			TriggeredBy: "user2",
 		})
 	if result.Error != nil {
 		t.Fatalf("Retry Update failed: %v", result.Error)
@@ -420,7 +424,7 @@ func TestVersionCompareSnapshot_LookupByDeliveryRuleID(t *testing.T) {
 
 	// Look up rule 801
 	var snap801 VersionCompareSnapshot
-	if err := testDB.Where("delivery_rule_id = ?", uint(801)).First(&snap801).Error; err != nil {
+	if err := testDB.Where(&VersionCompareSnapshot{DeliveryRuleID: 801}).First(&snap801).Error; err != nil {
 		t.Fatalf("lookup 801 failed: %v", err)
 	}
 	if snap801.Data.SourceTenantID != 8010 {
@@ -429,7 +433,7 @@ func TestVersionCompareSnapshot_LookupByDeliveryRuleID(t *testing.T) {
 
 	// Look up nonexistent rule
 	var snapMissing VersionCompareSnapshot
-	err := testDB.Where("delivery_rule_id = ?", uint(999)).First(&snapMissing).Error
+	err := testDB.Where(&VersionCompareSnapshot{DeliveryRuleID: 999}).First(&snapMissing).Error
 	if err == nil {
 		t.Fatal("expected error for nonexistent rule, got nil")
 	}
@@ -474,16 +478,17 @@ func TestVersionCompareSnapshot_DataOverwriteOnRetrigger(t *testing.T) {
 	}
 
 	// Second trigger — simulate the re-trigger flow: reset to running, then complete with new data
-	emptyDataJSON, _ := json.Marshal(SnapshotData{})
 	result := testDB.Model(&VersionCompareSnapshot{}).
-		Where("delivery_rule_id = ? AND status != ?", uint(900), consts.SnapshotStatusRunning).
-		Updates(map[string]any{
-			"status":       consts.SnapshotStatusRunning,
-			"triggered_at": time.Now(),
-			"triggered_by": "user2",
-			"completed_at": nil,
-			"error":        "",
-			"data":         string(emptyDataJSON),
+		Where(&VersionCompareSnapshot{DeliveryRuleID: 900}).
+		Where("status != ?", consts.SnapshotStatusRunning).
+		Select("Status", "TriggeredAt", "TriggeredBy", "CompletedAt", "Error", "Data").
+		Updates(VersionCompareSnapshot{
+			Status:      consts.SnapshotStatusRunning,
+			TriggeredAt: time.Now(),
+			TriggeredBy: "user2",
+			CompletedAt: nil,
+			Error:       "",
+			Data:        SnapshotData{},
 		})
 	if result.Error != nil {
 		t.Fatalf("reset to running failed: %v", result.Error)
@@ -511,18 +516,18 @@ func TestVersionCompareSnapshot_DataOverwriteOnRetrigger(t *testing.T) {
 		},
 	}
 	completedAt2 := time.Now().Truncate(time.Microsecond)
-	data2JSON, _ := json.Marshal(data2)
 	testDB.Model(&VersionCompareSnapshot{}).
-		Where("delivery_rule_id = ?", uint(900)).
-		Updates(map[string]any{
-			"status":       consts.SnapshotStatusCompleted,
-			"completed_at": &completedAt2,
-			"data":         string(data2JSON),
+		Where(&VersionCompareSnapshot{DeliveryRuleID: 900}).
+		Select("Status", "CompletedAt", "Data").
+		Updates(VersionCompareSnapshot{
+			Status:      consts.SnapshotStatusCompleted,
+			CompletedAt: &completedAt2,
+			Data:        data2,
 		})
 
 	// Verify old data is fully replaced
 	var loaded VersionCompareSnapshot
-	if err := testDB.Where("delivery_rule_id = ?", uint(900)).First(&loaded).Error; err != nil {
+	if err := testDB.Where(&VersionCompareSnapshot{DeliveryRuleID: 900}).First(&loaded).Error; err != nil {
 		t.Fatalf("First failed: %v", err)
 	}
 	if loaded.TriggeredBy != "user2" {
@@ -639,13 +644,13 @@ func TestVersionCompareSnapshot_SoftDelete(t *testing.T) {
 
 	// Normal query should not find it
 	var loaded VersionCompareSnapshot
-	err := testDB.Where("delivery_rule_id = ?", uint(1100)).First(&loaded).Error
+	err := testDB.Where(&VersionCompareSnapshot{DeliveryRuleID: 1100}).First(&loaded).Error
 	if err == nil {
 		t.Fatal("expected not-found after soft delete, got nil")
 	}
 
 	// Unscoped query should still find it
-	err = testDB.Unscoped().Where("delivery_rule_id = ?", uint(1100)).First(&loaded).Error
+	err = testDB.Unscoped().Where(&VersionCompareSnapshot{DeliveryRuleID: 1100}).First(&loaded).Error
 	if err != nil {
 		t.Fatalf("Unscoped query failed: %v", err)
 	}

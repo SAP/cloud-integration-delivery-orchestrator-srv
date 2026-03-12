@@ -629,7 +629,7 @@ func TestTriggerVersionCompare_FirstTrigger(t *testing.T) {
 
 	// Verify DB record was created with "running" status
 	var snap db.VersionCompareSnapshot
-	if err := testDB.Where("delivery_rule_id = ?", rule.ID).First(&snap).Error; err != nil {
+	if err := testDB.Where(&db.VersionCompareSnapshot{DeliveryRuleID: rule.ID}).First(&snap).Error; err != nil {
 		t.Fatalf("snapshot not found: %v", err)
 	}
 	if snap.Status != consts.SnapshotStatusRunning && snap.Status != consts.SnapshotStatusCompleted {
@@ -799,7 +799,7 @@ func TestCollectVersionSnapshot_Success(t *testing.T) {
 
 	// Verify DB result
 	var snap db.VersionCompareSnapshot
-	if err := testDB.Where("delivery_rule_id = ?", rule.ID).First(&snap).Error; err != nil {
+	if err := testDB.Where(&db.VersionCompareSnapshot{DeliveryRuleID: rule.ID}).First(&snap).Error; err != nil {
 		t.Fatalf("snapshot not found: %v", err)
 	}
 	if snap.Status != consts.SnapshotStatusCompleted {
@@ -884,7 +884,7 @@ func TestCollectVersionSnapshot_CPIClientError(t *testing.T) {
 	svc.collectVersionSnapshot(fullRule)
 
 	var snap db.VersionCompareSnapshot
-	testDB.Where("delivery_rule_id = ?", rule.ID).First(&snap)
+	testDB.Where(&db.VersionCompareSnapshot{DeliveryRuleID: rule.ID}).First(&snap)
 	if snap.Status != consts.SnapshotStatusFailed {
 		t.Errorf("status: got %q, want %q", snap.Status, consts.SnapshotStatusFailed)
 	}
@@ -915,7 +915,7 @@ func TestCollectVersionSnapshot_GetPackagesError(t *testing.T) {
 	svc.collectVersionSnapshot(fullRule)
 
 	var snap db.VersionCompareSnapshot
-	testDB.Where("delivery_rule_id = ?", rule.ID).First(&snap)
+	testDB.Where(&db.VersionCompareSnapshot{DeliveryRuleID: rule.ID}).First(&snap)
 	if snap.Status != consts.SnapshotStatusFailed {
 		t.Errorf("status: got %q, want %q", snap.Status, consts.SnapshotStatusFailed)
 	}
@@ -962,7 +962,7 @@ func TestCollectVersionSnapshot_PartialTenantFailure(t *testing.T) {
 
 	// Should still complete (error tolerance), but target tenant artifacts may be partial
 	var snap db.VersionCompareSnapshot
-	testDB.Where("delivery_rule_id = ?", rule.ID).First(&snap)
+	testDB.Where(&db.VersionCompareSnapshot{DeliveryRuleID: rule.ID}).First(&snap)
 	if snap.Status != consts.SnapshotStatusCompleted {
 		t.Errorf("status: got %q, want %q (error tolerance)", snap.Status, consts.SnapshotStatusCompleted)
 	}

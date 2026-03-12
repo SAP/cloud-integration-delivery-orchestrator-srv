@@ -375,6 +375,37 @@ GET /versionCompare?packageIDs=...&designTime=true&runTime=true&mismatchOnly=fal
 - 使用 `sync.Mutex` 保护结果写入
 - **错误容忍**: 单个 tenant/artifact 获取失败时记录 error，不阻断其他 tenant
 
+#### 5.3.1 Runtime Index 的 Mutex 设计与性能分析
+
+`collectVersionSnapshot` 预取 runtime artifact 时（`service/version_compare.go:151-192`），使用全局 `sync.Mutex` 保护 `runtimeIndex map[uint]map[string]RuntimeArtifact` 的写入。每个 tenant 对应一个 goroutine，所有 goroutine 共享同一把锁。
+
+**为什么不会产生性能问题：**
+
+每个 goroutine 的工作分为两部分：
+
+| 阶段 | 操作 | 耗时量级 | 是否持锁 |
+|------|------|----------|----------|
+| 网络 I/O | `s.CPI()` + `GetRuntimeArtifacts()` | 数百毫秒 ~ 数秒 | 否 |
+| 构建本地索引 | `for _, a := range artifacts { index[a.ID] = a }` | 微秒 | 否 |
+| 写入共享 map | `runtimeIndex[tenant.ID] = index` | 纳秒（单次指针赋值） | **是** |
+
+关键设计：**临界区只包含一次 map 赋值**（`runtimeIndex[tenant.ID] = index`），本地索引的构建在锁外完成。以 10 个 tenant、每个 API 调用 500ms 为例：
+
+- 并行 I/O 总耗时 ≈ 500ms
+- 10 次串行 map 写入 ≈ 1μs
+- 锁竞争额外开销 ≈ 1μs / 500ms ≈ **0.0002%**
+
+**替代方案及其 trade-off：**
+
+| 方案 | 优点 | 缺点 | 适用场景 |
+|------|------|------|----------|
+| **当前：`sync.Mutex`** | 简单直观，goroutine 数量不固定时代码清晰 | 理论上存在锁竞争 | 临界区极窄（纳秒级）时性能影响可忽略 |
+| 预分配 slice + 按索引写入 | 完全无锁 | 需要提前确定 goroutine 数量，与 `errgroup` 的动态错误处理搭配略显僵硬 | 临界区较宽（毫秒级）时值得考虑 |
+
+`collectPackageSnapshot`（第 243 行）采用了预分配 slice 方案（`results := make([]tenantArtifacts, len(tenants))`），因为该场景下 tenant 列表固定、goroutine 与索引一一对应。runtime 预取阶段保留 mutex 方案，因为其临界区极窄且代码更简洁。
+
+**结论：当前 mutex 设计在可预见的 tenant 规模下（数十个量级）不构成性能瓶颈，无需优化。**
+
 ### 5.4 Runtime 优化
 
 - 对每个 tenant 只调用 **一次** `GetRuntimeArtifacts()` 获取全部 runtime artifacts

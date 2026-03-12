@@ -183,7 +183,7 @@ func waitForSnapshotComplete(t *testing.T, ruleID uint, timeout time.Duration) {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		var snap db.VersionCompareSnapshot
-		if err := testDB.Where("delivery_rule_id = ?", ruleID).First(&snap).Error; err == nil {
+		if err := testDB.Where(&db.VersionCompareSnapshot{DeliveryRuleID: ruleID}).First(&snap).Error; err == nil {
 			if snap.Status == consts.SnapshotStatusCompleted || snap.Status == consts.SnapshotStatusFailed {
 				return
 			}

@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -52,7 +51,7 @@ func (s *Service) TriggerVersionCompare(ruleID uint, triggeredBy string) (Trigge
 
 	// 2. Rate-limit check
 	var existing db.VersionCompareSnapshot
-	found := s.DB.Where("delivery_rule_id = ?", ruleID).First(&existing).Error == nil
+	found := s.DB.Where(&db.VersionCompareSnapshot{DeliveryRuleID: ruleID}).First(&existing).Error == nil
 	if found && existing.Status == consts.SnapshotStatusCompleted && existing.CompletedAt != nil {
 		if time.Since(*existing.CompletedAt) < versionCompareCooldown {
 			return TriggerResult{Status: consts.TriggerStatusRateLimited}, nil
@@ -63,16 +62,17 @@ func (s *Service) TriggerVersionCompare(ruleID uint, triggeredBy string) (Trigge
 	now := time.Now()
 	if found {
 		// Try to update only if NOT already running
-		emptyDataJSON, _ := json.Marshal(db.SnapshotData{})
 		result := s.DB.Model(&db.VersionCompareSnapshot{}).
-			Where("delivery_rule_id = ? AND status != ?", ruleID, consts.SnapshotStatusRunning).
-			Updates(map[string]any{
-				"status":       consts.SnapshotStatusRunning,
-				"triggered_at": now,
-				"triggered_by": triggeredBy,
-				"completed_at": nil,
-				"error":        "",
-				"data":         string(emptyDataJSON),
+			Where(&db.VersionCompareSnapshot{DeliveryRuleID: ruleID}).
+			Where("status != ?", consts.SnapshotStatusRunning).
+			Select("Status", "TriggeredAt", "TriggeredBy", "CompletedAt", "Error", "Data").
+			Updates(db.VersionCompareSnapshot{
+				Status:      consts.SnapshotStatusRunning,
+				TriggeredAt: now,
+				TriggeredBy: triggeredBy,
+				CompletedAt: nil,
+				Error:       "",
+				Data:        db.SnapshotData{},
 			})
 		if result.Error != nil {
 			return TriggerResult{}, fmt.Errorf("failed to update snapshot: %w", result.Error)
@@ -109,11 +109,12 @@ func (s *Service) collectVersionSnapshot(rule db.DeliveryRule) {
 	completeWithError := func(errMsg string) {
 		now := time.Now()
 		s.DB.Model(&db.VersionCompareSnapshot{}).
-			Where("delivery_rule_id = ?", rule.ID).
-			Updates(map[string]any{
-				"status":       consts.SnapshotStatusFailed,
-				"completed_at": &now,
-				"error":        errMsg,
+			Where(&db.VersionCompareSnapshot{DeliveryRuleID: rule.ID}).
+			Select("Status", "CompletedAt", "Error").
+			Updates(db.VersionCompareSnapshot{
+				Status:      consts.SnapshotStatusFailed,
+				CompletedAt: &now,
+				Error:       errMsg,
 			})
 	}
 
@@ -226,14 +227,14 @@ func (s *Service) collectVersionSnapshot(rule db.DeliveryRule) {
 
 	// Update DB with completed snapshot
 	now := time.Now()
-	dataJSON, _ := json.Marshal(snapshotData)
 	s.DB.Model(&db.VersionCompareSnapshot{}).
-		Where("delivery_rule_id = ?", rule.ID).
-		Updates(map[string]any{
-			"status":       consts.SnapshotStatusCompleted,
-			"completed_at": &now,
-			"data":         string(dataJSON),
-			"error":        "",
+		Where(&db.VersionCompareSnapshot{DeliveryRuleID: rule.ID}).
+		Select("Status", "CompletedAt", "Data", "Error").
+		Updates(db.VersionCompareSnapshot{
+			Status:      consts.SnapshotStatusCompleted,
+			CompletedAt: &now,
+			Data:        snapshotData,
+			Error:       "",
 		})
 }
 
@@ -380,7 +381,7 @@ type VersionCompareArtifactTenantInfo struct {
 // QueryVersionCompare returns the cached snapshot with real-time match computation and filtering.
 func (s *Service) QueryVersionCompare(ruleID uint, params VersionCompareQueryParams) (VersionCompareResponse, error) {
 	var snapshot db.VersionCompareSnapshot
-	if err := s.DB.Where("delivery_rule_id = ?", ruleID).First(&snapshot).Error; err != nil {
+	if err := s.DB.Where(&db.VersionCompareSnapshot{DeliveryRuleID: ruleID}).First(&snapshot).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return VersionCompareResponse{Status: consts.SnapshotStatusNone}, nil
 		}
@@ -520,7 +521,7 @@ func (s *Service) GetVersionCompareSummary() ([]VersionCompareSummaryItem, error
 	if err := s.DB.
 		Preload("SourceTenant").
 		Preload("IncludedTenants").
-		Where("active = ?", true).
+		Where(&db.DeliveryRule{Active: true}).
 		Find(&rules).Error; err != nil {
 		return nil, fmt.Errorf("failed to load delivery rules: %w", err)
 	}
@@ -574,7 +575,7 @@ type VersionCompareCounts struct {
 // GetVersionCompareCounts returns mismatch statistics across all rules (for HomeView AppCard).
 func (s *Service) GetVersionCompareCounts() (VersionCompareCounts, error) {
 	var rules []db.DeliveryRule
-	if err := s.DB.Where("active = ?", true).Find(&rules).Error; err != nil {
+	if err := s.DB.Where(&db.DeliveryRule{Active: true}).Find(&rules).Error; err != nil {
 		return VersionCompareCounts{}, fmt.Errorf("failed to load delivery rules: %w", err)
 	}
 
