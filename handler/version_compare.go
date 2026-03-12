@@ -82,3 +82,34 @@ func (h *Handler) VersionCompareCountsHandler(ctx *gin.Context) {
 
 	ctx.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": counts})
 }
+
+// IncludedPackagesHandler handles GET /api/v1/versionCompare/includedPackages
+func (h *Handler) IncludedPackagesHandler(ctx *gin.Context) {
+	packages, err := h.svc.GetIncludedPackages()
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": gin.H{"packages": packages}})
+}
+
+// UpdateIncludedPackagesHandler handles PUT /api/v1/versionCompare/includedPackages
+func (h *Handler) UpdateIncludedPackagesHandler(ctx *gin.Context) {
+	var body struct {
+		Packages []service.IncludedPackageInput `json:"packages"`
+	}
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "invalid request body: " + err.Error()})
+		return
+	}
+
+	updatedBy := service.UserEmail(ctx)
+	packages, err := h.svc.UpdateIncludedPackages(body.Packages, updatedBy)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": gin.H{"packages": packages}})
+}

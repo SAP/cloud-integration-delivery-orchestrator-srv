@@ -51,3 +51,13 @@ type ArtifactVersionInfo struct {
 	RuntimeStatus     string `json:"runtimeStatus"` // STARTED | STARTING | ERROR
 	Error             string `json:"error,omitempty"`
 }
+
+// VersionCompareIncludedPackage is a global whitelist of CPI packages eligible for version compare.
+// When the table is empty, all packages are compared (backwards compatible).
+// When non-empty, only listed packages are included in version compare snapshots.
+type VersionCompareIncludedPackage struct {
+	gorm.Model
+	PackageID   string `gorm:"uniqueIndex"` // CPI Package ID
+	Description string // optional: reason for inclusion
+	CreatedBy   string
+}

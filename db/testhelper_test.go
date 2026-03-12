@@ -39,7 +39,7 @@ func TestMain(m *testing.M) {
 	}
 
 	// Migrate only the model under test
-	if err := testDB.AutoMigrate(&VersionCompareSnapshot{}); err != nil {
+	if err := testDB.AutoMigrate(&VersionCompareSnapshot{}, &VersionCompareIncludedPackage{}); err != nil {
 		fmt.Printf("FATAL: failed to migrate: %v\n", err)
 		os.Exit(1)
 	}

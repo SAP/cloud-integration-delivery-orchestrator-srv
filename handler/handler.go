@@ -107,6 +107,8 @@ func (h *Handler) SetupRoutes(v1 *gin.RouterGroup, v2 *gin.RouterGroup, router *
 	v1.POST("/deliveryRule/:id/versionCompare/trigger", h.TriggerVersionCompareHandler)
 	v1.GET("/deliveryRule/:id/versionCompare", h.QueryVersionCompareHandler)
 	v1.GET("/versionCompare/summary", h.VersionCompareSummaryHandler)
+	v1.GET("/versionCompare/includedPackages", h.IncludedPackagesHandler)
+	v1.PUT("/versionCompare/includedPackages", h.UpdateIncludedPackagesHandler)
 
 	// v2
 	v2.POST("/deliver", h.NativeDeliver)

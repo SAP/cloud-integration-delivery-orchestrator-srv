@@ -1165,3 +1165,244 @@ func TestGetVersionCompareCounts_RunningAndFailed(t *testing.T) {
 		t.Errorf("failed: got %d, want >= 1", counts.StatusCounts[string(consts.SnapshotStatusFailed)])
 	}
 }
+
+// --- Included Packages (Global Whitelist) Tests ---
+
+// cleanIncludedPackages removes all VersionCompareIncludedPackage records.
+func cleanIncludedPackages(t *testing.T) {
+	t.Helper()
+	t.Cleanup(func() {
+		testDB.Unscoped().Where("1 = 1").Delete(&db.VersionCompareIncludedPackage{})
+	})
+}
+
+func TestGetIncludedPackages_Empty(t *testing.T) {
+	cleanIncludedPackages(t)
+	svc := newTestService(nil)
+
+	packages, err := svc.GetIncludedPackages()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(packages) != 0 {
+		t.Errorf("expected empty list, got %d items", len(packages))
+	}
+}
+
+func TestUpdateIncludedPackages_InsertAndReplace(t *testing.T) {
+	cleanIncludedPackages(t)
+	svc := newTestService(nil)
+
+	// Initial insert
+	inputs := []IncludedPackageInput{
+		{PackageID: "PkgA", Description: "Package A"},
+		{PackageID: "PkgB", Description: "Package B"},
+	}
+	result, err := svc.UpdateIncludedPackages(inputs, "user@test.com")
+	if err != nil {
+		t.Fatalf("UpdateIncludedPackages failed: %v", err)
+	}
+	if len(result) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(result))
+	}
+	if result[0].PackageID != "PkgA" || result[1].PackageID != "PkgB" {
+		t.Errorf("unexpected package IDs: %v, %v", result[0].PackageID, result[1].PackageID)
+	}
+	if result[0].CreatedBy != "user@test.com" {
+		t.Errorf("CreatedBy: got %q, want user@test.com", result[0].CreatedBy)
+	}
+
+	// Verify via Get
+	packages, err := svc.GetIncludedPackages()
+	if err != nil {
+		t.Fatalf("GetIncludedPackages failed: %v", err)
+	}
+	if len(packages) != 2 {
+		t.Fatalf("expected 2 packages, got %d", len(packages))
+	}
+
+	// Replace with different set
+	inputs2 := []IncludedPackageInput{
+		{PackageID: "PkgX", Description: "Package X"},
+	}
+	result2, err := svc.UpdateIncludedPackages(inputs2, "admin@test.com")
+	if err != nil {
+		t.Fatalf("UpdateIncludedPackages (replace) failed: %v", err)
+	}
+	if len(result2) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(result2))
+	}
+	if result2[0].PackageID != "PkgX" {
+		t.Errorf("PackageID: got %q, want PkgX", result2[0].PackageID)
+	}
+
+	// Verify old ones are gone
+	packages2, err := svc.GetIncludedPackages()
+	if err != nil {
+		t.Fatalf("GetIncludedPackages (after replace) failed: %v", err)
+	}
+	if len(packages2) != 1 {
+		t.Fatalf("expected 1 package after replace, got %d", len(packages2))
+	}
+}
+
+func TestUpdateIncludedPackages_EmptyList(t *testing.T) {
+	cleanIncludedPackages(t)
+	svc := newTestService(nil)
+
+	// Insert some packages first
+	_, err := svc.UpdateIncludedPackages([]IncludedPackageInput{
+		{PackageID: "PkgA"},
+	}, "user@test.com")
+	if err != nil {
+		t.Fatalf("initial insert failed: %v", err)
+	}
+
+	// Replace with empty list
+	result, err := svc.UpdateIncludedPackages([]IncludedPackageInput{}, "user@test.com")
+	if err != nil {
+		t.Fatalf("UpdateIncludedPackages (empty) failed: %v", err)
+	}
+	if len(result) != 0 {
+		t.Errorf("expected 0 results, got %d", len(result))
+	}
+
+	// Verify table is empty
+	packages, err := svc.GetIncludedPackages()
+	if err != nil {
+		t.Fatalf("GetIncludedPackages failed: %v", err)
+	}
+	if len(packages) != 0 {
+		t.Errorf("expected empty list, got %d items", len(packages))
+	}
+}
+
+func TestTrigger_WithIncludedPackagesFilter(t *testing.T) {
+	cleanIncludedPackages(t)
+	tc := newTestCleanup(t)
+	tc.cleanIncludedPkgs = true
+
+	source := seedTenant(t, tc, "vc-incl-src")
+	target := seedTenant(t, tc, "vc-incl-tgt")
+	rule := seedRule(t, tc, "vc-incl-rule", source, []db.CpiTenant{source, target}, true)
+
+	mock := &mockCPIClient{
+		packages: []cpi.CPIPackage{
+			{ID: "PkgA"},
+			{ID: "PkgB"},
+			{ID: "TemplatePkg"}, // should be excluded when whitelist is active
+		},
+		iflows: map[string][]cpi.IflowItem{
+			"PkgA":        {{ArtifactCommonItem: cpi.ArtifactCommonItem{ID: "FlowA", Name: "Flow A", Version: "1.0.0"}}},
+			"PkgB":        {{ArtifactCommonItem: cpi.ArtifactCommonItem{ID: "FlowB", Name: "Flow B", Version: "2.0.0"}}},
+			"TemplatePkg": {{ArtifactCommonItem: cpi.ArtifactCommonItem{ID: "FlowT", Name: "Flow T", Version: "1.0.0"}}},
+		},
+		runtimeArts: []cpi.RuntimeArtifact{
+			{ID: "FlowA", Version: "1.0.0"},
+			{ID: "FlowB", Version: "2.0.0"},
+			{ID: "FlowT", Version: "1.0.0"},
+		},
+	}
+	factory := func(ctx context.Context, tenant string) (IntegrationService, error) {
+		return mock, nil
+	}
+	svc := newTestService(factory)
+
+	// Insert whitelist: only PkgA and PkgB
+	_, err := svc.UpdateIncludedPackages([]IncludedPackageInput{
+		{PackageID: "PkgA"},
+		{PackageID: "PkgB"},
+	}, "test@test.com")
+	if err != nil {
+		t.Fatalf("UpdateIncludedPackages failed: %v", err)
+	}
+
+	// Trigger
+	result, err := svc.TriggerVersionCompare(rule.ID, "test@test.com")
+	if err != nil {
+		t.Fatalf("TriggerVersionCompare failed: %v", err)
+	}
+	if result.Status != consts.TriggerStatusRunning {
+		t.Fatalf("expected running, got %s", result.Status)
+	}
+
+	waitForSnapshotComplete(t, rule.ID, 5*time.Second)
+
+	// Query and verify TemplatePkg is excluded
+	resp, err := svc.QueryVersionCompare(rule.ID, VersionCompareQueryParams{
+		DesignTime: true,
+		RunTime:    true,
+	})
+	if err != nil {
+		t.Fatalf("QueryVersionCompare failed: %v", err)
+	}
+	if resp.Status != consts.SnapshotStatusCompleted {
+		t.Fatalf("expected completed, got %s", resp.Status)
+	}
+
+	// Should only have PkgA and PkgB, not TemplatePkg
+	if len(resp.Packages) != 2 {
+		t.Fatalf("expected 2 packages, got %d", len(resp.Packages))
+	}
+	pkgIDs := map[string]bool{}
+	for _, pkg := range resp.Packages {
+		pkgIDs[pkg.PackageID] = true
+	}
+	if !pkgIDs["PkgA"] {
+		t.Error("expected PkgA in results")
+	}
+	if !pkgIDs["PkgB"] {
+		t.Error("expected PkgB in results")
+	}
+	if pkgIDs["TemplatePkg"] {
+		t.Error("TemplatePkg should be excluded by whitelist")
+	}
+}
+
+func TestTrigger_EmptyWhitelistIncludesAll(t *testing.T) {
+	cleanIncludedPackages(t)
+	tc := newTestCleanup(t)
+
+	source := seedTenant(t, tc, "vc-empty-incl-src")
+	target := seedTenant(t, tc, "vc-empty-incl-tgt")
+	rule := seedRule(t, tc, "vc-empty-incl-rule", source, []db.CpiTenant{source, target}, true)
+
+	mock := &mockCPIClient{
+		packages: []cpi.CPIPackage{
+			{ID: "PkgA"},
+			{ID: "PkgB"},
+		},
+		iflows: map[string][]cpi.IflowItem{
+			"PkgA": {{ArtifactCommonItem: cpi.ArtifactCommonItem{ID: "FlowA", Name: "Flow A", Version: "1.0.0"}}},
+			"PkgB": {{ArtifactCommonItem: cpi.ArtifactCommonItem{ID: "FlowB", Name: "Flow B", Version: "2.0.0"}}},
+		},
+		runtimeArts: []cpi.RuntimeArtifact{},
+	}
+	factory := func(ctx context.Context, tenant string) (IntegrationService, error) {
+		return mock, nil
+	}
+	svc := newTestService(factory)
+
+	// Whitelist is empty → should include all packages
+	result, err := svc.TriggerVersionCompare(rule.ID, "test@test.com")
+	if err != nil {
+		t.Fatalf("TriggerVersionCompare failed: %v", err)
+	}
+	if result.Status != consts.TriggerStatusRunning {
+		t.Fatalf("expected running, got %s", result.Status)
+	}
+
+	waitForSnapshotComplete(t, rule.ID, 5*time.Second)
+
+	resp, err := svc.QueryVersionCompare(rule.ID, VersionCompareQueryParams{
+		DesignTime: true,
+	})
+	if err != nil {
+		t.Fatalf("QueryVersionCompare failed: %v", err)
+	}
+
+	// Both packages should be present
+	if len(resp.Packages) != 2 {
+		t.Errorf("expected 2 packages with empty whitelist, got %d", len(resp.Packages))
+	}
+}

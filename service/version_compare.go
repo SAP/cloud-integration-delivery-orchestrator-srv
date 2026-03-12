@@ -132,6 +132,17 @@ func (s *Service) collectVersionSnapshot(rule db.DeliveryRule) {
 		return
 	}
 
+	// Apply global included packages whitelist filter
+	if includeSet := s.loadIncludedPackageFilter(); includeSet != nil {
+		var filtered []cpi.CPIPackage
+		for _, pkg := range packages {
+			if includeSet[pkg.ID] {
+				filtered = append(filtered, pkg)
+			}
+		}
+		packages = filtered
+	}
+
 	// Build tenant list: source + included tenants (excluding source to avoid duplication)
 	allTenants := make([]db.CpiTenant, 0, len(rule.IncludedTenants))
 	allTenants = append(allTenants, rule.SourceTenant)
@@ -621,6 +632,70 @@ func (s *Service) GetVersionCompareCounts() (VersionCompareCounts, error) {
 	}
 
 	return counts, nil
+}
+
+// --- Included Packages (Global Whitelist) ---
+
+// IncludedPackageInput is the input for a single included package entry.
+type IncludedPackageInput struct {
+	PackageID   string `json:"packageID"`
+	Description string `json:"description"`
+}
+
+// GetIncludedPackages returns the global included packages whitelist.
+func (s *Service) GetIncludedPackages() ([]db.VersionCompareIncludedPackage, error) {
+	var packages []db.VersionCompareIncludedPackage
+	if err := s.DB.Order("package_id ASC").Find(&packages).Error; err != nil {
+		return nil, fmt.Errorf("failed to load included packages: %w", err)
+	}
+	return packages, nil
+}
+
+// UpdateIncludedPackages replaces the entire included packages list in a single transaction.
+func (s *Service) UpdateIncludedPackages(inputs []IncludedPackageInput, updatedBy string) ([]db.VersionCompareIncludedPackage, error) {
+	var result []db.VersionCompareIncludedPackage
+
+	err := s.DB.Transaction(func(tx *gorm.DB) error {
+		// Delete all existing entries
+		if err := tx.Where("1 = 1").Delete(&db.VersionCompareIncludedPackage{}).Error; err != nil {
+			return fmt.Errorf("failed to clear included packages: %w", err)
+		}
+
+		// Insert new entries
+		for _, input := range inputs {
+			pkg := db.VersionCompareIncludedPackage{
+				PackageID:   input.PackageID,
+				Description: input.Description,
+				CreatedBy:   updatedBy,
+			}
+			if err := tx.Create(&pkg).Error; err != nil {
+				return fmt.Errorf("failed to insert included package %s: %w", input.PackageID, err)
+			}
+			result = append(result, pkg)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// loadIncludedPackageFilter loads the global whitelist and returns a filter set.
+// Returns nil if the whitelist is empty (meaning all packages should be included).
+func (s *Service) loadIncludedPackageFilter() map[string]bool {
+	var included []db.VersionCompareIncludedPackage
+	s.DB.Find(&included)
+
+	if len(included) == 0 {
+		return nil // empty = compare all
+	}
+
+	includeSet := make(map[string]bool, len(included))
+	for _, inc := range included {
+		includeSet[inc.PackageID] = true
+	}
+	return includeSet
 }
 
 // --- Helpers ---

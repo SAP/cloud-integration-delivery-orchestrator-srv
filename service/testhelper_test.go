@@ -48,6 +48,7 @@ func TestMain(m *testing.M) {
 		&db.CpiTenant{},
 		&db.DeliveryRule{},
 		&db.VersionCompareSnapshot{},
+		&db.VersionCompareIncludedPackage{},
 	); err != nil {
 		fmt.Printf("FATAL: failed to migrate: %v\n", err)
 		os.Exit(1)
@@ -70,9 +71,10 @@ func newTestService(factory IntegrationFactory) *Service {
 // --- testCleanup tracks IDs created during a test and deletes them on t.Cleanup ---
 
 type testCleanup struct {
-	t         *testing.T
-	tenantIDs []uint
-	ruleIDs   []uint
+	t                 *testing.T
+	tenantIDs         []uint
+	ruleIDs           []uint
+	cleanIncludedPkgs bool // whether to clean VersionCompareIncludedPackage table
 }
 
 // newTestCleanup registers a t.Cleanup that deletes all tracked records
@@ -82,6 +84,10 @@ func newTestCleanup(t *testing.T) *testCleanup {
 	t.Helper()
 	tc := &testCleanup{t: t}
 	t.Cleanup(func() {
+		// Delete included packages if flagged
+		if tc.cleanIncludedPkgs {
+			testDB.Unscoped().Where("1 = 1").Delete(&db.VersionCompareIncludedPackage{})
+		}
 		// Delete snapshots for tracked rules
 		if len(tc.ruleIDs) > 0 {
 			testDB.Unscoped().Where("delivery_rule_id IN ?", tc.ruleIDs).Delete(&db.VersionCompareSnapshot{})

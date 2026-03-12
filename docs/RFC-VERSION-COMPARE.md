@@ -9,6 +9,7 @@
 5. [后端实现计划](#5-后端实现计划)
 6. [前端 UI 方案](#6-前端-ui-方案)
 7. [执行阶段](#7-执行阶段)
+8. [Global Included Packages](#8-global-included-packages)
 
 ---
 
@@ -232,6 +233,55 @@ GET /api/v1/deliveryRule/:id/versionCompare
 | 某个 artifact 在 target tenant 不存在 | 200 | 该 tenant 的 version 为空，error 说明 |
 | CPI API 调用失败 | 200 | 对应 tenant 的 error 字段记录错误，不阻断其他 tenant |
 
+### 3.4 Included Packages 管理端点
+
+全局 Package 白名单配置，用于控制 version compare 的采集范围。详见 [Section 8](#8-global-included-packages)。
+
+```
+GET /api/v1/versionCompare/includedPackages
+```
+
+返回当前全局 include 列表。
+
+#### Response
+
+```json
+{
+  "packages": [
+    { "id": 1, "packageID": "PackageA", "description": "Core integration flows", "createdBy": "user@example.com" },
+    { "id": 2, "packageID": "PackageB", "description": "EDI mappings", "createdBy": "user@example.com" }
+  ]
+}
+```
+
+```
+PUT /api/v1/versionCompare/includedPackages
+```
+
+批量替换整个 include 列表（事务操作：先删除旧记录，再插入新记录）。
+
+#### Request Body
+
+```json
+{
+  "packages": [
+    { "packageID": "PackageA", "description": "Core integration flows" },
+    { "packageID": "PackageB", "description": "EDI mappings" }
+  ]
+}
+```
+
+#### Response
+
+```json
+{
+  "packages": [
+    { "id": 3, "packageID": "PackageA", "description": "Core integration flows", "createdBy": "user@example.com" },
+    { "id": 4, "packageID": "PackageB", "description": "EDI mappings", "createdBy": "user@example.com" }
+  ]
+}
+```
+
 ---
 
 ## 4. DB 模型设计
@@ -286,7 +336,26 @@ type ArtifactVersionInfo struct {
 }
 ```
 
-### 4.3 设计决策
+### 4.3 VersionCompareIncludedPackage 表（全局白名单）
+
+全局 Package 白名单，控制 version compare 的采集范围。所有 Delivery Rule 共享同一份列表。
+
+```go
+type VersionCompareIncludedPackage struct {
+    gorm.Model
+    PackageID   string `gorm:"uniqueIndex"` // CPI Package ID (e.g. "PackageA")
+    Description string                       // 说明 (optional, e.g. "Core integration flows")
+    CreatedBy   string
+}
+```
+
+**语义**:
+- **列表为空** → 比较所有 Package（向后兼容，与当前行为一致）
+- **列表非空** → 仅比较列表中的 Package（白名单模式）
+
+**应用时机**: `collectVersionSnapshot` 的 goroutine 中，在 `GetPackages()` 之后、per-package 循环之前，加载白名单并过滤。
+
+### 4.4 设计决策
 
 | 决策 | 选择 | 理由 |
 |------|------|------|
@@ -300,6 +369,9 @@ type ArtifactVersionInfo struct {
 | Package 列表来源 | Source Tenant 实时 API 调用（`GetPackages`） | 以 Source Tenant 为准；不存在于 Source 上的 Package 不出现在比较结果中 |
 | ModifiedBy/ModifiedAt | 仅存储 + 仅对 Source Tenant 返回 | 用户关注"谁在源端做了最后一次提交"；Target Tenant 版本会被覆盖，修改人无意义 |
 | SC 缺少 ModifiedBy | 接受 API 限制，显示 `-` | SAP CPI `ScriptCollectionDesigntimeArtifacts` 端点（list 和 single-item）均不返回 `ModifiedBy`/`ModifiedAt`，属于 API 设计缺陷，无法绕过 |
+| Package 白名单范围 | 全局（所有 Rule 共享） | 某些 Package 本身是 template 生成的（包含数百个仅名称/配置不同的 artifact），无论在哪个 Rule 下都不需要 version compare |
+| 白名单空列表语义 | 空 = 全部比较 | 向后兼容，不影响现有功能；非空时切换为白名单模式 |
+| Include vs Exclude | Include List（白名单） | 用户希望显式控制哪些 Package 参与比较，白名单模式更精确 |
 
 ---
 
@@ -329,6 +401,12 @@ POST /trigger
   │     ├─ 4a. 获取 Source Tenant 的所有 Package 列表 (通过 CPI API: GetPackages)
   │     │       注意: Package 列表来自 Source Tenant 的实时 API 调用，
   │     │       不存在于 Source Tenant 上的 Package 不会出现在比较结果中。
+  │     │
+  │     ├─ 4a.1. 应用全局 Package 白名单过滤:
+  │     │       加载 VersionCompareIncludedPackage 表。
+  │     │       如果列表非空 → 仅保留列表中的 Package（白名单模式）。
+  │     │       如果列表为空 → 保留所有 Package（向后兼容）。
+  │     │       被过滤的 Package 不会产生任何 CPI API 调用，也不会出现在快照数据中。
   │     │
   │     ├─ 4b. 对每个 Tenant 预取 Runtime 数据 (并发 — errgroup):
   │     │     └─ GetRuntimeArtifacts() → 建 map[artifactID]RuntimeArtifact
@@ -464,7 +542,33 @@ func wrapArtifact(artifactType consts.ArtifactType, artifact any) db.Artifact { 
 | `db/conn.go` | AutoMigrate 新增 model |
 | `service/version_compare_test.go` | **新建** — 单元测试 |
 
-### 5.7 IntegrationService 接口扩展
+### 5.7 Global Included Packages 过滤逻辑
+
+`collectVersionSnapshot` 中 `GetPackages()` 之后增加白名单过滤：
+
+```go
+// After: packages, err := sourceClient.GetPackages(ctx)
+var included []db.VersionCompareIncludedPackage
+s.DB.Find(&included)
+
+if len(included) > 0 {
+    includeSet := make(map[string]bool, len(included))
+    for _, inc := range included {
+        includeSet[inc.PackageID] = true
+    }
+    var filtered []cpi.CPIPackage
+    for _, pkg := range packages {
+        if includeSet[pkg.ID] {
+            filtered = append(filtered, pkg)
+        }
+    }
+    packages = filtered
+}
+```
+
+**效果**: 被过滤的 Package 完全不会产生后续 CPI API 调用（per-tenant FetchPackageArtifacts），也不会出现在快照数据或查询结果中。
+
+### 5.8 IntegrationService 接口扩展
 
 `IntegrationService` 的定位是 **CPI API 的抽象层**（facade），目的是让 service 层可以 mock CPI 调用进行单元测试。现有方法（`DeployArtifact`、`RuntimeArtifact` 等）同样是对 `CpiClient` 的直接透传，不包含编排逻辑。新增的四个方法性质相同——声明 service 层对 CPI API 的新依赖。
 
@@ -535,6 +639,17 @@ HomeView
 
 **点击卡片** → 跳转到 `/jobs/version-compare/:ruleId`
 
+#### 6.2.1 Included Packages 管理
+
+列表页 header 区域新增 **"Manage Included Packages"** 按钮（因为是全局配置，放在列表页而非详情页）。
+
+点击打开一个 dialog，用于管理全局 Package 白名单：
+- 显示当前 include 列表（Package ID + Description）
+- 可以添加新的 Package ID（手动输入）
+- 可以移除已有条目
+- 空列表时显示提示："When the list is empty, all packages are compared."
+- 保存时调用 `PUT /api/v1/versionCompare/includedPackages` 批量替换
+
 ### 6.3 第二级: 比较结果详情页 (`/jobs/version-compare/:ruleId`)
 
 `VersionCompareDetailView.vue` — 展示单个 Rule 的完整比较结果。
@@ -602,9 +717,9 @@ HomeView
 | 文件 | 变更 |
 |------|------|
 | `src/router/index.ts` | `/jobs` children 新增 `version-compare` 路由 + 新增 `/jobs/version-compare/:ruleId` 路由 |
-| `src/service/api.ts` | 新增 `getVersionCompareSummary()`、`triggerVersionCompare(ruleId)`、`getVersionCompare(ruleId, params)`、`getVersionCompareCounts()` |
-| `src/service/model.ts` | 新增 request/response 类型定义 |
-| `src/views/VersionCompareView.vue` | **新建** — Rule 卡片列表页 |
+| `src/service/api.ts` | 新增 `getVersionCompareSummary()`、`triggerVersionCompare(ruleId)`、`getVersionCompare(ruleId, params)`、`getVersionCompareCounts()`；后续新增 `GetIncludedPackages()`、`UpdateIncludedPackages()` |
+| `src/service/model.ts` | 新增 request/response 类型定义；后续新增 `VersionCompareIncludedPackage` type |
+| `src/views/VersionCompareView.vue` | **新建** — Rule 卡片列表页；后续新增 "Manage Included Packages" 按钮 + dialog |
 | `src/views/VersionCompareDetailView.vue` | **新建** — 单 Rule 比较结果详情页 |
 
 ---
@@ -718,6 +833,91 @@ HomeView
 - [ ] 错误处理完善
 - [ ] Rate limit 配置调优
 
+### 阶段七: Global Included Packages ✅
+
+- [x] 后端 — DB Model:
+  - [x] 新增 `VersionCompareIncludedPackage` struct — `db/version_compare.go`
+  - [x] 注册 AutoMigrate — `db/conn.go`
+- [x] 后端 — Service:
+  - [x] `GetIncludedPackages` — 查询当前白名单 — `service/version_compare.go`
+  - [x] `UpdateIncludedPackages` — 事务批量替换白名单 — `service/version_compare.go`
+  - [x] `collectVersionSnapshot` 中增加 include 过滤逻辑 — `service/version_compare.go`
+- [x] 后端 — Handler + 路由:
+  - [x] `IncludedPackagesHandler` (GET) — `handler/version_compare.go`
+  - [x] `UpdateIncludedPackagesHandler` (PUT) — `handler/version_compare.go`
+  - [x] 注册路由: `GET /api/v1/versionCompare/includedPackages` + `PUT /api/v1/versionCompare/includedPackages` — `handler/handler.go`
+- [x] 后端 — 测试:
+  - [x] DB 层测试: `VersionCompareIncludedPackage` CRUD — `db/version_compare_test.go` (4 tests)
+  - [x] Service 层测试: `GetIncludedPackages` / `UpdateIncludedPackages` + trigger 过滤逻辑 — `service/version_compare_test.go` (5 tests)
+- [x] 前端 — 类型 + API:
+  - [x] 新增 `VersionCompareIncludedPackage` type — `src/service/model.ts`
+  - [x] 新增 `GetIncludedPackages()` / `UpdateIncludedPackages()` — `src/service/api.ts`
+- [x] 前端 — UI:
+  - [x] `VersionCompareView.vue` 新增 "Manage Included Packages" 按钮 + `ui5-dialog`（添加/移除/保存）
+- [x] 编译验证: `go build ./...` + `go vet ./...` + 前端 `vite build`
+
+> **实现备注**:
+> - `VersionCompareIncludedPackage` model 使用 `gorm:"uniqueIndex"` 在 `PackageID` 上保证唯一性
+> - `UpdateIncludedPackages` 使用 GORM Transaction：先 `DELETE WHERE 1=1`，再逐条 `Create`，保证原子性
+> - `loadIncludedPackageFilter()` 内部 helper：空表返回 `nil`（表示不过滤），非空返回 `map[string]bool`
+> - `collectVersionSnapshot` 在 `GetPackages()` 之后调用 `loadIncludedPackageFilter()`，若返回非 nil 则过滤
+> - 前端 dialog 使用 `ui5-dialog` + `ui5-toolbar` footer 模式，与项目其他 dialog 一致
+> - 前端 dialog 支持手动输入 Package ID + Description，添加/移除后点 Save 批量提交
+
+---
+
+## 8. Global Included Packages
+
+### 8.1 需求背景
+
+某些 CPI Package 包含大量由 template 生成的 artifact（数百个），这些 artifact 仅在名称和配置上有区别，对 version compare 没有意义。如果纳入比较：
+- **性能浪费**: 数百个 artifact × 多个 tenant = 数千次无意义的 CPI API 调用
+- **结果噪声**: 大量无意义的 mismatch 淹没真正需要关注的差异
+- **快照膨胀**: 存储大量无用数据
+
+### 8.2 设计方案
+
+采用 **全局 Package 白名单（Include List）** 模式：
+
+| 属性 | 说明 |
+|------|------|
+| **作用范围** | 全局，所有 Delivery Rule 共享 |
+| **存储** | 独立表 `VersionCompareIncludedPackage`（非 per-rule 字段） |
+| **空列表语义** | 比较所有 Package（向后兼容，当前行为） |
+| **非空列表语义** | 仅比较列表中的 Package（白名单模式） |
+| **应用时机** | Trigger 采集阶段，`GetPackages()` 之后、per-package 循环之前 |
+| **影响范围** | 被过滤的 Package 不产生 API 调用，不出现在快照/查询/统计中 |
+
+### 8.3 为什么选择 Include List 而非 Exclude List
+
+| 维度 | Include List | Exclude List |
+|------|-------------|-------------|
+| 语义 | "只比较这些" | "比较所有，除了这些" |
+| 新 Package 行为 | 不自动纳入（需手动添加） | 自动纳入 |
+| 用户偏好 | 显式控制，更精确 | 省事，但可能引入噪声 |
+
+选择 Include List 的原因：用户希望显式控制哪些 Package 参与比较，确保结果只包含有意义的内容。
+
+### 8.4 API 端点
+
+详见 [Section 3.4](#34-included-packages-管理端点)。
+
+- `GET /api/v1/versionCompare/includedPackages` — 获取白名单
+- `PUT /api/v1/versionCompare/includedPackages` — 批量替换白名单
+
+PUT 使用整体替换而非逐条 CRUD，原因：
+- 配置场景下"查看全貌 → 编辑 → 保存"更自然
+- 前端不需要 diff 逻辑
+- 单事务保证一致性（先 DELETE ALL 再 INSERT）
+
+### 8.5 前端交互
+
+详见 [Section 6.2.1](#621-included-packages-管理)。
+
+- "Manage Included Packages" 按钮位于 VersionCompareView（列表页）header
+- 点击打开 dialog，管理 Package ID 列表
+- 空列表提示用户当前为"全部比较"模式
+
 ---
 
 ## 附录: 设计决策记录
@@ -727,7 +927,7 @@ HomeView
 | 1 | 同步 vs 异步 | 异步 trigger + 缓存 query | 同步 POST | 20+ tenant 场景下同步调用会超时 |
 | 2 | 快照存储粒度 | 每 Rule 1 条记录 (upsert) | 每次触发新增记录 | 只需最新结果，避免数据膨胀 |
 | 3 | Match 计算位置 | GET 时后端实时计算 | 存入 DB / 推给前端 | 保证过滤灵活性，减少前端逻辑 |
-| 4 | 采集范围 | 全量（所有 Package、所有 Tenant） | 按用户选择的 Package 采集 | Trigger 无参数更简洁，Query 时再过滤 |
+| 4 | 采集范围 | 全量（所有 Package、所有 Tenant），受全局白名单约束 | 按用户选择的 Package 采集 | Trigger 无参数更简洁，Query 时再过滤；全局白名单在 trigger 阶段排除无意义 Package |
 | 5 | sourceTenant 格式 | 完整 `db.CpiTenant` 实体 | 简化的 `{id, name}` | 前端可能需要 host 等额外字段 |
 | 6 | Version 比较方式 | 字符串精确匹配 | semver 比较 | 跨 tenant 一致性检查，相等即可 |
 | 7 | DRAFT 处理 | `designTimeDraft: true` 标记 | 将 "active" 转为特殊版本号 | 保留原始信息，前端可自行决定展示方式 |
@@ -739,3 +939,8 @@ HomeView
 | 13 | 测试框架 | 标准库 `testing`（`t.Errorf`/`t.Fatalf`） | testify | 减少外部依赖，与项目现有风格一致 |
 | 14 | 测试数据库 | 本地 PostgreSQL（`LOCAL_POSTGRES_URI`） | SQLite | 保证 GORM 行为一致（JSON 序列化、`TRUNCATE CASCADE` 等 PostgreSQL 特有语义） |
 | 15 | 测试隔离 | 目标 ID 清理（`testCleanup` struct + `t.Cleanup`） | `TRUNCATE CASCADE` / `DELETE FROM` | 共享 DB 中不能删除其他数据；`testCleanup` 追踪测试创建的 ID，按 FK 安全顺序删除 |
+| 16 | Package 过滤模式 | Include List（全局白名单） | Exclude List（全局黑名单） | 用户偏好显式控制比较范围，白名单更精确 |
+| 17 | Package 过滤范围 | 全局（所有 Rule 共享） | Per-Rule 配置 | template Package 无论在哪个 Rule 下都不需要比较；全局配置减少重复维护 |
+| 18 | 空白名单语义 | 空 = 比较所有 Package | 空 = 不比较任何 Package | 向后兼容，不影响现有功能 |
+| 19 | 白名单存储位置 | 独立表 `VersionCompareIncludedPackage` | `DeliveryRule` 字段 | 全局配置不应绑定到单个 Rule；独立表语义清晰 |
+| 20 | 白名单更新 API | PUT 整体替换 | 逐条 CRUD (POST/DELETE) | 配置场景下"查看→编辑→保存"更自然；单事务保证一致性 |

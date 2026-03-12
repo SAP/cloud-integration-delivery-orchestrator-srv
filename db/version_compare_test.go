@@ -5,6 +5,8 @@ import (
 	"mmt-delivery/consts"
 	"testing"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // --- Create & Read ---
@@ -656,5 +658,119 @@ func TestVersionCompareSnapshot_SoftDelete(t *testing.T) {
 	}
 	if loaded.DeliveryRuleID != 1100 {
 		t.Errorf("DeliveryRuleID: got %d, want 1100", loaded.DeliveryRuleID)
+	}
+}
+
+// --- VersionCompareIncludedPackage Tests ---
+
+// cleanIncludedPackages registers a t.Cleanup that deletes all included packages.
+func cleanIncludedPackages(t *testing.T) {
+	t.Helper()
+	t.Cleanup(func() {
+		testDB.Unscoped().Where("1 = 1").Delete(&VersionCompareIncludedPackage{})
+	})
+}
+
+func TestIncludedPackage_CreateAndRead(t *testing.T) {
+	cleanIncludedPackages(t)
+
+	pkg := VersionCompareIncludedPackage{
+		PackageID:   "TestPkgA",
+		Description: "Test package A",
+		CreatedBy:   "tester@example.com",
+	}
+	if err := testDB.Create(&pkg).Error; err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	if pkg.ID == 0 {
+		t.Fatal("expected non-zero ID after Create")
+	}
+
+	var loaded VersionCompareIncludedPackage
+	if err := testDB.First(&loaded, pkg.ID).Error; err != nil {
+		t.Fatalf("First failed: %v", err)
+	}
+	if loaded.PackageID != "TestPkgA" {
+		t.Errorf("PackageID: got %q, want %q", loaded.PackageID, "TestPkgA")
+	}
+	if loaded.Description != "Test package A" {
+		t.Errorf("Description: got %q, want %q", loaded.Description, "Test package A")
+	}
+	if loaded.CreatedBy != "tester@example.com" {
+		t.Errorf("CreatedBy: got %q, want %q", loaded.CreatedBy, "tester@example.com")
+	}
+}
+
+func TestIncludedPackage_UniqueConstraint(t *testing.T) {
+	cleanIncludedPackages(t)
+
+	pkg1 := VersionCompareIncludedPackage{PackageID: "UniquePkg", CreatedBy: "user1"}
+	if err := testDB.Create(&pkg1).Error; err != nil {
+		t.Fatalf("Create first failed: %v", err)
+	}
+
+	pkg2 := VersionCompareIncludedPackage{PackageID: "UniquePkg", CreatedBy: "user2"}
+	err := testDB.Create(&pkg2).Error
+	if err == nil {
+		t.Fatal("expected unique constraint violation, got nil")
+	}
+}
+
+func TestIncludedPackage_BulkReplacePattern(t *testing.T) {
+	cleanIncludedPackages(t)
+
+	// Insert initial packages
+	for _, id := range []string{"PkgA", "PkgB", "PkgC"} {
+		if err := testDB.Create(&VersionCompareIncludedPackage{PackageID: id, CreatedBy: "user"}).Error; err != nil {
+			t.Fatalf("Create %s failed: %v", id, err)
+		}
+	}
+
+	// Verify 3 exist
+	var count int64
+	testDB.Model(&VersionCompareIncludedPackage{}).Count(&count)
+	if count != 3 {
+		t.Fatalf("expected 3 records, got %d", count)
+	}
+
+	// Bulk replace: delete all, insert new set
+	err := testDB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("1 = 1").Delete(&VersionCompareIncludedPackage{}).Error; err != nil {
+			return err
+		}
+		for _, id := range []string{"PkgX", "PkgY"} {
+			if err := tx.Create(&VersionCompareIncludedPackage{PackageID: id, CreatedBy: "user2"}).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Transaction failed: %v", err)
+	}
+
+	// Verify 2 exist with new IDs
+	var packages []VersionCompareIncludedPackage
+	testDB.Order("package_id ASC").Find(&packages)
+	if len(packages) != 2 {
+		t.Fatalf("expected 2 records after replace, got %d", len(packages))
+	}
+	if packages[0].PackageID != "PkgX" {
+		t.Errorf("first package: got %q, want PkgX", packages[0].PackageID)
+	}
+	if packages[1].PackageID != "PkgY" {
+		t.Errorf("second package: got %q, want PkgY", packages[1].PackageID)
+	}
+}
+
+func TestIncludedPackage_EmptyTable(t *testing.T) {
+	cleanIncludedPackages(t)
+
+	var packages []VersionCompareIncludedPackage
+	if err := testDB.Find(&packages).Error; err != nil {
+		t.Fatalf("Find failed: %v", err)
+	}
+	if len(packages) != 0 {
+		t.Errorf("expected empty slice, got %d records", len(packages))
 	}
 }
