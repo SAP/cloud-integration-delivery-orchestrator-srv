@@ -856,17 +856,22 @@ v1.POST("/deliveryRule/:id/versionCompare/createDR",  h.HandleCreateDRFromMismat
 
 ## 7. 执行阶段
 
-### Phase 1: DB Model + 核心 DR 逻辑修改
+### Phase 1: DB Model + 核心 DR 逻辑修改 — ✅ COMPLETE
 
 **范围**：Backend only
+**状态**：已完成，commit `e28203e`（2025-06-xx）
+**变更文件**：
+- `db/delivery.go` — `DeliveryRequest` 新增 `VersionCompareSnapshotID *uint` + FK 关联
+- `service/dr.go` — `InsertTenantOps`: TR 为空时跳过 `TrExist`
+- `service/dr.go` — `UpdateTenantOps`: TR 为空时跳过 `TrExist`
+- `service/approve.go` — `Approve` + `RequestApproval` 中直接调用 `BatchTrExist`
+- `service/approve.go` — `RequestApproval` 重构为使用 `QueryDrWithAssociations` 加载关联数据
 
-1. `db/delivery.go` — `DeliveryRequest` 新增 `VersionCompareSnapshotID *uint`
-2. `db/conn.go` — AutoMigrate
-3. `service/dr.go` — `InsertTenantOps`: TR 为空时跳过 `TrExist`
-4. `service/dr.go` — `UpdateTenantOps`: TR 为空时跳过 `TrExist`
-5. `service/approve.go` — `Approve` + `RequestApproval` 中直接调用 `BatchTrExist`
+**备注**：
+- AutoMigrate 无需额外修改（`DeliveryRequest` 已在 `db/conn.go` 中注册）
+- 原设计中的 `validateAllOpsHaveTR` 包装函数经代码审查后移除，改为直接调用 `BatchTrExist`（因 `TrExist` 内部已处理空 TR 检查）
 
-### Phase 2: Preview + Create Service 实现
+### Phase 2: Preview + Create Service 实现 — ⏳ TODO
 
 **范围**：Backend
 
@@ -876,14 +881,14 @@ v1.POST("/deliveryRule/:id/versionCompare/createDR",  h.HandleCreateDRFromMismat
 4. `handler/version_compare.go` — 两个新 Handler
 5. `handler/handler.go` — 注册路由
 
-### Phase 3: 后端测试
+### Phase 3: 后端测试 — ⏳ TODO
 
 **范围**：Backend
 
 1. Phase 1 修改的测试（TR optional、approve validation）
 2. Preview 和 Create 的测试
 
-### Phase 4: 前端 — Preview Dialog + Create Flow
+### Phase 4: 前端 — Preview Dialog + Create Flow — ⏳ TODO
 
 **范围**：Frontend
 
@@ -891,7 +896,7 @@ v1.POST("/deliveryRule/:id/versionCompare/createDR",  h.HandleCreateDRFromMismat
 2. `src/service/model.ts` — 更新 DeliveryRequest 类型（新增 VersionCompareSnapshotID）
 3. `src/views/VersionCompareDetailView.vue` — 按钮 + Dialog + 两步流程
 
-### Phase 5: 前端 — DR 详情页适配
+### Phase 5: 前端 — DR 详情页适配 — ⏳ TODO
 
 **范围**：Frontend
 
