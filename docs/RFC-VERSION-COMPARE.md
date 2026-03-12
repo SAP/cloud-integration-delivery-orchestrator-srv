@@ -553,9 +553,10 @@ HomeView
 │  Source: {sourceTenant}                                  │
 │  Snapshot: {triggeredAt} by {triggeredBy}  [Refresh] btn│
 │                                                         │
-│  [☑ Design Time] [☑ Runtime] [☐ Mismatch Only]          │
+│  [☑ Design Time] [☑ Runtime] [☑ Mismatch Only]          │
 │                                                         │
-│  Packages: [☑ PkgA] [☑ PkgB] [☐ PkgC]                 │
+│  Packages: [Select All] [Deselect All]  (max-height 滚动)│
+│  [☑ PkgA] [☑ PkgB] [☐ PkgC]                            │
 │                                                         │
 │  ┌─ Package: PkgA ────────────────────────────────────┐ │
 │  │                                                     │ │
@@ -693,9 +694,9 @@ HomeView
 > **VersionCompareDetailView.vue (比较结果详情页)**:
 > - 标题显示 Rule 名称（通过 `GetDeliveryRule(ruleId)` 并行加载）
 > - Meta 区域: Source Tenant、Snapshot 时间 + 触发者
-> - 三组 Filter: Design Time / Runtime / Mismatch Only（变更时重新调 GET）
-> - Package Filter: 当有多个 Package 时显示 checkbox 列表，前端本地过滤
-> - 比较表格按 Package 分组，每个 Package 一个 `<table>`
+> - 三组 Filter: Design Time / Runtime / Mismatch Only（**Mismatch Only 默认勾选**；变更时重新调 GET）
+> - Package Filter: 当有多个 Package 时显示 checkbox 列表，前端本地过滤；带 Select All / Deselect All 按钮；checkbox 区域有 `max-height: 6rem` 限高滚动
+> - 比较表格按 Package 分组，每个 Package 一个 `<ui5-panel>`（可折叠），内含 `<ui5-table>`
 > - **每个 Tenant 一列**（非 DT/RT 分两列）：单元格内 DT/RT 上下堆叠
 > - Source 列无 match 标记；Target 列每行带 ✓/✗ 图标 + 背景色（绿/红）
 > - DRAFT 标签: `designTimeDraft` 时显示 `<ui5-tag>DRAFT</ui5-tag>`
