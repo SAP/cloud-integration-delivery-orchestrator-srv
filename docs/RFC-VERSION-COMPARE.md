@@ -664,18 +664,46 @@ HomeView
 > - Trigger handler 根据 `TriggerResult.Status` 返回不同 HTTP 状态码: `running`→200, `rate_limited`→429, `conflict`→409
 > - `triggeredBy` 使用 `service.UserEmail(ctx)` 获取当前用户邮箱
 
-### 阶段四: 前端 — API + 类型定义
+### 阶段四: 前端 — API + 类型定义 ✅
 
-- [ ] 新增 TypeScript 类型定义
-- [ ] 新增 API 调用函数（trigger + query）
+- [x] 新增 TypeScript 类型定义 — `src/service/model.ts`（8 个类型: `SnapshotStatus`, `TriggerStatus`, `TriggerResult`, `VersionCompareTenantInfo`, `VersionCompareArtifactTenantInfo`, `VersionCompareArtifact`, `VersionComparePackage`, `VersionCompareResponse`, `VersionCompareSummaryItem`）
+- [x] 新增 API 调用函数 — `src/service/api.ts`（4 个函数: `TriggerVersionCompare`, `QueryVersionCompare`, `GetVersionCompareSummary`, `GetVersionCompareCounts`）
 
-### 阶段五: 前端 — UI 组件
+> **实现备注**:
+> - 类型定义与后端 Go struct 的 JSON tag 一一对应
+> - `QueryVersionCompare` 通过 `params` 传递 `designTime`/`runTime`/`mismatchOnly` 查询参数（布尔值转字符串）
+> - `GetVersionCompareCounts` 返回 `AppCount` 类型（与 HomeView AppCard 框架统一）
 
-- [ ] 实现 `VersionCompareView.vue`（Rule 卡片列表页）
-- [ ] 实现 `VersionCompareDetailView.vue`（比较结果详情页）
-- [ ] 路由注册（`/jobs/version-compare` + `/jobs/version-compare/:ruleId`）
-- [ ] HomeView AppCard 自动显示（由 router children 发现机制驱动）
-- [ ] 轮询机制（trigger 后等待 completed）
+### 阶段五: 前端 — UI 组件 ✅
+
+- [x] 实现 `VersionCompareView.vue`（Rule 卡片列表页）
+- [x] 实现 `VersionCompareDetailView.vue`（比较结果详情页）
+- [x] 路由注册（`/jobs/version-compare` + `/jobs/version-compare/:ruleId`）
+- [x] HomeView AppCard 自动显示（由 router children 发现机制驱动 + `versionCompareCounts` 状态函数）
+- [x] 轮询机制（trigger 后 3s 间隔 poll GET 直到 status !== 'running'）
+
+> **实现备注**:
+>
+> **VersionCompareView.vue (Rule 卡片列表页)**:
+> - 调用 `GetVersionCompareSummary` 获取所有 Rule 的快照摘要
+> - 每张卡片显示: Rule 名称、Source Tenant、Tenant 数量、状态 Tag、matched/mismatched/total 计数
+> - 每张卡片有 Trigger Scan 按钮（`event.stopPropagation()` 防止冒泡到卡片点击）
+> - 点击卡片跳转到 `/jobs/version-compare/:ruleId`
+>
+> **VersionCompareDetailView.vue (比较结果详情页)**:
+> - 标题显示 Rule 名称（通过 `GetDeliveryRule(ruleId)` 并行加载）
+> - Meta 区域: Source Tenant、Snapshot 时间 + 触发者
+> - 三组 Filter: Design Time / Runtime / Mismatch Only（变更时重新调 GET）
+> - Package Filter: 当有多个 Package 时显示 checkbox 列表，前端本地过滤
+> - 比较表格按 Package 分组，每个 Package 一个 `<table>`
+> - **每个 Tenant 一列**（非 DT/RT 分两列）：单元格内 DT/RT 上下堆叠
+> - Source 列无 match 标记；Target 列每行带 ✓/✗ 图标 + 背景色（绿/红）
+> - DRAFT 标签: `designTimeDraft` 时显示 `<ui5-tag>DRAFT</ui5-tag>`
+> - RuntimeStatus 标签: 显示 STARTED/ERROR 等状态
+> - 错误信息: `error` 字段通过 `title` 属性作为 tooltip
+> - N/A: artifact 在 tenant 上不存在时显示灰色斜体 "N/A" + tooltip
+> - `onUnmounted` 清理 poll timer，防止组件销毁后继续轮询
+> - Go `map[uint]` JSON 序列化为 string key，通过 `Record<number, ...>` + JS 自动类型转换处理
 
 ### 阶段六: 集成测试 + 优化
 
@@ -704,4 +732,4 @@ HomeView
 | 12 | 测试文件位置 | 与被测代码同 package 目录 | 集中 `test/` 目录 | Go 约定：`_test.go` 与实现文件同目录，`go test ./...` 自动发现；集中测试目录是 Java/JS 惯例，在 Go 中为反模式 |
 | 13 | 测试框架 | 标准库 `testing`（`t.Errorf`/`t.Fatalf`） | testify | 减少外部依赖，与项目现有风格一致 |
 | 14 | 测试数据库 | 本地 PostgreSQL（`LOCAL_POSTGRES_URI`） | SQLite | 保证 GORM 行为一致（JSON 序列化、`TRUNCATE CASCADE` 等 PostgreSQL 特有语义） |
-| 15 | 测试隔离 | `TRUNCATE CASCADE` per test | `DELETE FROM` | FK 约束阻止 DELETE（如 `delivery_requests` → `delivery_rules`），CASCADE 确保清理 |
+| 15 | 测试隔离 | 目标 ID 清理（`testCleanup` struct + `t.Cleanup`） | `TRUNCATE CASCADE` / `DELETE FROM` | 共享 DB 中不能删除其他数据；`testCleanup` 追踪测试创建的 ID，按 FK 安全顺序删除 |
