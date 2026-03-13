@@ -913,13 +913,16 @@ v1.POST("/deliveryRule/:id/versionCompare/createDR",  h.HandleCreateDRFromMismat
 - 测试使用 `t.Name()` 作为后缀确保多测试间数据唯一性
 - 现有 VC 测试因共享 DB 中 included packages 状态导致偶发顺序依赖（非本次变更引入）
 
-### Phase 4: 前端 — Preview Dialog + Create Flow — ⏳ TODO
+### Phase 4: 前端 — Preview Dialog + Create Flow — ✅ COMPLETE
 
 **范围**：Frontend
 
-1. `src/service/api.ts` — 新增 API 函数和类型
-2. `src/service/model.ts` — 更新 DeliveryRequest 类型（新增 VersionCompareSnapshotID）
-3. `src/views/VersionCompareDetailView.vue` — 按钮 + Dialog + 两步流程
+1. `src/service/model.ts` — 新增 8 个 TypeScript 接口（Preview/Create API 类型）
+2. `src/service/api.ts` — 新增 `PreviewDRFromMismatch`、`CreateDRFromMismatch` API 函数
+3. `src/service/http.ts` — HTTP 拦截器重构：导出 `HttpError` 接口，支持 `silentError` 配置跳过全局 toast
+4. `src/views/VersionCompareDetailView.vue` — "Create Delivery Request" 按钮 + 两步 Dialog（Preview → Result），ui5-table 展示分类 artifact 列表，内联 HttpError 错误处理
+5. `src/views/DeliveryRequestListView.vue` — 移除 `onCreate`/`handleDelete` 中的手动 toast（修复 double-toast bug）
+6. `docs/HTTP-INTERCEPTOR-REFACTOR.md` — HTTP 拦截器重构文档
 
 ### Phase 5: 前端 — DR 详情页适配 — ⏳ TODO
 
