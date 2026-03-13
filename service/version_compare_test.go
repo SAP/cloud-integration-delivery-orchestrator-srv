@@ -9,6 +9,7 @@ import (
 	"mmt-delivery/consts"
 	"mmt-delivery/db"
 	"mmt-delivery/pkg/cpi"
+	"mmt-delivery/pkg/lifecycle"
 )
 
 // =============================================================================
@@ -1404,5 +1405,798 @@ func TestTrigger_EmptyWhitelistIncludesAll(t *testing.T) {
 	// Both packages should be present
 	if len(resp.Packages) != 2 {
 		t.Errorf("expected 2 packages with empty whitelist, got %d", len(resp.Packages))
+	}
+}
+
+// =============================================================================
+// Phase 2 Tests: PreviewDRFromMismatch
+// =============================================================================
+
+// setupPreviewTestData creates a snapshot with mismatches of various types for preview tests.
+func setupPreviewTestData(t *testing.T) (ruleID uint, snapshotCompletedAt time.Time, tc *testCleanup) {
+	t.Helper()
+	tc = newTestCleanup(t)
+
+	source := seedTenant(t, tc, "prev-src-"+t.Name())
+	target := seedTenant(t, tc, "prev-tgt-"+t.Name())
+	rule := seedRule(t, tc, "prev-rule-"+t.Name(), source, []db.CpiTenant{source, target}, true)
+	rule.VersionPattern = "1.0.*"
+	testDB.Save(&rule)
+
+	now := time.Now().Truncate(time.Second)
+	snap := db.VersionCompareSnapshot{
+		DeliveryRuleID: rule.ID,
+		Status:         consts.SnapshotStatusCompleted,
+		TriggeredAt:    now,
+		CompletedAt:    &now,
+		TriggeredBy:    "test",
+		Data: db.SnapshotData{
+			SourceTenantID:  source.ID,
+			ComparedTenants: []uint{target.ID},
+			Packages: []db.PackageSnapshot{
+				{
+					PackageID: "pkg1",
+					Artifacts: []db.ArtifactSnapshot{
+						{
+							// Includable: version matches pattern, not draft, not duplicate
+							ID: "iflow-ok", Name: "IFlow OK", Type: "Integration Flow",
+							Versions: map[uint]db.ArtifactVersionInfo{
+								source.ID: {DesignTimeVersion: "1.0.5"},
+								target.ID: {DesignTimeVersion: "1.0.4"}, // mismatch
+							},
+						},
+						{
+							// Draft: source has "active" DT version
+							ID: "iflow-draft", Name: "IFlow Draft", Type: "Integration Flow",
+							Versions: map[uint]db.ArtifactVersionInfo{
+								source.ID: {DesignTimeVersion: "active"},
+								target.ID: {DesignTimeVersion: "1.0.0"},
+							},
+						},
+						{
+							// VersionPattern mismatch: version 2.1.0 doesn't match 1.0.*
+							ID: "iflow-badver", Name: "IFlow BadVer", Type: "Integration Flow",
+							Versions: map[uint]db.ArtifactVersionInfo{
+								source.ID: {DesignTimeVersion: "2.1.0"},
+								target.ID: {DesignTimeVersion: "1.0.0"},
+							},
+						},
+						{
+							// Fully matched — should NOT appear in preview
+							ID: "iflow-matched", Name: "IFlow Matched", Type: "Integration Flow",
+							Versions: map[uint]db.ArtifactVersionInfo{
+								source.ID: {DesignTimeVersion: "1.0.5"},
+								target.ID: {DesignTimeVersion: "1.0.5"}, // no mismatch
+							},
+						},
+					},
+				},
+				{
+					PackageID: "pkg2",
+					Artifacts: []db.ArtifactSnapshot{
+						{
+							// Target absent from snapshot → mismatch (Preview treats missing as mismatch)
+							ID: "iflow-missing-tgt", Name: "IFlow Missing Target", Type: "Integration Flow",
+							Versions: map[uint]db.ArtifactVersionInfo{
+								source.ID: {DesignTimeVersion: "1.0.1"},
+								// target not present in map
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	seedSnapshot(t, snap)
+
+	return rule.ID, now, tc
+}
+
+func TestPreviewDR_Basic(t *testing.T) {
+	ruleID, _, _ := setupPreviewTestData(t)
+	svc := newTestService(nil)
+
+	resp, err := svc.PreviewDRFromMismatch(ruleID)
+	if err != nil {
+		t.Fatalf("PreviewDRFromMismatch failed: %v", err)
+	}
+
+	// 4 mismatched artifacts (iflow-ok, iflow-draft, iflow-badver, iflow-missing-tgt)
+	// iflow-matched is NOT a mismatch
+	if resp.Summary.TotalMismatch != 4 {
+		t.Errorf("TotalMismatch: got %d, want 4", resp.Summary.TotalMismatch)
+	}
+	if len(resp.Artifacts) != 4 {
+		t.Errorf("Artifacts count: got %d, want 4", len(resp.Artifacts))
+	}
+
+	// Check that snapshot info is returned
+	if resp.SnapshotID == 0 {
+		t.Error("SnapshotID should be non-zero")
+	}
+	if resp.SnapshotCompletedAt.IsZero() {
+		t.Error("SnapshotCompletedAt should be set")
+	}
+}
+
+func TestPreviewDR_DraftDetection(t *testing.T) {
+	ruleID, _, _ := setupPreviewTestData(t)
+	svc := newTestService(nil)
+
+	resp, err := svc.PreviewDRFromMismatch(ruleID)
+	if err != nil {
+		t.Fatalf("PreviewDRFromMismatch failed: %v", err)
+	}
+
+	// Find iflow-draft
+	var draftArt *PreviewDRArtifact
+	for i := range resp.Artifacts {
+		if resp.Artifacts[i].ArtifactID == "iflow-draft" {
+			draftArt = &resp.Artifacts[i]
+			break
+		}
+	}
+	if draftArt == nil {
+		t.Fatal("iflow-draft not found in artifacts")
+	}
+	if draftArt.Category != "draft" {
+		t.Errorf("iflow-draft category: got %q, want %q", draftArt.Category, "draft")
+	}
+	if resp.Summary.Draft != 1 {
+		t.Errorf("Draft count: got %d, want 1", resp.Summary.Draft)
+	}
+}
+
+func TestPreviewDR_VersionPatternDetection(t *testing.T) {
+	ruleID, _, _ := setupPreviewTestData(t)
+	svc := newTestService(nil)
+
+	resp, err := svc.PreviewDRFromMismatch(ruleID)
+	if err != nil {
+		t.Fatalf("PreviewDRFromMismatch failed: %v", err)
+	}
+
+	var vpArt *PreviewDRArtifact
+	for i := range resp.Artifacts {
+		if resp.Artifacts[i].ArtifactID == "iflow-badver" {
+			vpArt = &resp.Artifacts[i]
+			break
+		}
+	}
+	if vpArt == nil {
+		t.Fatal("iflow-badver not found in artifacts")
+	}
+	if vpArt.Category != "versionPattern" {
+		t.Errorf("iflow-badver category: got %q, want %q", vpArt.Category, "versionPattern")
+	}
+	if resp.Summary.VersionPattern != 1 {
+		t.Errorf("VersionPattern count: got %d, want 1", resp.Summary.VersionPattern)
+	}
+}
+
+func TestPreviewDR_DuplicateDetection(t *testing.T) {
+	tc := newTestCleanup(t)
+
+	source := seedTenant(t, tc, "dup-src-"+t.Name())
+	target := seedTenant(t, tc, "dup-tgt-"+t.Name())
+	rule := seedRule(t, tc, "dup-rule-"+t.Name(), source, []db.CpiTenant{source, target}, true)
+	rule.VersionPattern = "1.0.*"
+	testDB.Save(&rule)
+
+	now := time.Now().Truncate(time.Second)
+	snap := db.VersionCompareSnapshot{
+		DeliveryRuleID: rule.ID,
+		Status:         consts.SnapshotStatusCompleted,
+		TriggeredAt:    now,
+		CompletedAt:    &now,
+		TriggeredBy:    "test",
+		Data: db.SnapshotData{
+			SourceTenantID:  source.ID,
+			ComparedTenants: []uint{target.ID},
+			Packages: []db.PackageSnapshot{
+				{
+					PackageID: "pkg1",
+					Artifacts: []db.ArtifactSnapshot{
+						{
+							ID: "iflow-dup", Name: "IFlow Dup", Type: "Integration Flow",
+							Versions: map[uint]db.ArtifactVersionInfo{
+								source.ID: {DesignTimeVersion: "1.0.5"},
+								target.ID: {DesignTimeVersion: "1.0.4"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	seedSnapshot(t, snap)
+
+	// Create an active DR that already contains iflow-dup at version 1.0.5
+	art := seedArtifact(t, tc, db.Artifact{
+		TechID:    "iflow-dup",
+		Version:   "1.0.5",
+		Name:      "IFlow Dup",
+		Type:      consts.Artifact_Type_Iflow,
+		PackageID: "pkg1",
+	})
+	existingDR := seedDeliveryRequest(t, tc, db.DeliveryRequest{
+		Name:            "Existing DR",
+		DeliveryRuleID:  rule.ID,
+		SourceTenantID:  source.ID,
+		AggregateStatus: lifecycle.AggPending,
+		CreatedBy:       "user",
+		UpdatedBy:       "user",
+	})
+	seedOp(t, db.ArtifactTenantOperation{
+		DeliveryRequestID:      existingDR.ID,
+		TenantID:               target.ID,
+		ArtifactID:             art.ID,
+		ArtifactTechID:         art.TechID,
+		ArtifactVersion:        art.Version,
+		TransportRequestNumber: "",
+		RequestState:           lifecycle.RequestPending,
+		ImportState:            lifecycle.ImportNotStarted,
+		DeployState:            lifecycle.DeployNotStarted,
+	})
+
+	svc := newTestService(nil)
+	resp, err := svc.PreviewDRFromMismatch(rule.ID)
+	if err != nil {
+		t.Fatalf("PreviewDRFromMismatch failed: %v", err)
+	}
+
+	if resp.Summary.Duplicate != 1 {
+		t.Errorf("Duplicate count: got %d, want 1", resp.Summary.Duplicate)
+	}
+	var dupArt *PreviewDRArtifact
+	for i := range resp.Artifacts {
+		if resp.Artifacts[i].ArtifactID == "iflow-dup" {
+			dupArt = &resp.Artifacts[i]
+			break
+		}
+	}
+	if dupArt == nil {
+		t.Fatal("iflow-dup not found")
+	}
+	if dupArt.Category != "duplicate" {
+		t.Errorf("category: got %q, want %q", dupArt.Category, "duplicate")
+	}
+	if dupArt.ExistingDR == nil {
+		t.Fatal("ExistingDR should not be nil for duplicate")
+	}
+	if dupArt.ExistingDR.ID != existingDR.ID {
+		t.Errorf("ExistingDR.ID: got %d, want %d", dupArt.ExistingDR.ID, existingDR.ID)
+	}
+}
+
+func TestPreviewDR_NoMismatch(t *testing.T) {
+	tc := newTestCleanup(t)
+
+	source := seedTenant(t, tc, "nomis-src-"+t.Name())
+	target := seedTenant(t, tc, "nomis-tgt-"+t.Name())
+	rule := seedRule(t, tc, "nomis-rule-"+t.Name(), source, []db.CpiTenant{source, target}, true)
+
+	now := time.Now().Truncate(time.Second)
+	snap := db.VersionCompareSnapshot{
+		DeliveryRuleID: rule.ID,
+		Status:         consts.SnapshotStatusCompleted,
+		TriggeredAt:    now,
+		CompletedAt:    &now,
+		TriggeredBy:    "test",
+		Data: db.SnapshotData{
+			SourceTenantID:  source.ID,
+			ComparedTenants: []uint{target.ID},
+			Packages: []db.PackageSnapshot{
+				{
+					PackageID: "pkg1",
+					Artifacts: []db.ArtifactSnapshot{
+						{
+							ID: "iflow-all-match", Name: "All Match", Type: "Integration Flow",
+							Versions: map[uint]db.ArtifactVersionInfo{
+								source.ID: {DesignTimeVersion: "1.0.0"},
+								target.ID: {DesignTimeVersion: "1.0.0"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	seedSnapshot(t, snap)
+
+	svc := newTestService(nil)
+	_, err := svc.PreviewDRFromMismatch(rule.ID)
+	if err == nil {
+		t.Fatal("PreviewDRFromMismatch with no mismatches should return error")
+	}
+}
+
+func TestPreviewDR_NoSnapshot(t *testing.T) {
+	tc := newTestCleanup(t)
+	source := seedTenant(t, tc, "nosnap-src-"+t.Name())
+	rule := seedRule(t, tc, "nosnap-rule-"+t.Name(), source, []db.CpiTenant{source}, true)
+
+	svc := newTestService(nil)
+	_, err := svc.PreviewDRFromMismatch(rule.ID)
+	if err == nil {
+		t.Fatal("PreviewDRFromMismatch with no snapshot should return error")
+	}
+}
+
+// =============================================================================
+// Phase 2 Tests: CreateDRFromMismatch
+// =============================================================================
+
+func setupCreateTestData(t *testing.T) (ruleID uint, snapshotID uint, snapshotCompletedAt time.Time, sourceID uint, tc *testCleanup) {
+	t.Helper()
+	tc = newTestCleanup(t)
+
+	source := seedTenant(t, tc, "cre-src-"+t.Name())
+	source.TransportNodeID = 500
+	source.TransportNodeName = "cre-src-node"
+	testDB.Save(&source)
+
+	target := seedTenant(t, tc, "cre-tgt-"+t.Name())
+	target.TransportNodeID = 600
+	target.TransportNodeName = "cre-tgt-node"
+	testDB.Save(&target)
+
+	rule := seedRule(t, tc, "cre-rule-"+t.Name(), source, []db.CpiTenant{source, target}, true)
+	rule.VersionPattern = "1.0.*"
+	testDB.Save(&rule)
+
+	now := time.Now().Truncate(time.Second)
+	snap := seedSnapshot(t, db.VersionCompareSnapshot{
+		DeliveryRuleID: rule.ID,
+		Status:         consts.SnapshotStatusCompleted,
+		TriggeredAt:    now,
+		CompletedAt:    &now,
+		TriggeredBy:    "test",
+		Data: db.SnapshotData{
+			SourceTenantID:  source.ID,
+			ComparedTenants: []uint{target.ID},
+			Packages: []db.PackageSnapshot{
+				{
+					PackageID: "pkg1",
+					Artifacts: []db.ArtifactSnapshot{
+						{
+							ID: "cre-iflow-1", Name: "Create IFlow 1", Type: "Integration Flow",
+							Versions: map[uint]db.ArtifactVersionInfo{
+								source.ID: {DesignTimeVersion: "1.0.5"},
+								target.ID: {DesignTimeVersion: "1.0.4"},
+							},
+						},
+						{
+							ID: "cre-iflow-2", Name: "Create IFlow 2", Type: "Integration Flow",
+							Versions: map[uint]db.ArtifactVersionInfo{
+								source.ID: {DesignTimeVersion: "1.0.3"},
+								target.ID: {DesignTimeVersion: "1.0.2"},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	return rule.ID, snap.ID, now, source.ID, tc
+}
+
+func TestCreateDR_Basic(t *testing.T) {
+	ruleID, snapshotID, completedAt, _, tc := setupCreateTestData(t)
+
+	// CPI mock for downgrade check — target has lower version, so no downgrade error
+	factory := func(ctx context.Context, tenant string) (IntegrationService, error) {
+		return &mockCPIClient{}, nil
+	}
+	svc := newTestService(factory)
+
+	req := CreateDRFromMismatchRequest{
+		SnapshotID:          snapshotID,
+		SnapshotCompletedAt: completedAt,
+		ArtifactKeys: []ArtifactKey{
+			{ArtifactID: "cre-iflow-1", PackageID: "pkg1"},
+			{ArtifactID: "cre-iflow-2", PackageID: "pkg1"},
+		},
+	}
+
+	resp, err := svc.CreateDRFromMismatch(ruleID, req, "test-user")
+	if err != nil {
+		t.Fatalf("CreateDRFromMismatch failed: %v", err)
+	}
+	tc.trackDR(resp.DeliveryRequest.ID)
+
+	if resp.Summary.Requested != 2 {
+		t.Errorf("Requested: got %d, want 2", resp.Summary.Requested)
+	}
+	if resp.Summary.Created != 2 {
+		t.Errorf("Created: got %d, want 2", resp.Summary.Created)
+	}
+	if resp.DeliveryRequest.ID == 0 {
+		t.Fatal("DR ID should be non-zero")
+	}
+	if resp.DeliveryRequest.AggregateStatus != lifecycle.AggPending {
+		t.Errorf("DR status: got %s, want PENDING", resp.DeliveryRequest.AggregateStatus)
+	}
+	if resp.DeliveryRequest.VersionCompareSnapshotID == nil {
+		t.Fatal("VersionCompareSnapshotID should be set")
+	}
+	if *resp.DeliveryRequest.VersionCompareSnapshotID != snapshotID {
+		t.Errorf("VersionCompareSnapshotID: got %d, want %d", *resp.DeliveryRequest.VersionCompareSnapshotID, snapshotID)
+	}
+
+	// Verify ops have empty TR
+	for _, op := range resp.DeliveryRequest.ArtifactTenantOperations {
+		if op.TransportRequestNumber != "" {
+			t.Errorf("op %d should have empty TR, got %q", op.ID, op.TransportRequestNumber)
+		}
+	}
+}
+
+func TestCreateDR_SnapshotStale(t *testing.T) {
+	ruleID, snapshotID, _, _, _ := setupCreateTestData(t)
+
+	svc := newTestService(nil)
+
+	// Use a stale completedAt
+	staleTime := time.Now().Add(-1 * time.Hour).Truncate(time.Second)
+	req := CreateDRFromMismatchRequest{
+		SnapshotID:          snapshotID,
+		SnapshotCompletedAt: staleTime,
+		ArtifactKeys: []ArtifactKey{
+			{ArtifactID: "cre-iflow-1", PackageID: "pkg1"},
+		},
+	}
+
+	_, err := svc.CreateDRFromMismatch(ruleID, req, "test-user")
+	if err == nil {
+		t.Fatal("CreateDRFromMismatch with stale snapshot should fail")
+	}
+}
+
+func TestCreateDR_EmptyArtifactKeys(t *testing.T) {
+	ruleID, snapshotID, completedAt, _, _ := setupCreateTestData(t)
+
+	svc := newTestService(nil)
+
+	req := CreateDRFromMismatchRequest{
+		SnapshotID:          snapshotID,
+		SnapshotCompletedAt: completedAt,
+		ArtifactKeys:        []ArtifactKey{}, // empty
+	}
+
+	_, err := svc.CreateDRFromMismatch(ruleID, req, "test-user")
+	if err == nil {
+		t.Fatal("CreateDRFromMismatch with empty artifactKeys should fail")
+	}
+}
+
+func TestCreateDR_JiraRequired(t *testing.T) {
+	tc := newTestCleanup(t)
+
+	source := seedTenant(t, tc, "jira-src-"+t.Name())
+	target := seedTenant(t, tc, "jira-tgt-"+t.Name())
+	rule := seedRule(t, tc, "jira-rule-"+t.Name(), source, []db.CpiTenant{source, target}, true)
+	rule.VersionPattern = "1.0.*"
+	rule.RequireJira = true
+	testDB.Save(&rule)
+
+	now := time.Now().Truncate(time.Second)
+	snap := seedSnapshot(t, db.VersionCompareSnapshot{
+		DeliveryRuleID: rule.ID,
+		Status:         consts.SnapshotStatusCompleted,
+		TriggeredAt:    now,
+		CompletedAt:    &now,
+		TriggeredBy:    "test",
+		Data: db.SnapshotData{
+			SourceTenantID:  source.ID,
+			ComparedTenants: []uint{target.ID},
+			Packages: []db.PackageSnapshot{
+				{
+					PackageID: "pkg1",
+					Artifacts: []db.ArtifactSnapshot{
+						{
+							ID: "jira-iflow", Name: "Jira IFlow", Type: "Integration Flow",
+							Versions: map[uint]db.ArtifactVersionInfo{
+								source.ID: {DesignTimeVersion: "1.0.1"},
+								target.ID: {DesignTimeVersion: "1.0.0"},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	svc := newTestService(nil)
+
+	// No JIRA link → should fail
+	req := CreateDRFromMismatchRequest{
+		SnapshotID:          snap.ID,
+		SnapshotCompletedAt: now,
+		JiraLink:            "",
+		ArtifactKeys:        []ArtifactKey{{ArtifactID: "jira-iflow", PackageID: "pkg1"}},
+	}
+	_, err := svc.CreateDRFromMismatch(rule.ID, req, "test-user")
+	if err == nil {
+		t.Fatal("CreateDRFromMismatch without JIRA when required should fail")
+	}
+
+	// With JIRA link → should succeed (assuming CPI mock for downgrade passes)
+	factory := func(ctx context.Context, tenant string) (IntegrationService, error) {
+		return &mockCPIClient{}, nil
+	}
+	svc2 := newTestService(factory)
+
+	req.JiraLink = "https://jira.example.com/PROJ-123"
+	resp, err := svc2.CreateDRFromMismatch(rule.ID, req, "test-user")
+	if err != nil {
+		t.Fatalf("CreateDRFromMismatch with JIRA should succeed: %v", err)
+	}
+	tc.trackDR(resp.DeliveryRequest.ID)
+	if resp.DeliveryRequest.JiraLink != "https://jira.example.com/PROJ-123" {
+		t.Errorf("JiraLink: got %q", resp.DeliveryRequest.JiraLink)
+	}
+}
+
+func TestCreateDR_SnapshotFKSet(t *testing.T) {
+	ruleID, snapshotID, completedAt, _, tc := setupCreateTestData(t)
+
+	factory := func(ctx context.Context, tenant string) (IntegrationService, error) {
+		return &mockCPIClient{}, nil
+	}
+	svc := newTestService(factory)
+
+	req := CreateDRFromMismatchRequest{
+		SnapshotID:          snapshotID,
+		SnapshotCompletedAt: completedAt,
+		ArtifactKeys: []ArtifactKey{
+			{ArtifactID: "cre-iflow-1", PackageID: "pkg1"},
+		},
+	}
+
+	resp, err := svc.CreateDRFromMismatch(ruleID, req, "test-user")
+	if err != nil {
+		t.Fatalf("CreateDRFromMismatch failed: %v", err)
+	}
+	tc.trackDR(resp.DeliveryRequest.ID)
+
+	// Verify FK in DB
+	var dbDR db.DeliveryRequest
+	testDB.First(&dbDR, resp.DeliveryRequest.ID)
+	if dbDR.VersionCompareSnapshotID == nil {
+		t.Fatal("VersionCompareSnapshotID should be set in DB")
+	}
+	if *dbDR.VersionCompareSnapshotID != snapshotID {
+		t.Errorf("VersionCompareSnapshotID in DB: got %d, want %d", *dbDR.VersionCompareSnapshotID, snapshotID)
+	}
+}
+
+func TestCreateDR_DuplicateIncluded(t *testing.T) {
+	// Test that user can intentionally select an artifact that was marked as duplicate in preview.
+	// The Create API should include it normally.
+	tc := newTestCleanup(t)
+
+	source := seedTenant(t, tc, "dupinc-src-"+t.Name())
+	target := seedTenant(t, tc, "dupinc-tgt-"+t.Name())
+	rule := seedRule(t, tc, "dupinc-rule-"+t.Name(), source, []db.CpiTenant{source, target}, true)
+	rule.VersionPattern = "1.0.*"
+	testDB.Save(&rule)
+
+	now := time.Now().Truncate(time.Second)
+	snap := seedSnapshot(t, db.VersionCompareSnapshot{
+		DeliveryRuleID: rule.ID,
+		Status:         consts.SnapshotStatusCompleted,
+		TriggeredAt:    now,
+		CompletedAt:    &now,
+		TriggeredBy:    "test",
+		Data: db.SnapshotData{
+			SourceTenantID:  source.ID,
+			ComparedTenants: []uint{target.ID},
+			Packages: []db.PackageSnapshot{
+				{
+					PackageID: "pkg1",
+					Artifacts: []db.ArtifactSnapshot{
+						{
+							ID: "dup-allowed-iflow", Name: "Dup Allowed", Type: "Integration Flow",
+							Versions: map[uint]db.ArtifactVersionInfo{
+								source.ID: {DesignTimeVersion: "1.0.7"},
+								target.ID: {DesignTimeVersion: "1.0.6"},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	// Create an existing active DR with the same artifact
+	dupArt := seedArtifact(t, tc, db.Artifact{
+		TechID:    "dup-allowed-iflow",
+		Version:   "1.0.7",
+		Name:      "Dup Allowed",
+		Type:      consts.Artifact_Type_Iflow,
+		PackageID: "pkg1",
+	})
+	existingDR := seedDeliveryRequest(t, tc, db.DeliveryRequest{
+		Name:            "Existing Dup DR",
+		DeliveryRuleID:  rule.ID,
+		SourceTenantID:  source.ID,
+		AggregateStatus: lifecycle.AggPending,
+		CreatedBy:       "user",
+		UpdatedBy:       "user",
+	})
+	seedOp(t, db.ArtifactTenantOperation{
+		DeliveryRequestID: existingDR.ID,
+		TenantID:          target.ID,
+		ArtifactID:        dupArt.ID,
+		ArtifactTechID:    dupArt.TechID,
+		ArtifactVersion:   dupArt.Version,
+		RequestState:      lifecycle.RequestPending,
+		ImportState:       lifecycle.ImportNotStarted,
+		DeployState:       lifecycle.DeployNotStarted,
+	})
+
+	// Preview should show it as duplicate
+	svc := newTestService(nil)
+	preview, err := svc.PreviewDRFromMismatch(rule.ID)
+	if err != nil {
+		t.Fatalf("Preview failed: %v", err)
+	}
+	if preview.Summary.Duplicate != 1 {
+		t.Errorf("Preview should show 1 duplicate, got %d", preview.Summary.Duplicate)
+	}
+
+	// Create should still work when user selects the duplicate
+	factory := func(ctx context.Context, tenant string) (IntegrationService, error) {
+		return &mockCPIClient{}, nil
+	}
+	svc2 := newTestService(factory)
+
+	req := CreateDRFromMismatchRequest{
+		SnapshotID:          snap.ID,
+		SnapshotCompletedAt: now,
+		ArtifactKeys:        []ArtifactKey{{ArtifactID: "dup-allowed-iflow", PackageID: "pkg1"}},
+	}
+	resp, err := svc2.CreateDRFromMismatch(rule.ID, req, "test-user")
+	if err != nil {
+		t.Fatalf("CreateDRFromMismatch with duplicate selection should succeed: %v", err)
+	}
+	tc.trackDR(resp.DeliveryRequest.ID)
+
+	if resp.Summary.Created != 1 {
+		t.Errorf("Created: got %d, want 1", resp.Summary.Created)
+	}
+}
+
+func TestCreateDR_VersionDowngradeSkip(t *testing.T) {
+	tc := newTestCleanup(t)
+
+	source := seedTenant(t, tc, "dg-src-"+t.Name())
+	source.TransportNodeID = 700
+	source.TransportNodeName = "dg-src-node"
+	testDB.Save(&source)
+
+	target := seedTenant(t, tc, "dg-tgt-"+t.Name())
+	target.TransportNodeID = 800
+	target.TransportNodeName = "dg-tgt-node"
+	testDB.Save(&target)
+
+	rule := seedRule(t, tc, "dg-rule-"+t.Name(), source, []db.CpiTenant{source, target}, true)
+	rule.VersionPattern = "1.0.*"
+	testDB.Save(&rule)
+
+	now := time.Now().Truncate(time.Second)
+	snap := seedSnapshot(t, db.VersionCompareSnapshot{
+		DeliveryRuleID: rule.ID,
+		Status:         consts.SnapshotStatusCompleted,
+		TriggeredAt:    now,
+		CompletedAt:    &now,
+		TriggeredBy:    "test",
+		Data: db.SnapshotData{
+			SourceTenantID:  source.ID,
+			ComparedTenants: []uint{target.ID},
+			Packages: []db.PackageSnapshot{
+				{
+					PackageID: "pkg1",
+					Artifacts: []db.ArtifactSnapshot{
+						{
+							// This artifact has source version LOWER than target → downgrade
+							ID: "dg-iflow", Name: "Downgrade IFlow", Type: "Integration Flow",
+							Versions: map[uint]db.ArtifactVersionInfo{
+								source.ID: {DesignTimeVersion: "1.0.1"},
+								target.ID: {DesignTimeVersion: "1.0.5"}, // target is higher
+							},
+						},
+						{
+							// This artifact is fine (source higher than target)
+							ID: "ok-iflow", Name: "OK IFlow", Type: "Integration Flow",
+							Versions: map[uint]db.ArtifactVersionInfo{
+								source.ID: {DesignTimeVersion: "1.0.9"},
+								target.ID: {DesignTimeVersion: "1.0.8"},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	// CPI mock: GetDesignTimeIflow returns the target's current version
+	// For the downgrade check, checkVersionDowngradeInTenant calls GetDesignTimeIflow(ctx, techID, "active")
+	// and compares the returned version to the source version.
+	factoryWithDowngrade := func(ctx context.Context, tenant string) (IntegrationService, error) {
+		// If this is the target tenant, GetDesignTimeIflow returns version 1.0.5 (for dg-iflow)
+		// and 1.0.8 (for ok-iflow)
+		if tenant == target.CpiEndpoint.Name {
+			return &mockCPIClientWithDesignTime{
+				iflowVersions: map[string]string{
+					"dg-iflow": "1.0.5", // higher than source 1.0.1 → downgrade
+					"ok-iflow": "1.0.8", // lower than source 1.0.9 → ok
+				},
+			}, nil
+		}
+		return &mockCPIClient{}, nil
+	}
+
+	svc := newTestService(factoryWithDowngrade)
+
+	req := CreateDRFromMismatchRequest{
+		SnapshotID:          snap.ID,
+		SnapshotCompletedAt: now,
+		ArtifactKeys: []ArtifactKey{
+			{ArtifactID: "dg-iflow", PackageID: "pkg1"},
+			{ArtifactID: "ok-iflow", PackageID: "pkg1"},
+		},
+	}
+
+	resp, err := svc.CreateDRFromMismatch(rule.ID, req, "test-user")
+	if err != nil {
+		t.Fatalf("CreateDRFromMismatch should succeed with partial errors: %v", err)
+	}
+	tc.trackDR(resp.DeliveryRequest.ID)
+
+	// dg-iflow should be skipped (downgrade), ok-iflow should succeed
+	if resp.Summary.Created != 1 {
+		t.Errorf("Created: got %d, want 1", resp.Summary.Created)
+	}
+	if len(resp.Summary.Errors) != 1 {
+		t.Errorf("Errors: got %d, want 1", len(resp.Summary.Errors))
+	}
+	if len(resp.Summary.Errors) > 0 && resp.Summary.Errors[0].ArtifactID != "dg-iflow" {
+		t.Errorf("Error artifact: got %q, want %q", resp.Summary.Errors[0].ArtifactID, "dg-iflow")
+	}
+}
+
+func TestCreateDR_AutoGeneratedName(t *testing.T) {
+	ruleID, snapshotID, completedAt, _, tc := setupCreateTestData(t)
+
+	factory := func(ctx context.Context, tenant string) (IntegrationService, error) {
+		return &mockCPIClient{}, nil
+	}
+	svc := newTestService(factory)
+
+	req := CreateDRFromMismatchRequest{
+		Name:                "", // empty → auto-generate
+		SnapshotID:          snapshotID,
+		SnapshotCompletedAt: completedAt,
+		ArtifactKeys: []ArtifactKey{
+			{ArtifactID: "cre-iflow-1", PackageID: "pkg1"},
+		},
+	}
+
+	resp, err := svc.CreateDRFromMismatch(ruleID, req, "test-user")
+	if err != nil {
+		t.Fatalf("CreateDRFromMismatch failed: %v", err)
+	}
+	tc.trackDR(resp.DeliveryRequest.ID)
+
+	// Name should follow the format: "Auto DR - <rule name> - VC <snapshot completion time>"
+	if resp.DeliveryRequest.Name == "" {
+		t.Fatal("DR name should be auto-generated, got empty")
+	}
+	// Just check it starts with "Auto DR"
+	if len(resp.DeliveryRequest.Name) < 7 || resp.DeliveryRequest.Name[:7] != "Auto DR" {
+		t.Errorf("DR name should start with 'Auto DR', got %q", resp.DeliveryRequest.Name)
 	}
 }

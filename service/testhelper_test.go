@@ -11,6 +11,7 @@ import (
 	"mmt-delivery/consts"
 	"mmt-delivery/db"
 	"mmt-delivery/pkg/cpi"
+	"mmt-delivery/pkg/tms"
 
 	"go.uber.org/zap"
 	"gorm.io/driver/postgres"
@@ -43,12 +44,16 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
-	// Migrate models needed by service-layer version compare tests.
+	// Migrate models needed by service-layer tests.
 	if err := testDB.AutoMigrate(
 		&db.CpiTenant{},
 		&db.DeliveryRule{},
 		&db.VersionCompareSnapshot{},
 		&db.VersionCompareIncludedPackage{},
+		&db.Artifact{},
+		&db.DeliveryRequest{},
+		&db.ArtifactTenantOperation{},
+		&db.Condition{},
 	); err != nil {
 		fmt.Printf("FATAL: failed to migrate: %v\n", err)
 		os.Exit(1)
@@ -58,14 +63,45 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+// testServiceOpts holds optional dependencies for building a test Service.
+type testServiceOpts struct {
+	tms          TransportService
+	notifier     Notifier
+	getUserEmail func(ctx context.Context, userID string) (string, error)
+}
+
 // newTestService creates a Service wired to testDB with a given mock CPI factory.
-func newTestService(factory IntegrationFactory) *Service {
+// It sets sensible defaults for TMS/Notifier/GetUserEmail (no-op mocks) so that
+// existing tests that only care about CPI continue to work unchanged.
+func newTestService(factory IntegrationFactory, opts ...testServiceOpts) *Service {
 	l, _ := zap.NewDevelopment()
-	return &Service{
+	svc := &Service{
 		DB:     testDB,
 		Logger: l.Sugar(),
 		CPI:    factory,
 	}
+	if len(opts) > 0 {
+		o := opts[0]
+		if o.tms != nil {
+			svc.TMS = o.tms
+		}
+		if o.notifier != nil {
+			svc.Notifier = o.notifier
+		}
+		if o.getUserEmail != nil {
+			svc.GetUserEmail = o.getUserEmail
+		}
+	}
+	// Fallback defaults so callers that don't need these don't crash
+	if svc.Notifier == nil {
+		svc.Notifier = &mockNotifier{}
+	}
+	if svc.GetUserEmail == nil {
+		svc.GetUserEmail = func(ctx context.Context, userID string) (string, error) {
+			return userID + "@test.com", nil
+		}
+	}
+	return svc
 }
 
 // --- testCleanup tracks IDs created during a test and deletes them on t.Cleanup ---
@@ -74,11 +110,14 @@ type testCleanup struct {
 	t                 *testing.T
 	tenantIDs         []uint
 	ruleIDs           []uint
+	drIDs             []uint
+	artifactIDs       []uint
 	cleanIncludedPkgs bool // whether to clean VersionCompareIncludedPackage table
 }
 
 // newTestCleanup registers a t.Cleanup that deletes all tracked records
-// in the correct order (snapshots → rules → tenants) to respect FK constraints.
+// in the correct order to respect FK constraints:
+// conditions → ops → artifacts → DRs → snapshots → rules → tenants
 // It uses Unscoped to also remove soft-deleted records.
 func newTestCleanup(t *testing.T) *testCleanup {
 	t.Helper()
@@ -87,6 +126,16 @@ func newTestCleanup(t *testing.T) *testCleanup {
 		// Delete included packages if flagged
 		if tc.cleanIncludedPkgs {
 			testDB.Unscoped().Where("1 = 1").Delete(&db.VersionCompareIncludedPackage{})
+		}
+		// Delete conditions, ops, DRs for tracked delivery requests
+		if len(tc.drIDs) > 0 {
+			testDB.Unscoped().Where("delivery_request_id IN ?", tc.drIDs).Delete(&db.Condition{})
+			testDB.Unscoped().Where("delivery_request_id IN ?", tc.drIDs).Delete(&db.ArtifactTenantOperation{})
+			testDB.Unscoped().Where("id IN ?", tc.drIDs).Delete(&db.DeliveryRequest{})
+		}
+		// Delete artifacts
+		if len(tc.artifactIDs) > 0 {
+			testDB.Unscoped().Where("id IN ?", tc.artifactIDs).Delete(&db.Artifact{})
 		}
 		// Delete snapshots for tracked rules
 		if len(tc.ruleIDs) > 0 {
@@ -109,8 +158,10 @@ func newTestCleanup(t *testing.T) *testCleanup {
 	return tc
 }
 
-func (tc *testCleanup) trackTenant(id uint) { tc.tenantIDs = append(tc.tenantIDs, id) }
-func (tc *testCleanup) trackRule(id uint)   { tc.ruleIDs = append(tc.ruleIDs, id) }
+func (tc *testCleanup) trackTenant(id uint)   { tc.tenantIDs = append(tc.tenantIDs, id) }
+func (tc *testCleanup) trackRule(id uint)     { tc.ruleIDs = append(tc.ruleIDs, id) }
+func (tc *testCleanup) trackDR(id uint)       { tc.drIDs = append(tc.drIDs, id) }
+func (tc *testCleanup) trackArtifact(id uint) { tc.artifactIDs = append(tc.artifactIDs, id) }
 
 // --- Mock CPI Client ---
 
@@ -159,6 +210,28 @@ func (m *mockCPIClient) GetDesignTimeIflow(ctx context.Context, iflowID string, 
 }
 func (m *mockCPIClient) GetDesignTimeScriptCollection(ctx context.Context, scriptCollectionID string, scriptCollectionVersion string) (cpi.ScriptCollectionItem, error) {
 	return cpi.ScriptCollectionItem{}, nil
+}
+
+// mockCPIClientWithDesignTime extends the mock to return specific design-time versions.
+// Used by tests that exercise checkVersionDowngradeInTenant.
+type mockCPIClientWithDesignTime struct {
+	mockCPIClient
+	iflowVersions            map[string]string // artifactID → version
+	scriptCollectionVersions map[string]string
+}
+
+func (m *mockCPIClientWithDesignTime) GetDesignTimeIflow(ctx context.Context, iflowID string, iflowVersion string) (cpi.IflowItem, error) {
+	if v, ok := m.iflowVersions[iflowID]; ok {
+		return cpi.IflowItem{ArtifactCommonItem: cpi.ArtifactCommonItem{ID: iflowID, Version: v}}, nil
+	}
+	return cpi.IflowItem{}, fmt.Errorf("iflow %s not found", iflowID)
+}
+
+func (m *mockCPIClientWithDesignTime) GetDesignTimeScriptCollection(ctx context.Context, scID string, scVersion string) (cpi.ScriptCollectionItem, error) {
+	if v, ok := m.scriptCollectionVersions[scID]; ok {
+		return cpi.ScriptCollectionItem{ArtifactCommonItem: cpi.ArtifactCommonItem{ID: scID, Version: v}}, nil
+	}
+	return cpi.ScriptCollectionItem{}, fmt.Errorf("script collection %s not found", scID)
 }
 
 // --- Seed Helpers ---
@@ -221,4 +294,133 @@ func waitForSnapshotComplete(t *testing.T, ruleID uint, timeout time.Duration) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Fatalf("snapshot for rule %d did not reach terminal status within %v", ruleID, timeout)
+}
+
+// --- Mock TMS Client ---
+
+// mockTMSClient implements TransportService for testing.
+type mockTMSClient struct {
+	nodes    []db.TransportNode
+	nodesErr error
+
+	routes    []db.TransportRoute
+	routesErr error
+
+	importTRResult uint
+	importTRErr    error
+
+	// getTransportRequest maps TR number → response. If trErr is set for a number, that error is returned.
+	transportRequests map[string]*tms.TransportRequestV1
+	trErr             map[string]error
+
+	// trNodeStatuses maps TR number → node status map
+	nodeStatuses    map[string]map[uint]tms.TrNodeStatus
+	nodeStatusesErr map[string]error
+}
+
+func (m *mockTMSClient) GetNodes(ctx context.Context) ([]db.TransportNode, error) {
+	return m.nodes, m.nodesErr
+}
+func (m *mockTMSClient) GetRoutes(ctx context.Context) ([]db.TransportRoute, error) {
+	return m.routes, m.routesErr
+}
+func (m *mockTMSClient) ImportTransportRequest(ctx context.Context, nodeID uint, trs []uint) (uint, error) {
+	return m.importTRResult, m.importTRErr
+}
+func (m *mockTMSClient) GetTransportRequest(ctx context.Context, TrNumber string) (*tms.TransportRequestV1, error) {
+	if m.trErr != nil {
+		if e, ok := m.trErr[TrNumber]; ok {
+			return nil, e
+		}
+	}
+	if m.transportRequests != nil {
+		if tr, ok := m.transportRequests[TrNumber]; ok {
+			return tr, nil
+		}
+	}
+	return nil, fmt.Errorf("transport request %s not found", TrNumber)
+}
+func (m *mockTMSClient) TrNodeStatuses(ctx context.Context, trNumber string) (map[uint]tms.TrNodeStatus, error) {
+	if m.nodeStatusesErr != nil {
+		if e, ok := m.nodeStatusesErr[trNumber]; ok {
+			return nil, e
+		}
+	}
+	if m.nodeStatuses != nil {
+		if s, ok := m.nodeStatuses[trNumber]; ok {
+			return s, nil
+		}
+	}
+	return nil, fmt.Errorf("no node statuses for TR %s", trNumber)
+}
+func (m *mockTMSClient) ErrLogsInTransportLog(ctx context.Context, trNumber string, nodeID uint) ([]string, error) {
+	return nil, nil
+}
+
+// --- Mock Notifier ---
+
+// mockNotifier implements Notifier as a no-op for testing.
+type mockNotifier struct{}
+
+func (m *mockNotifier) SendApprovalRequest(to []string, drID uint, requestor string, description string) error {
+	return nil
+}
+func (m *mockNotifier) SendDeliveryNotification(to []string, drID uint, status string, message string) error {
+	return nil
+}
+func (m *mockNotifier) AddDeliveryComment(issueKey string, drID uint, message string, status string) error {
+	return nil
+}
+
+// --- Additional Seed Helpers ---
+
+// seedDeliveryRequest creates a DR in the test DB, tracks it for cleanup, and returns it.
+func seedDeliveryRequest(t *testing.T, tc *testCleanup, dr db.DeliveryRequest) db.DeliveryRequest {
+	t.Helper()
+	if err := testDB.Create(&dr).Error; err != nil {
+		t.Fatalf("seedDeliveryRequest failed: %v", err)
+	}
+	tc.trackDR(dr.ID)
+	return dr
+}
+
+// seedOp creates an ArtifactTenantOperation in the test DB and returns it.
+// The op's DeliveryRequestID should already be tracked by tc.
+func seedOp(t *testing.T, op db.ArtifactTenantOperation) db.ArtifactTenantOperation {
+	t.Helper()
+	if err := testDB.Create(&op).Error; err != nil {
+		t.Fatalf("seedOp failed: %v", err)
+	}
+	return op
+}
+
+// seedArtifact creates an Artifact in the test DB, tracks it for cleanup, and returns it.
+func seedArtifact(t *testing.T, tc *testCleanup, art db.Artifact) db.Artifact {
+	t.Helper()
+	if err := testDB.Create(&art).Error; err != nil {
+		t.Fatalf("seedArtifact failed: %v", err)
+	}
+	tc.trackArtifact(art.ID)
+	return art
+}
+
+// validTR returns a valid RELEASED TransportRequestV1 for testing.
+// It matches the given artifact metadata and originates from the given sourceTenantNodeName.
+func validTR(trNumber string, sourceTenantNodeName string, artifactTechID string, artifactVersion string, artifactType consts.ArtifactType) *tms.TransportRequestV1 {
+	return &tms.TransportRequestV1{
+		ID:     1,
+		State:  "RELEASED",
+		Origin: sourceTenantNodeName,
+		Content: []tms.Content{
+			{
+				Metadata: []tms.Metadata{
+					{
+						Name:    artifactTechID,
+						Version: artifactVersion,
+						Type:    artifactType,
+					},
+				},
+			},
+		},
+	}
 }
