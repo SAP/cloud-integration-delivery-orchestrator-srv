@@ -924,13 +924,20 @@ v1.POST("/deliveryRule/:id/versionCompare/createDR",  h.HandleCreateDRFromMismat
 5. `src/views/DeliveryRequestListView.vue` — 移除 `onCreate`/`handleDelete` 中的手动 toast（修复 double-toast bug）
 6. `docs/HTTP-INTERCEPTOR-REFACTOR.md` — HTTP 拦截器重构文档
 
-### Phase 5: 前端 — DR 详情页适配 — ⏳ TODO
+### Phase 5: 前端 — DR 详情页适配 — ✅ COMPLETE
 
 **范围**：Frontend
 
-1. `src/views/DeliveryRequestView.vue` — 适配 TR 为空的 ops
-2. Generate TRs 扩展支持空 TR source ops
-3. Request Approval disable 逻辑
+1. `src/views/DeliveryRequestView.vue` — 适配 TR 为空的 ops：
+   - 移除 `updateDr()` 中的 TR 校验（后端 Phase 1 已允许空 TR，approve 阶段兜底）
+   - 新增 `missingTrOps` computed：筛选已保存但 TR 为空的 source ops
+   - 新增 Missing TR 警告横幅（`ui5-message-strip` design="Critical"，`width: fit-content`）+ "Generate TRs for All Missing" 按钮
+   - `batchGenTrs()` 扩展：同时处理 `addOps` 和 `missingTrOps`，成功后将 saved ops 加入 `draftSourceOps`
+   - `approveInfo` computed 扩展：当 `missingTrOps` 非空时 disable Approve 按钮并显示 tooltip
+   - "Send To Approvers" 按钮：当 `missingTrOps` 非空时 disabled + tooltip
+   - "New" 区域提示文案改为 "TRs required before requesting approval"
+   - Logs 区域增加 `max-height: 400px; overflow-y: auto` 防止大量日志撑爆页面
+2. `src/components/ArtifactOpTag.vue` — TR 为空时显示 warning 颜色的 "Required" 文字
 
 ---
 
