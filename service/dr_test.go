@@ -410,6 +410,189 @@ func TestApprove_MissingTR(t *testing.T) {
 	}
 }
 
+// =============================================================================
+// SkipDeploy Tests
+// =============================================================================
+
+func TestInsertTenantOps_SkipDeploy(t *testing.T) {
+	s := setupDRTest(t)
+
+	factory := func(ctx context.Context, tenant string) (IntegrationService, error) {
+		return &mockCPIClient{}, nil
+	}
+	svc := newTestService(factory)
+
+	ops := []db.ArtifactTenantOperation{
+		{
+			TenantID:               s.target.ID,
+			ArtifactTechID:         s.artifact.TechID,
+			ArtifactVersion:        s.artifact.Version,
+			Artifact:               s.artifact,
+			TransportRequestNumber: "",
+			SkipDeploy:             true,
+		},
+	}
+
+	result, err := svc.InsertTenantOps(s.dr.ID, ops, "test-user")
+	if err != nil {
+		t.Fatalf("InsertTenantOps with SkipDeploy should succeed, got error: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("expected 1 op, got %d", len(result))
+	}
+	if !result[0].SkipDeploy {
+		t.Error("expected SkipDeploy=true")
+	}
+	if result[0].DeployState != lifecycle.DeployDisabled {
+		t.Errorf("expected DEPLOY_DISABLED, got %s", result[0].DeployState)
+	}
+	if result[0].ImportState != lifecycle.ImportNotStarted {
+		t.Errorf("expected NOT_STARTED import, got %s", result[0].ImportState)
+	}
+}
+
+func TestInsertTenantOps_NoSkipDeploy(t *testing.T) {
+	s := setupDRTest(t)
+
+	factory := func(ctx context.Context, tenant string) (IntegrationService, error) {
+		return &mockCPIClient{}, nil
+	}
+	svc := newTestService(factory)
+
+	ops := []db.ArtifactTenantOperation{
+		{
+			TenantID:               s.target.ID,
+			ArtifactTechID:         s.artifact.TechID,
+			ArtifactVersion:        s.artifact.Version,
+			Artifact:               s.artifact,
+			TransportRequestNumber: "",
+			SkipDeploy:             false,
+		},
+	}
+
+	result, err := svc.InsertTenantOps(s.dr.ID, ops, "test-user")
+	if err != nil {
+		t.Fatalf("InsertTenantOps without SkipDeploy should succeed, got error: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("expected 1 op, got %d", len(result))
+	}
+	if result[0].SkipDeploy {
+		t.Error("expected SkipDeploy=false")
+	}
+	if result[0].DeployState != lifecycle.DeployNotStarted {
+		t.Errorf("expected NOT_STARTED deploy, got %s", result[0].DeployState)
+	}
+}
+
+func TestUpdateTenantOps_EnableSkipDeploy(t *testing.T) {
+	s := setupDRTest(t)
+
+	factory := func(ctx context.Context, tenant string) (IntegrationService, error) {
+		return &mockCPIClient{}, nil
+	}
+	svc := newTestService(factory)
+
+	ops := []db.ArtifactTenantOperation{
+		{
+			TenantID:               s.target.ID,
+			ArtifactTechID:         s.artifact.TechID,
+			ArtifactVersion:        s.artifact.Version,
+			Artifact:               s.artifact,
+			TransportRequestNumber: "",
+			SkipDeploy:             false,
+		},
+	}
+	inserted, err := svc.InsertTenantOps(s.dr.ID, ops, "test-user")
+	if err != nil {
+		t.Fatalf("InsertTenantOps failed: %v", err)
+	}
+	opID := inserted[0].ID
+
+	if inserted[0].SkipDeploy {
+		t.Fatal("precondition: expected SkipDeploy=false after insert")
+	}
+	if inserted[0].DeployState != lifecycle.DeployNotStarted {
+		t.Fatalf("precondition: expected NOT_STARTED, got %s", inserted[0].DeployState)
+	}
+
+	updateOps := []db.ArtifactTenantOperation{
+		{
+			TransportRequestNumber: "",
+			SkipDeploy:             true,
+		},
+	}
+	updateOps[0].ID = opID
+
+	_, err = svc.UpdateTenantOps(s.dr.ID, updateOps, "test-user")
+	if err != nil {
+		t.Fatalf("UpdateTenantOps (enable SkipDeploy) should succeed, got: %v", err)
+	}
+
+	var dbOp db.ArtifactTenantOperation
+	testDB.First(&dbOp, opID)
+	if !dbOp.SkipDeploy {
+		t.Error("expected SkipDeploy=true in DB")
+	}
+	if dbOp.DeployState != lifecycle.DeployDisabled {
+		t.Errorf("expected DEPLOY_DISABLED in DB, got %s", dbOp.DeployState)
+	}
+}
+
+func TestUpdateTenantOps_DisableSkipDeploy(t *testing.T) {
+	s := setupDRTest(t)
+
+	factory := func(ctx context.Context, tenant string) (IntegrationService, error) {
+		return &mockCPIClient{}, nil
+	}
+	svc := newTestService(factory)
+
+	ops := []db.ArtifactTenantOperation{
+		{
+			TenantID:               s.target.ID,
+			ArtifactTechID:         s.artifact.TechID,
+			ArtifactVersion:        s.artifact.Version,
+			Artifact:               s.artifact,
+			TransportRequestNumber: "",
+			SkipDeploy:             true,
+		},
+	}
+	inserted, err := svc.InsertTenantOps(s.dr.ID, ops, "test-user")
+	if err != nil {
+		t.Fatalf("InsertTenantOps failed: %v", err)
+	}
+	opID := inserted[0].ID
+
+	if !inserted[0].SkipDeploy {
+		t.Fatal("precondition: expected SkipDeploy=true after insert")
+	}
+	if inserted[0].DeployState != lifecycle.DeployDisabled {
+		t.Fatalf("precondition: expected DEPLOY_DISABLED, got %s", inserted[0].DeployState)
+	}
+
+	updateOps := []db.ArtifactTenantOperation{
+		{
+			TransportRequestNumber: "",
+			SkipDeploy:             false,
+		},
+	}
+	updateOps[0].ID = opID
+
+	_, err = svc.UpdateTenantOps(s.dr.ID, updateOps, "test-user")
+	if err != nil {
+		t.Fatalf("UpdateTenantOps (disable SkipDeploy) should succeed, got: %v", err)
+	}
+
+	var dbOp db.ArtifactTenantOperation
+	testDB.First(&dbOp, opID)
+	if dbOp.SkipDeploy {
+		t.Error("expected SkipDeploy=false in DB")
+	}
+	if dbOp.DeployState != lifecycle.DeployNotStarted {
+		t.Errorf("expected NOT_STARTED in DB, got %s", dbOp.DeployState)
+	}
+}
+
 func TestApprove_AllTRPresent(t *testing.T) {
 	s := setupApproveTest(t, "TR-APPROVE-002")
 

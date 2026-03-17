@@ -272,8 +272,13 @@ func (s *Service) InsertTenantOps(drID uint, ops []db.ArtifactTenantOperation, u
 		op.Artifact = a
 		op.DeliveryRequestID = drID
 		op.ArtifactTechID, op.ArtifactVersion = a.TechID, a.Version // cache techID and version for quick access
-		op.ImportState, op.DeployState, op.RequestState =
-			lifecycle.ImportNotStarted, lifecycle.DeployNotStarted, lifecycle.RequestPending
+		op.ImportState = lifecycle.ImportNotStarted
+		op.RequestState = lifecycle.RequestPending
+		if op.SkipDeploy {
+			op.DeployState = lifecycle.DeployDisabled
+		} else {
+			op.DeployState = lifecycle.DeployNotStarted
+		}
 	}
 	if len(errOps) > 0 {
 		errMsg := "errors occurred during insert artifact tenant operations:\n"
@@ -323,6 +328,12 @@ func (s *Service) UpdateTenantOps(drID uint, ops []db.ArtifactTenantOperation, u
 		}
 		existingOp.UpdatedBy = user
 		existingOp.TransportRequestNumber = draftOp.TransportRequestNumber
+		existingOp.SkipDeploy = draftOp.SkipDeploy
+		if draftOp.SkipDeploy {
+			existingOp.DeployState = lifecycle.DeployDisabled
+		} else {
+			existingOp.DeployState = lifecycle.DeployNotStarted
+		}
 
 		if err := s.DB.Save(&existingOp).Error; err != nil {
 			errOps[draftOp.ID] = fmt.Errorf("failed to update artifact tenant operation %d: %s", draftOp.ID, err)

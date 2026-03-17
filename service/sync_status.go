@@ -273,6 +273,10 @@ func (s *Service) syncImportState(deliveryRequestID uint, user string) []db.Cond
 				tenantToOps[tenantID] = make(map[string]db.ArtifactTenantOperation)
 			}
 			if _, ok := tenantToOps[tenantID][trNumber]; !ok { // means this a new status happens in tms, should create a new record
+				deployState := lifecycle.DeployNotStarted
+				if op.SkipDeploy {
+					deployState = lifecycle.DeployDisabled
+				}
 				newOp := db.ArtifactTenantOperation{
 					DeliveryRequestID:      op.DeliveryRequestID,
 					ArtifactID:             op.ArtifactID,
@@ -280,8 +284,9 @@ func (s *Service) syncImportState(deliveryRequestID uint, user string) []db.Cond
 					ArtifactVersion:        op.ArtifactVersion,
 					TenantID:               tenantID,
 					TransportRequestNumber: trNumber,
+					SkipDeploy:             op.SkipDeploy,
 					ImportState:            lifecycle.ImportNotStarted,
-					DeployState:            lifecycle.DeployNotStarted,
+					DeployState:            deployState,
 					CreatedBy:              user,
 				}
 				tenantToOps[tenantID][trNumber] = newOp
@@ -299,7 +304,11 @@ func (s *Service) syncImportState(deliveryRequestID uint, user string) []db.Cond
 			curOp.ImportState, curOp.UpdatedBy = state, user
 			// NOTE: set deploy state if import completed
 			if curOp.ImportState == lifecycle.ImportComplete && curOp.DeployState == lifecycle.DeployNotStarted {
-				curOp.DeployState = lifecycle.DeployQueued
+				if curOp.SkipDeploy {
+					curOp.DeployState = lifecycle.DeployDisabled
+				} else {
+					curOp.DeployState = lifecycle.DeployQueued
+				}
 			}
 			if err := s.DB.Save(&curOp).Error; err != nil { // update each op
 				return []db.Condition{

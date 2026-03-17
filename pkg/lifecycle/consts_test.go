@@ -278,6 +278,57 @@ func TestDeriveAggregateStatus_DeployedWithDisabled(t *testing.T) {
 	}
 }
 
+// TestDeriveAggregateStatus_MixedSkipDeploy verifies aggregate status with a mix of
+// skip-deploy (DeployDisabled) and normal (DeployComplete) ops.
+func TestDeriveAggregateStatus_MixedSkipDeploy(t *testing.T) {
+	tests := []struct {
+		name         string
+		importStates []ImportState
+		deployStates []DeployState
+		want         AggregateStatus
+	}{
+		{
+			name:         "all skip deploy",
+			importStates: []ImportState{ImportComplete, ImportComplete},
+			deployStates: []DeployState{DeployDisabled, DeployDisabled},
+			want:         AggDeployed,
+		},
+		{
+			name:         "mixed complete and disabled",
+			importStates: []ImportState{ImportComplete, ImportComplete, ImportComplete},
+			deployStates: []DeployState{DeployComplete, DeployDisabled, DeployComplete},
+			want:         AggDeployed,
+		},
+		{
+			name:         "skip deploy with one still deploying",
+			importStates: []ImportState{ImportComplete, ImportComplete},
+			deployStates: []DeployState{DeployDisabled, DeployInProgress},
+			want:         AggDeploying,
+		},
+		{
+			name:         "skip deploy with one failed",
+			importStates: []ImportState{ImportComplete, ImportComplete},
+			deployStates: []DeployState{DeployDisabled, DeployFailed},
+			want:         AggDeployFailed,
+		},
+		{
+			name:         "skip deploy with one not started (awaiting deploy)",
+			importStates: []ImportState{ImportComplete, ImportComplete},
+			deployStates: []DeployState{DeployDisabled, DeployNotStarted},
+			want:         AggWaitingDeploy,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			agg := DeriveAggregateStatus(AggWaitingDeploy, tt.importStates, tt.deployStates)
+			if agg != tt.want {
+				t.Errorf("got %s, want %s", agg, tt.want)
+			}
+		})
+	}
+}
+
 // TestImportDisabledProgressesToDeploy verifies ImportDisabled allows progression to deploy phase
 func TestDeriveAggregateStatus_ImportDisabledProgressesToDeploy(t *testing.T) {
 	agg := DeriveAggregateStatus(

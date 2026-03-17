@@ -738,10 +738,12 @@ type PreviewDRResponse struct {
 	Summary             PreviewDRSummary    `json:"summary"`
 }
 
-// ArtifactKey uniquely identifies an artifact within a snapshot (artifactID + packageID).
+// ArtifactKey uniquely identifies an artifact within a snapshot (artifactID + packageID),
+// and optionally carries per-artifact configuration for DR creation.
 type ArtifactKey struct {
 	ArtifactID string `json:"artifactID"`
 	PackageID  string `json:"packageID"`
+	SkipDeploy bool   `json:"skipDeploy"`
 }
 
 // CreateDRFromMismatchRequest is the request body for the Create API.
@@ -943,23 +945,31 @@ func (s *Service) CreateDRFromMismatch(ruleID uint, req CreateDRFromMismatchRequ
 		req.Name = fmt.Sprintf("Auto DR - %s - VC %s", rule.Name, snapshot.CompletedAt.Format("2006-01-02 15:04"))
 	}
 
-	// 6. Build artifact key lookup set
-	artifactKeySet := make(map[ArtifactKey]bool, len(req.ArtifactKeys))
+	// 6. Build artifact key lookup set (keyed by ArtifactID+PackageID only; SkipDeploy is config, not identity)
+	type artIdentity struct {
+		ArtifactID string
+		PackageID  string
+	}
+	artifactKeySet := make(map[artIdentity]bool, len(req.ArtifactKeys))
+	skipDeployMap := make(map[artIdentity]bool, len(req.ArtifactKeys))
 	for _, k := range req.ArtifactKeys {
-		artifactKeySet[k] = true
+		id := artIdentity{ArtifactID: k.ArtifactID, PackageID: k.PackageID}
+		artifactKeySet[id] = true
+		skipDeployMap[id] = k.SkipDeploy
 	}
 
 	// 7. Find selected artifacts in snapshot
 	type artifactWithPkg struct {
-		art db.ArtifactSnapshot
-		pkg string // packageID
+		art        db.ArtifactSnapshot
+		pkg        string // packageID
+		skipDeploy bool
 	}
 	var selectedArtifacts []artifactWithPkg
 	for _, pkg := range snapshot.Data.Packages {
 		for _, art := range pkg.Artifacts {
-			key := ArtifactKey{ArtifactID: art.ID, PackageID: pkg.PackageID}
-			if artifactKeySet[key] {
-				selectedArtifacts = append(selectedArtifacts, artifactWithPkg{art: art, pkg: pkg.PackageID})
+			id := artIdentity{ArtifactID: art.ID, PackageID: pkg.PackageID}
+			if artifactKeySet[id] {
+				selectedArtifacts = append(selectedArtifacts, artifactWithPkg{art: art, pkg: pkg.PackageID, skipDeploy: skipDeployMap[id]})
 			}
 		}
 	}
@@ -1031,10 +1041,15 @@ func (s *Service) CreateDRFromMismatch(ruleID uint, req CreateDRFromMismatchRequ
 		}
 
 		// Set initial lifecycle states
+		op.SkipDeploy = item.skipDeploy
 		op.ImportState = lifecycle.ImportNotStarted
-		op.DeployState = lifecycle.DeployNotStarted
 		op.RequestState = lifecycle.RequestPending
 		op.CreatedBy = user
+		if op.SkipDeploy {
+			op.DeployState = lifecycle.DeployDisabled
+		} else {
+			op.DeployState = lifecycle.DeployNotStarted
+		}
 
 		validOps = append(validOps, op)
 	}

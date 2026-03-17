@@ -64,6 +64,8 @@ type ArtifactTenantOperation struct {
 	ImportState  lifecycle.ImportState
 	DeployState  lifecycle.DeployState
 
+	SkipDeploy bool
+
 	LastError        string
 	RetryCountImport int
 	RetryCountDeploy int
