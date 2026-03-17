@@ -127,9 +127,12 @@ func (h *Handler) GetDeliveryRequest(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": dr})
 }
 
-// DeleteDr DeliveryRequest by id
+// DeleteDr soft-deletes a DeliveryRequest by id.
+// Associated ArtifactTenantOperations and Conditions are not explicitly deleted,
+// but are effectively inaccessible: all write paths validate the parent DR first
+// (h.db.First(&dr, id)), which returns ErrRecordNotFound for soft-deleted records.
+// Preload-based read paths also go through the DR and therefore never reach orphaned rows.
 func (h *Handler) DeleteDr(c *gin.Context) {
-	// TODO: check if dr can be deleted. if approved, cannot delete
 	raw := c.Param("id")
 	id, err := strconv.Atoi(raw)
 	if err != nil || id <= 0 {
