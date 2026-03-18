@@ -28,7 +28,8 @@ const (
 )
 
 // Canonical import states.
-// status from TMS API: INITIAL, RUNNING, SUCCEEDED, FATAL, TODO: REPEAT, etc...
+// status from TMS API: INITIAL, RUNNING, SUCCEEDED, FATAL, 
+// TODO: REPEAT, WARNING, ERROR, etc...
 const (
 	ImportNotStarted ImportState = "NOT_STARTED"
 	ImportQueued     ImportState = "QUEUED" // INITIAL

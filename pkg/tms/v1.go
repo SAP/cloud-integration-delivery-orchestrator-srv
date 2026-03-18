@@ -86,7 +86,7 @@ type TrNodeStatus struct {
 	StateID                uint      `json:"id"` // state id
 	TransportNodeID        uint      `json:"transportNodeId"`
 	TransportNodeName      string    `json:"TransportNodeName"`
-	Status                 string    `json:"status"` // SUCCEEDED, INITIAL, FATAL, RUNNING
+	Status                 string    `json:"status"` // SUCCEEDED, INITIAL, FATAL, RUNNING, WARNING, ERROR, etc...
 	UpdatedAt              time.Time `json:"updatedAt"`
 }
 
