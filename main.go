@@ -21,6 +21,8 @@ import (
 	"github.com/lestrrat-go/jwx/jwk"
 )
 
+var enableSSE = false
+
 func main() {
 	// --- Explicit initialization (no more init() side effects) ---
 	if err := env.Init(); err != nil {
@@ -48,7 +50,11 @@ func main() {
 	}
 
 	cpiManager := cpi.NewManager()
-	eventBus := service.NewEventBus()
+
+	var eventBus *service.EventBus
+	if enableSSE {
+		eventBus = service.NewEventBus()
+	}
 
 	// --- Build service with all injected dependencies ---
 	svc := &service.Service{
