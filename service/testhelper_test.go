@@ -15,36 +15,38 @@ import (
 
 	"go.uber.org/zap"
 	"gorm.io/driver/postgres"
+	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
 
-// testDB is the shared *gorm.DB for service-layer tests.
 var testDB *gorm.DB
 
 func TestMain(m *testing.M) {
-	uri := os.Getenv("LOCAL_POSTGRES_URI")
-	if uri == "" {
-		fmt.Println("SKIP: LOCAL_POSTGRES_URI not set, skipping service tests")
-		os.Exit(0)
+	var dialector gorm.Dialector
+
+	if uri := os.Getenv("LOCAL_POSTGRES_URI"); uri != "" {
+		conn, err := sql.Open("pgx", uri)
+		if err != nil {
+			fmt.Printf("FATAL: failed to open postgres: %v\n", err)
+			os.Exit(1)
+		}
+		dialector = postgres.New(postgres.Config{Conn: conn})
+		fmt.Fprintln(os.Stderr, "INFO: using PostgreSQL for tests")
+	} else {
+		dialector = sqlite.Open("file::memory:?cache=shared")
+		fmt.Fprintln(os.Stderr, "INFO: using SQLite (in-memory) for tests")
 	}
 
-	conn, err := sql.Open("pgx", uri)
-	if err != nil {
-		fmt.Printf("FATAL: failed to open database: %v\n", err)
-		os.Exit(1)
-	}
-
-	testDB, err = gorm.Open(
-		postgres.New(postgres.Config{Conn: conn}),
-		&gorm.Config{Logger: logger.Default.LogMode(logger.Silent)},
-	)
+	var err error
+	testDB, err = gorm.Open(dialector, &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
 	if err != nil {
 		fmt.Printf("FATAL: failed to initialize gorm: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Migrate models needed by service-layer tests.
 	if err := testDB.AutoMigrate(
 		&db.CpiTenant{},
 		&db.DeliveryRule{},
@@ -59,8 +61,7 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
-	code := m.Run()
-	os.Exit(code)
+	os.Exit(m.Run())
 }
 
 // testServiceOpts holds optional dependencies for building a test Service.
@@ -73,6 +74,7 @@ type testServiceOpts struct {
 // newTestService creates a Service wired to testDB with a given mock CPI factory.
 // It sets sensible defaults for TMS/Notifier/GetUserEmail (no-op mocks) so that
 // existing tests that only care about CPI continue to work unchanged.
+// Automatically skips the calling test when testDB is nil.
 func newTestService(factory IntegrationFactory, opts ...testServiceOpts) *Service {
 	l, _ := zap.NewDevelopment()
 	svc := &Service{
