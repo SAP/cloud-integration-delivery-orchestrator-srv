@@ -21,6 +21,8 @@ var cancellableStatuses = map[lifecycle.AggregateStatus]bool{
 // CancelDeliveryRequest cancels a delivery request with a reason.
 // Cancellation is permanent and prevents any further import/deploy operations.
 func (s *Service) CancelDeliveryRequest(drID uint, userID string, reason string) error {
+	before := s.captureDrSnapshot(drID)
+
 	// 1. Sync status first to get latest state from TMS/CPI
 	if err := s.SyncDeliveryStatus(drID, userID); err != nil {
 		// Ignore "not approved yet" error - PENDING/WAITING_APPROVAL are cancellable
@@ -47,6 +49,12 @@ func (s *Service) CancelDeliveryRequest(drID uint, userID string, reason string)
 		UpdatedBy:       userID,
 	}).Error; err != nil {
 		return fmt.Errorf("failed to update delivery request status: %s", err.Error())
+	}
+
+	after := s.captureDrSnapshot(drID)
+	if before.Exists && after.Exists && before.Status != after.Status {
+		s.publishDrStatus(drID, before.Status, after.Status)
+		s.publishCounts()
 	}
 
 	// 5. Create cancellation condition

@@ -61,6 +61,7 @@ type Service struct {
 	CPI          IntegrationFactory
 	GetUserEmail func(ctx context.Context, userID string) (string, error)
 	Notifier     Notifier
+	EventBus     *EventBus
 }
 
 // --- Default Notifier implementation (wraps pkg/notify package functions) ---

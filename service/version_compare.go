@@ -1094,6 +1094,7 @@ func (s *Service) CreateDRFromMismatch(ruleID uint, req CreateDRFromMismatchRequ
 		return CreateDRFromMismatchResponse{}, fmt.Errorf("failed to reload created delivery request: %w", err)
 	}
 
+	s.publishCounts()
 	return CreateDRFromMismatchResponse{
 		DeliveryRequest: *drLoaded,
 		Summary: CreateDRFromMismatchSummary{

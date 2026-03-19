@@ -49,8 +49,24 @@ func (s *Service) DetermineOverallStatus(drID uint) error {
 }
 
 func (s *Service) SyncDeliveryStatus(deliveryRequestID uint, user string) error {
-	// Always recompute aggregate status regardless of early returns below
+	before := s.captureDrSnapshot(deliveryRequestID)
 
+	// Defers execute LIFO: event-publish runs last (registered first),
+	// DetermineOverallStatus runs first (registered last), ensuring the
+	// snapshot captured in the publish defer reflects the final aggregate status.
+	defer func() {
+		after := s.captureDrSnapshot(deliveryRequestID)
+		if !before.Exists || !after.Exists {
+			return
+		}
+		if !sameOps(before.Ops, after.Ops) {
+			s.publishDrOps(deliveryRequestID, after.Ops)
+		}
+		if before.Status != after.Status {
+			s.publishDrStatus(deliveryRequestID, before.Status, after.Status)
+			s.publishCounts()
+		}
+	}()
 	defer s.DetermineOverallStatus(deliveryRequestID)
 
 	// Check if delivery request is approved before syncing status

@@ -48,6 +48,7 @@ func main() {
 	}
 
 	cpiManager := cpi.NewManager()
+	eventBus := service.NewEventBus()
 
 	// --- Build service with all injected dependencies ---
 	svc := &service.Service{
@@ -59,6 +60,7 @@ func main() {
 		},
 		GetUserEmail: xsuaa.GetUserEmail,
 		Notifier:     service.NewDefaultNotifier(),
+		EventBus:     eventBus,
 	}
 
 	// --- Build handler with all injected dependencies ---
@@ -70,7 +72,10 @@ func main() {
 		cpiManager,
 		xsuaaClient,
 		env.Destinations(),
+		eventBus,
 	)
+
+	svc.StartBackgroundSync(ctx, 15*time.Second)
 
 	// --- Setup Gin router ---
 	router := gin.New()
@@ -81,7 +86,7 @@ func main() {
 	v1Group := router.Group("/api/v1")
 	v2Group := router.Group("/api/v2")
 
-	h.SetupRoutes(v1Group, v2Group, router)
+	h.SetupRoutes(v1Group, v2Group)
 
 	if err := router.Run(":8080"); err != nil {
 		panic(err)

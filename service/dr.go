@@ -13,6 +13,22 @@ import (
 	"gorm.io/gorm"
 )
 
+func (s *Service) CreateDeliveryRequest(dr *db.DeliveryRequest) error {
+	if err := s.DB.Create(dr).Error; err != nil {
+		return fmt.Errorf("failed to create delivery request: %s", err)
+	}
+	s.publishCounts()
+	return nil
+}
+
+func (s *Service) DeleteDeliveryRequest(id uint) error {
+	if err := s.DB.Delete(&db.DeliveryRequest{}, id).Error; err != nil {
+		return fmt.Errorf("failed to delete delivery request %d: %s", id, err)
+	}
+	s.publishCounts()
+	return nil
+}
+
 // check and load artifact info into db, set ArtifactID in ops
 func (s *Service) LoadArtifact(op db.ArtifactTenantOperation) (atf db.Artifact, err error) {
 	a := &op.Artifact
@@ -205,7 +221,7 @@ func (s *Service) GenRouteForRule(ctx context.Context, ruleID uint) (err error) 
 	return
 }
 
-func (s *Service) DeleteTenantOps(opIDs []uint) error {
+func (s *Service) DeleteTenantOps(drID uint, opIDs []uint) error {
 	if len(opIDs) == 0 {
 		return nil
 	}
@@ -232,6 +248,9 @@ func (s *Service) DeleteTenantOps(opIDs []uint) error {
 			errMsg += fmt.Sprintf("\t operation %d: %s\n", id, e)
 		}
 		return errors.New(errMsg)
+	}
+	if drID != 0 {
+		s.publishDrOps(drID, s.snapshotOps(drID))
 	}
 	return nil
 }
@@ -290,6 +309,7 @@ func (s *Service) InsertTenantOps(drID uint, ops []db.ArtifactTenantOperation, u
 	if err := s.DB.Create(&ops).Error; err != nil {
 		return nil, fmt.Errorf("failed to insert artifact tenant operations: %s", err)
 	}
+	s.publishDrOps(drID, s.snapshotOps(drID))
 	return ops, nil
 }
 
@@ -347,6 +367,7 @@ func (s *Service) UpdateTenantOps(drID uint, ops []db.ArtifactTenantOperation, u
 		}
 		return nil, errors.New(errMsg)
 	}
+	s.publishDrOps(drID, s.snapshotOps(drID))
 	return ops, nil
 }
 

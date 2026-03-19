@@ -61,6 +61,7 @@ func (s *Service) BatchImportTenantOps(drID uint, opIDs []uint, targetTenantID u
 	if err != nil {
 		return false, err
 	}
+	s.publishDrOps(drID, s.snapshotOps(drID))
 
 	// trigger async import in goroutine to avoid blocking
 	go func(drID uint, targetNodeID uint, targetTenantName string, trs []uint, ops []db.ArtifactTenantOperation, user string) {
@@ -71,6 +72,7 @@ func (s *Service) BatchImportTenantOps(drID uint, opIDs []uint, targetTenantID u
 				ops[i].ImportState = lifecycle.ImportFailed
 			}
 			_ = s.batchUpdateOps(ops)
+			s.publishDrOps(drID, s.snapshotOps(drID))
 
 			condition := db.Condition{
 				DeliveryRequestID: drID,
@@ -139,6 +141,7 @@ func (s *Service) BatchDeployTenantOps(drID uint, opIDs []uint, targetTenantID u
 	if err != nil {
 		return false, err
 	}
+	s.publishDrOps(drID, s.snapshotOps(drID))
 
 	// trigger async deploy in goroutine to avoid blocking
 	go func(drID uint, tenant *db.CpiTenant, ops []db.ArtifactTenantOperation, user string) {
@@ -170,6 +173,7 @@ func (s *Service) BatchDeployTenantOps(drID uint, opIDs []uint, targetTenantID u
 		// update failed ops state to DeployFailed in database
 		if len(failedOps) > 0 {
 			_ = s.batchUpdateOps(failedOps)
+			s.publishDrOps(drID, s.snapshotOps(drID))
 		}
 
 		// record conditions based on results

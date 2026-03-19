@@ -22,6 +22,12 @@ type Handler struct {
 	cpi          *cpi.Manager
 	xsuaa        *xsuaa.UaaClient
 	destinations map[string]env.Destination
+	eventBus     *service.EventBus
+}
+
+type StatusCount struct {
+	Total        int64
+	StatusCounts map[string]uint
 }
 
 func NewHandler(
@@ -32,6 +38,7 @@ func NewHandler(
 	cpiManager *cpi.Manager,
 	xsuaaClient *xsuaa.UaaClient,
 	destinations map[string]env.Destination,
+	eventBus *service.EventBus,
 ) *Handler {
 	return &Handler{
 		svc:          svc,
@@ -41,11 +48,12 @@ func NewHandler(
 		cpi:          cpiManager,
 		xsuaa:        xsuaaClient,
 		destinations: destinations,
+		eventBus:     eventBus,
 	}
 }
 
 // SetupRoutes registers all API routes on the given router group.
-func (h *Handler) SetupRoutes(v1 *gin.RouterGroup, v2 *gin.RouterGroup, router *gin.Engine) {
+func (h *Handler) SetupRoutes(v1 *gin.RouterGroup, v2 *gin.RouterGroup) {
 	// CPI tenant artifacts
 	v1.GET("/tanant/packages", h.GetPackagesHandler)
 	v1.GET("/tenant/packages/artifacts", h.GetPackageArtifactsHandler)
@@ -114,9 +122,9 @@ func (h *Handler) SetupRoutes(v1 *gin.RouterGroup, v2 *gin.RouterGroup, router *
 	v1.GET("/deliveryRule/:id/versionCompare/previewDR", h.HandlePreviewDRFromMismatch)
 	v1.POST("/deliveryRule/:id/versionCompare/createDR", h.HandleCreateDRFromMismatch)
 
+	// Events
+	v1.GET("/events", h.SSEHandler)
+
 	// v2
 	v2.POST("/deliver", h.NativeDeliver)
-
-	// WebSocket
-	router.GET("/ws", h.WsHandler)
 }

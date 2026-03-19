@@ -143,3 +143,12 @@ func (h *Handler) DeleteDeliveryRule(ctx *gin.Context) {
 	}
 	ctx.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": id})
 }
+
+func (h *Handler) DeliveryRuleCounts(ctx *gin.Context) {
+	var res StatusCount
+	if err := h.db.Model(&db.DeliveryRule{}).Count(&res.Total).Error; err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": res})
+}

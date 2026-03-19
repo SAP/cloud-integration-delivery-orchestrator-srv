@@ -69,6 +69,11 @@ func (s *Service) RequestApproval(drID uint, currentUserID string, approvers []s
 	}); err != nil {
 		return fmt.Errorf("failed to update condition: %s", err.Error())
 	}
+
+	if dr.AggregateStatus != lifecycle.AggWaitingApprove {
+		s.publishDrStatus(drID, dr.AggregateStatus, lifecycle.AggWaitingApprove)
+		s.publishCounts()
+	}
 	return nil
 }
 
@@ -120,6 +125,11 @@ func (s *Service) Approve(drID uint, approverID string) (*db.DeliveryRequest, er
 		UpdatedBy:       approverID,
 	}).Error; err != nil {
 		return nil, fmt.Errorf("failed to update delivery request status: %s", err.Error())
+	}
+
+	if dr.AggregateStatus != lifecycle.AggAwaitingImport {
+		s.publishDrStatus(drID, dr.AggregateStatus, lifecycle.AggAwaitingImport)
+		s.publishCounts()
 	}
 	// sync import/deploy state after approval
 	if err := s.SyncDeliveryStatus(drID, approverID); err != nil {

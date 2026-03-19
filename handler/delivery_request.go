@@ -47,7 +47,7 @@ func (h *Handler) CreateDr(c *gin.Context) {
 	user := service.UserID(c)
 	dr.CreatedBy, dr.UpdatedBy = user, user
 
-	if err := h.db.Create(&dr).Error; err != nil {
+	if err := h.svc.CreateDeliveryRequest(&dr); err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
 	}
@@ -111,6 +111,30 @@ func (h *Handler) GetAllDr(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": drList})
 }
 
+func (h *Handler) DeliveryRequestCounts(ctx *gin.Context) {
+	var res StatusCount
+	if err := h.db.Model(&db.DeliveryRequest{}).Count(&res.Total).Error; err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
+		return
+	}
+	var counts []struct {
+		AggregateStatus lifecycle.AggregateStatus
+		Count           uint
+	}
+	if err := h.db.Model(&db.DeliveryRequest{}).
+		Select("aggregate_status, count(*) as count").
+		Group("aggregate_status").
+		Scan(&counts).Error; err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
+		return
+	}
+	res.StatusCounts = make(map[string]uint, len(counts))
+	for _, c := range counts {
+		res.StatusCounts[string(c.AggregateStatus)] = c.Count
+	}
+	ctx.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": res})
+}
+
 // Get a single DeliveryRequest by id
 func (h *Handler) GetDeliveryRequest(c *gin.Context) {
 	raw := c.Param("id")
@@ -139,7 +163,7 @@ func (h *Handler) DeleteDr(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "invalid id"})
 		return
 	}
-	if err := h.db.Delete(&db.DeliveryRequest{}, id).Error; err != nil {
+	if err := h.svc.DeleteDeliveryRequest(uint(id)); err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
 	}
@@ -262,20 +286,21 @@ func (h *Handler) HandleSyncState(ctx *gin.Context) {
 }
 
 type DeleteOpsRequest struct {
-	OpIds []uint `json:"opIds"`
+	OpIds             []uint `json:"opIds"`
+	DeliveryRequestID uint   `json:"deliveryRequestID"`
 }
 
 func (h *Handler) HandleDeleteOps(c *gin.Context) {
 	var req DeleteOpsRequest
 	if err := c.ShouldBindBodyWithJSON(&req); err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
+		return
 	}
-	if err := h.svc.DeleteTenantOps(req.OpIds); err != nil {
+	if err := h.svc.DeleteTenantOps(req.DeliveryRequestID, req.OpIds); err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": req.OpIds})
-
 }
 
 // update or insert ops request
@@ -302,7 +327,6 @@ func (h *Handler) HandleInsertOps(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": ops})
-
 }
 
 func (h *Handler) HandleUpdateOps(c *gin.Context) {
