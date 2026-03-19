@@ -346,7 +346,7 @@ func (s *Service) syncImportState(deliveryRequestID uint, user string) []db.Cond
 					Message:                   conditionMsg,
 				})
 
-				// Send notification to JIRA if configured
+				// Send notification to JIRA if configured (same as SUCCEEDED; WARNING is still a successful import)
 				if dr.JiraLink != "" {
 					go func(jiraLink string, drID uint, message string) {
 						issueKey := s.extractJiraIssueKey(jiraLink)
@@ -358,6 +358,25 @@ func (s *Service) syncImportState(deliveryRequestID uint, user string) []db.Cond
 							s.Logger.Errorf("Failed to add JIRA comment for import success: %s", err)
 						}
 					}(dr.JiraLink, deliveryRequestID, conditionMsg)
+				}
+
+				// TMS WARNING: import counts as complete but persist severity-W log lines as CondWarn
+				if strings.EqualFold(nState.Status, "WARNING") {
+					warnMsgs, werr := s.TMS.WarnLogsInTransportLog(context.Background(), trNumber, nID)
+					var warnBody string
+					if werr != nil {
+						warnBody = fmt.Sprintf("could not load TMS warning messages for transport request %s in node %d: %s", trNumber, nID, werr.Error())
+					} else if len(warnMsgs) == 0 {
+						warnBody = fmt.Sprintf("TMS reported WARNING for transport request %s in node %d; no severity W messages in transport log.", trNumber, nID)
+					} else {
+						warnBody = strings.Join(warnMsgs, "\n")
+					}
+					conditions = append(conditions, db.Condition{
+						DeliveryRequestID:         deliveryRequestID,
+						ArtifactTenantOperationID: curOp.ID,
+						State:                     lifecycle.CondWarn,
+						Message:                   warnBody,
+					})
 				}
 			}
 			// get error logs if import failed

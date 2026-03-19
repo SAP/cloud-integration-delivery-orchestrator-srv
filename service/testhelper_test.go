@@ -358,6 +358,9 @@ func (m *mockTMSClient) TrNodeStatuses(ctx context.Context, trNumber string) (ma
 func (m *mockTMSClient) ErrLogsInTransportLog(ctx context.Context, trNumber string, nodeID uint) ([]string, error) {
 	return nil, nil
 }
+func (m *mockTMSClient) WarnLogsInTransportLog(ctx context.Context, trNumber string, nodeID uint) ([]string, error) {
+	return nil, nil
+}
 
 // --- Mock Notifier ---
 

@@ -23,6 +23,7 @@ type TransportService interface {
 	GetTransportRequest(ctx context.Context, TrNumber string) (*tms.TransportRequestV1, error)
 	TrNodeStatuses(ctx context.Context, trNumber string) (map[uint]tms.TrNodeStatus, error)
 	ErrLogsInTransportLog(ctx context.Context, trNumber string, nodeID uint) ([]string, error)
+	WarnLogsInTransportLog(ctx context.Context, trNumber string, nodeID uint) ([]string, error)
 }
 
 // IntegrationService defines the CPI operations needed by the service layer.

@@ -430,3 +430,22 @@ func (t *TmsClient) ErrLogsInTransportLog(ctx context.Context, trNumber string, 
 	}
 	return
 }
+
+// WarnLogsInTransportLog returns messages with severity "W" from the transport request log.
+func (t *TmsClient) WarnLogsInTransportLog(ctx context.Context, trNumber string, nodeID uint) (warnLogs []string, err error) {
+	warnLogs = make([]string, 0)
+	transportLogResp, err := t.getTransportLogs(ctx, trNumber, nodeID)
+	if err != nil {
+		return
+	}
+	for _, trLog := range transportLogResp.Logs {
+		for _, entity := range trLog.Entities {
+			for _, msg := range entity.Messages {
+				if msg.Severity == "W" {
+					warnLogs = append(warnLogs, fmt.Sprintf("Transport Request %s in Node %d (warning): %s", trNumber, nodeID, msg.Message))
+				}
+			}
+		}
+	}
+	return
+}

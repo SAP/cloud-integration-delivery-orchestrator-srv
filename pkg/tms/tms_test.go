@@ -292,6 +292,55 @@ func TestGetActionResult_Timeout(t *testing.T) {
 	}
 }
 
+func TestWarnLogsInTransportLog_CollectsSeverityW(t *testing.T) {
+	// TMS only returns W/F severity in entity-level messages; action-level
+	// messages are informational (severity "I"). The test mirrors real TMS
+	// responses: W messages only appear under entities[].messages.
+	logJSON := `{
+		"logs": [{
+			"actionId": 1,
+			"actionType": "IMPORT",
+			"status": "DONE",
+			"actionStartedAt": "2026-03-18T06:53:00Z",
+			"actionTriggeredBy": "user",
+			"messages": [
+				{"id": 1, "messageId": " ", "severity": "I", "message": "action-level info", "createdAt": "2026-03-18T06:53:50.066Z"}
+			],
+			"entities": [{
+				"id": 1,
+				"uri": "",
+				"status": "",
+				"fileName": "",
+				"messages": [
+					{"id": 2, "messageId": " ", "severity": "W", "message": "entity warn 1", "createdAt": "2026-03-18T06:53:51.066Z"},
+					{"id": 3, "messageId": " ", "severity": "I", "message": "entity info", "createdAt": "2026-03-18T06:53:52.066Z"},
+					{"id": 4, "messageId": " ", "severity": "W", "message": "entity warn 2", "createdAt": "2026-03-18T06:53:53.066Z"}
+				]
+			}]
+		}]
+	}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("expected GET, got %s", r.Method)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(logJSON))
+	}))
+	defer server.Close()
+
+	client := createTestClient(server.URL)
+	out, err := client.WarnLogsInTransportLog(context.Background(), "TR123", 7)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("expected 2 warning lines, got %d: %v", len(out), out)
+	}
+	if !containsSubstring(out[0], "entity warn 1") || !containsSubstring(out[1], "entity warn 2") {
+		t.Fatalf("unexpected messages: %v", out)
+	}
+}
+
 // =============================================================================
 // Helper functions
 // =============================================================================

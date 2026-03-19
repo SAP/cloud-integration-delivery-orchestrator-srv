@@ -28,8 +28,7 @@ const (
 )
 
 // Canonical import states.
-// status from TMS API: INITIAL, RUNNING, SUCCEEDED, FATAL, 
-// TODO: REPEAT, WARNING, ERROR, etc...
+// TMS node status mapping: INITIAL, RUNNING, SUCCEEDED, WARNING, FATAL, REPEAT, etc.
 const (
 	ImportNotStarted ImportState = "NOT_STARTED"
 	ImportQueued     ImportState = "QUEUED" // INITIAL
@@ -74,16 +73,18 @@ const (
 	CondSuccess ConditionState = "Success"
 )
 
-// INITIAL, RUNNING, SUCCEEDED, FATAL, 
-// TODO: REPEAT, deleted, unknown, warning
+// DeriveImport maps TMS transport node state to our ImportState.
+// WARNING is treated as successful import (deploy may proceed); REPEAT means TR was reset and may be imported again.
 func DeriveImport(state string) ImportState {
 	switch strings.ToUpper(state) {
 	case "INITIAL":
 		return ImportQueued
 	case "RUNNING":
 		return ImportInProgress
-	case "SUCCEEDED":
+	case "SUCCEEDED", "WARNING":
 		return ImportComplete
+	case "REPEAT":
+		return ImportQueued
 	case "FATAL", "FAILED", "ERROR":
 		return ImportFailed
 	default:

@@ -340,3 +340,15 @@ func TestDeriveAggregateStatus_ImportDisabledProgressesToDeploy(t *testing.T) {
 		t.Fatalf("expected WAITING_DEPLOY with all ImportDisabled, got %s", agg)
 	}
 }
+
+// REPEAT → ImportQueued: mixed with completed imports should surface AWAITING_IMPORT (re-import allowed).
+func TestDeriveAggregateStatus_RepeatQueuedWithComplete(t *testing.T) {
+	agg := DeriveAggregateStatus(
+		AggWaitingDeploy,
+		[]ImportState{ImportComplete, ImportQueued},
+		[]DeployState{DeployQueued, DeployNotStarted},
+	)
+	if agg != AggAwaitingImport {
+		t.Fatalf("expected AWAITING_IMPORT when any op is QUEUED (e.g. TMS REPEAT), got %s", agg)
+	}
+}
