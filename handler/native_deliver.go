@@ -90,7 +90,7 @@ func (h *Handler) NativeDeliver(ctx *gin.Context) {
 
 			// TODO: deploy the artifact by artifact type
 
-			// TODO: loop for aroud 5 times to check deploy status
+			// TODO: loop for aroud 5 times to check deploy stus
 			for i := 0; i < 5; i++ {
 				runtimeArtifact, err := destClient.RuntimeArtifact(ctx, artifact.ArtifactID)
 				if err != nil {
