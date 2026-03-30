@@ -17,7 +17,7 @@ import (
 // Flow: EventBus.Publish → subscriber channel → fmt.Fprintf → Flusher.Flush → network
 func (h *Handler) SSEHandler(c *gin.Context) {
 	if h.eventBus == nil {
-		c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"status": "fail", "code": 503, "error": "event bus is not available"})
+		Fail(c, http.StatusServiceUnavailable, "event bus is not available")
 		return
 	}
 
@@ -28,7 +28,7 @@ func (h *Handler) SSEHandler(c *gin.Context) {
 
 	flusher, ok := c.Writer.(http.Flusher)
 	if !ok {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": "streaming unsupported"})
+		Fail(c, http.StatusInternalServerError, "streaming unsupported")
 		return
 	}
 

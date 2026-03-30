@@ -18,25 +18,25 @@ func (h *Handler) CreateDr(c *gin.Context) {
 	var dr db.DeliveryRequest
 	var err error
 	if err = c.ShouldBindJSON(&dr); err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
+		Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 	if dr.DeliveryRule.ID == 0 {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "missing delivery rule"})
+		Fail(c, http.StatusBadRequest, "missing delivery rule")
 		return
 	}
 	if dr.Name == "" {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "missing name"})
+		Fail(c, http.StatusBadRequest, "missing name")
 		return
 	}
 
 	if err := checkJIRA(dr.JiraLink, dr.DeliveryRule); err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
+		Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 	var rule db.DeliveryRule
 	if rule, err = h.svc.GetDeliveryRuleWithAcc(dr.DeliveryRule.ID); err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": fmt.Errorf("failed to generate target routes and nodes: %s", err)})
+		Fail(c, http.StatusInternalServerError, fmt.Errorf("failed to generate target routes and nodes: %s", err).Error())
 		return
 	}
 	dr.SourceTenantID = rule.SourceTenantID
@@ -48,38 +48,38 @@ func (h *Handler) CreateDr(c *gin.Context) {
 	dr.CreatedBy, dr.UpdatedBy = user, user
 
 	if err := h.svc.CreateDeliveryRequest(&dr); err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
+		Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": dr})
+	OK(c, dr)
 }
 
 // update DeliveryRequest, not including ops
 func (h *Handler) UpdateDr(c *gin.Context) {
 	var dr db.DeliveryRequest
 	if err := c.ShouldBindJSON(&dr); err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
+		Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 	var existing db.DeliveryRequest
 	if err := h.db.First(&existing, dr.ID).Error; err != nil {
-		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"status": "fail", "code": 404, "error": fmt.Sprintf("delivery request id %d not found", dr.ID)})
+		Fail(c, http.StatusNotFound, fmt.Sprintf("delivery request id %d not found", dr.ID))
 		return
 	}
 	if existing.AggregateStatus != lifecycle.AggPending && existing.AggregateStatus != lifecycle.AggWaitingApprove {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "only pending or waiting approval delivery request can be updated"})
+		Fail(c, http.StatusBadRequest, "only pending or waiting approval delivery request can be updated")
 		return
 	}
 	rule, err := h.svc.GetDeliveryRuleWithAcc(dr.DeliveryRule.ID)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
+		Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 	user := service.UserID(c)
 	// check and update JIRA
 	if existing.JiraLink != dr.JiraLink {
 		if err := checkJIRA(dr.JiraLink, rule); err != nil {
-			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
+			Fail(c, http.StatusBadRequest, err.Error())
 			return
 		}
 		existing.JiraLink = dr.JiraLink
@@ -92,10 +92,10 @@ func (h *Handler) UpdateDr(c *gin.Context) {
 	}
 	existing.Name = dr.Name
 	if err := h.db.Updates(&existing).Error; err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
+		Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": dr})
+	OK(c, dr)
 }
 
 // List all DeliveryRequests
@@ -105,16 +105,16 @@ func (h *Handler) GetAllDr(c *gin.Context) {
 		Preload("SourceTenant").
 		Preload("DeliveryRule").
 		Find(&drList).Error; err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
+		Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": drList})
+	OK(c, drList)
 }
 
 func (h *Handler) DeliveryRequestCounts(ctx *gin.Context) {
 	var res StatusCount
 	if err := h.db.Model(&db.DeliveryRequest{}).Count(&res.Total).Error; err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
+		Fail(ctx, http.StatusInternalServerError, err.Error())
 		return
 	}
 	var counts []struct {
@@ -125,14 +125,14 @@ func (h *Handler) DeliveryRequestCounts(ctx *gin.Context) {
 		Select("aggregate_status, count(*) as count").
 		Group("aggregate_status").
 		Scan(&counts).Error; err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
+		Fail(ctx, http.StatusInternalServerError, err.Error())
 		return
 	}
 	res.StatusCounts = make(map[string]uint, len(counts))
 	for _, c := range counts {
 		res.StatusCounts[string(c.AggregateStatus)] = c.Count
 	}
-	ctx.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": res})
+	OK(ctx, res)
 }
 
 // Get a single DeliveryRequest by id
@@ -140,15 +140,15 @@ func (h *Handler) GetDeliveryRequest(c *gin.Context) {
 	raw := c.Param("id")
 	drID, err := strconv.Atoi(raw)
 	if err != nil || drID <= 0 {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "invalid id"})
+		Fail(c, http.StatusBadRequest, "invalid id")
 		return
 	}
 	dr, err := h.svc.QueryDrWithAssociations(uint(drID))
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
+		Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": dr})
+	OK(c, dr)
 }
 
 // DeleteDr soft-deletes a DeliveryRequest by id.
@@ -160,14 +160,14 @@ func (h *Handler) DeleteDr(c *gin.Context) {
 	raw := c.Param("id")
 	id, err := strconv.Atoi(raw)
 	if err != nil || id <= 0 {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "invalid id"})
+		Fail(c, http.StatusBadRequest, "invalid id")
 		return
 	}
 	if err := h.svc.DeleteDeliveryRequest(uint(id)); err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
+		Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": id})
+	OK(c, id)
 }
 
 // checkJIRA validates JIRA link format
@@ -230,59 +230,59 @@ func (h *Handler) preDeliverCheck(req DeliverOpRequest) error {
 func (h *Handler) HandleImportOps(c *gin.Context) {
 	var req DeliverOpRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
+		Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 	if err := h.preDeliverCheck(req); err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
+		Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 	user := service.UserID(c)
 	success, err := h.svc.BatchImportTenantOps(req.DeliveryRequestID, req.OpIDs, req.TargetTenant, user)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
+		Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": success, "msg": "Import triggered"})
+	OKMsg(c, success, "Import triggered")
 }
 
 func (h *Handler) HandleDeployOps(c *gin.Context) {
 	var req DeliverOpRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
+		Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 	if err := h.preDeliverCheck(req); err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
+		Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 	user := service.UserID(c)
 	success, err := h.svc.BatchDeployTenantOps(req.DeliveryRequestID, req.OpIDs, req.TargetTenant, user)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
+		Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": success, "msg": "Deploy triggered"})
+	OKMsg(c, success, "Deploy triggered")
 }
 
 func (h *Handler) HandleSyncState(ctx *gin.Context) {
 	drIDStr := ctx.Param("deliveryRequestId")
 	if drIDStr == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"status": 400, "error": "missing query param: deliveryRequestId"})
+		Fail(ctx, http.StatusBadRequest, "missing query param: deliveryRequestId")
 		return
 	}
 	user := service.UserID(ctx)
 	drID, err := service.ToUint(drIDStr)
 	if err != nil || drID <= 0 {
-		ctx.JSON(http.StatusBadRequest, gin.H{"status": 400, "error": "invalid deliveryRequestId"})
+		Fail(ctx, http.StatusBadRequest, "invalid deliveryRequestId")
 		return
 	}
 	if err := h.svc.SyncDeliveryStatus(drID, user); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"status": 500, "error": err.Error()})
+		Fail(ctx, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"status": 200, "msg": "sync finished"})
+	OKMsg(ctx, nil, "sync finished")
 }
 
 type DeleteOpsRequest struct {
@@ -293,14 +293,14 @@ type DeleteOpsRequest struct {
 func (h *Handler) HandleDeleteOps(c *gin.Context) {
 	var req DeleteOpsRequest
 	if err := c.ShouldBindBodyWithJSON(&req); err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
+		Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 	if err := h.svc.DeleteTenantOps(req.DeliveryRequestID, req.OpIds); err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
+		Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": req.OpIds})
+	OK(c, req.OpIds)
 }
 
 // update or insert ops request
@@ -312,36 +312,36 @@ type OpsRequest struct {
 func (h *Handler) HandleInsertOps(c *gin.Context) {
 	var req OpsRequest
 	if err := c.ShouldBindBodyWithJSON(&req); err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
+		Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 	user := service.UserID(c)
 	if req.DeliveryRequestID == 0 {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "missing deliveryRequestID"})
+		Fail(c, http.StatusBadRequest, "missing deliveryRequestID")
 		return
 	}
 	var ops []db.ArtifactTenantOperation
 	ops, err := h.svc.InsertTenantOps(req.DeliveryRequestID, req.Ops, user)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
+		Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": ops})
+	OK(c, ops)
 }
 
 func (h *Handler) HandleUpdateOps(c *gin.Context) {
 	var req OpsRequest
 	if err := c.ShouldBindBodyWithJSON(&req); err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
+		Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 	user := service.UserID(c)
 	ops, err := h.svc.UpdateTenantOps(req.DeliveryRequestID, req.Ops, user)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
+		Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": ops})
+	OK(c, ops)
 }
 
 func (h *Handler) HandleCheckTr(c *gin.Context) {
@@ -350,31 +350,31 @@ func (h *Handler) HandleCheckTr(c *gin.Context) {
 		DeliveryRequestID uint                       `json:"deliveryRequestID"`
 	}
 	if err := c.ShouldBindBodyWithJSON(&req); err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
+		Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 	var dr db.DeliveryRequest
 	if err := h.db.First(&dr, req.DeliveryRequestID).Error; err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": fmt.Sprintf("failed to get delivery request id %d: %s", req.DeliveryRequestID, err)})
+		Fail(c, http.StatusInternalServerError, fmt.Sprintf("failed to get delivery request id %d: %s", req.DeliveryRequestID, err))
 		return
 	}
 	sourceTenantID := dr.SourceTenantID
 	if req.Op.TenantID != sourceTenantID {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": fmt.Sprintf("artifact tenant operation id %d has different source tenant id %d than delivery request source tenant id %d", req.Op.ID, req.Op.TenantID, sourceTenantID)})
+		Fail(c, http.StatusBadRequest, fmt.Sprintf("artifact tenant operation id %d has different source tenant id %d than delivery request source tenant id %d", req.Op.ID, req.Op.TenantID, sourceTenantID))
 		return
 	}
 	var sourceTenant db.CpiTenant
 	if err := h.db.First(&sourceTenant, sourceTenantID).Error; err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": fmt.Sprintf("failed to get source tenant id %d: %s", sourceTenantID, err)})
+		Fail(c, http.StatusInternalServerError, fmt.Sprintf("failed to get source tenant id %d: %s", sourceTenantID, err))
 		return
 	}
 
 	_, err := h.svc.TrExist(&req.Op, &sourceTenant)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
+		Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "msg": "valid TR: " + req.Op.TransportRequestNumber})
+	OKMsg(c, nil, "valid TR: "+req.Op.TransportRequestNumber)
 }
 
 // CancelDrRequest is the request body for canceling a delivery request
@@ -387,19 +387,19 @@ type CancelDrRequest struct {
 func (h *Handler) HandleCancelDr(c *gin.Context) {
 	var req CancelDrRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
+		Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 	if req.DeliveryRequestID == 0 {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "missing deliveryRequestID"})
+		Fail(c, http.StatusBadRequest, "missing deliveryRequestID")
 		return
 	}
 
 	user := service.UserID(c)
 	if err := h.svc.CancelDeliveryRequest(req.DeliveryRequestID, user, req.Reason); err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
+		Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "message": "Delivery request canceled successfully"})
+	OKMsg(c, nil, "Delivery request canceled successfully")
 }

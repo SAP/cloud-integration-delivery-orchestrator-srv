@@ -30,6 +30,28 @@ type StatusCount struct {
 	StatusCounts map[string]uint
 }
 
+// --- Response helpers ---
+
+// OK sends a 200 response with data payload.
+func OK(c *gin.Context, data any) {
+	c.JSON(200, gin.H{"data": data})
+}
+
+// OKMsg sends a 200 response with data + a toast message.
+func OKMsg(c *gin.Context, data any, message string) {
+	c.JSON(200, gin.H{"data": data, "message": message})
+}
+
+// Fail sends an error response with message.
+func Fail(c *gin.Context, status int, message string) {
+	c.AbortWithStatusJSON(status, gin.H{"message": message})
+}
+
+// FailErrors sends an error response with message + structured error details.
+func FailErrors(c *gin.Context, status int, message string, errors any) {
+	c.AbortWithStatusJSON(status, gin.H{"message": message, "errors": errors})
+}
+
 func NewHandler(
 	svc *service.Service,
 	db *gorm.DB,

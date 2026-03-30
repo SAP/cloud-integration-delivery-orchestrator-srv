@@ -13,20 +13,19 @@ import (
 func (h *Handler) GetTmsNodesHandler(ctx *gin.Context) {
 	tmsNodes, error := h.tms.GetNodes(ctx)
 	if error != nil {
-		errorMsg := fmt.Sprintf("Error while retrieving tms Nodes: %s", error)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"status": 500, "result": errorMsg})
+		Fail(ctx, http.StatusInternalServerError, fmt.Sprintf("Error while retrieving tms Nodes: %s", error))
 		return
 	}
-	ctx.JSON(http.StatusOK, gin.H{"status": 200, "result": tmsNodes})
+	OK(ctx, tmsNodes)
 }
 
 func (h *Handler) GetRoutesHandler(ctx *gin.Context) {
 	routes, err := h.tms.GetRoutes(ctx)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"status": 500, "error": fmt.Sprintf("Error while get routes from tms: %s", err)})
+		Fail(ctx, http.StatusInternalServerError, fmt.Sprintf("Error while get routes from tms: %s", err))
 		return
 	}
-	ctx.JSON(http.StatusOK, gin.H{"status": 200, "result": routes})
+	OK(ctx, routes)
 }
 
 func (h *Handler) GetTranportRequestsHandler(ctx *gin.Context) {
@@ -35,7 +34,7 @@ func (h *Handler) GetTranportRequestsHandler(ctx *gin.Context) {
 	if error != nil {
 		errorMsg := fmt.Sprintf("Invalid transport node id %s: %s", trNode, error)
 		h.logger.Error(errorMsg)
-		ctx.JSON(http.StatusBadRequest, gin.H{"status": 500, "result": errorMsg})
+		Fail(ctx, http.StatusBadRequest, errorMsg)
 		return
 	}
 
@@ -43,7 +42,7 @@ func (h *Handler) GetTranportRequestsHandler(ctx *gin.Context) {
 	if error != nil {
 		errorMsg := fmt.Sprintf("Error while get node trs: %s", error)
 		h.logger.Error(errorMsg)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"status": 500, "result": errorMsg})
+		Fail(ctx, http.StatusInternalServerError, errorMsg)
 		return
 	}
 	trResp := make([]db.TransportRequest, len(trs))
@@ -54,7 +53,7 @@ func (h *Handler) GetTranportRequestsHandler(ctx *gin.Context) {
 			Status:      trs[i].Status,
 		}
 	}
-	ctx.JSON(http.StatusOK, gin.H{"status": 200, "result": trs})
+	OK(ctx, trs)
 }
 
 // TODO: monitoring and logging if transport request is not

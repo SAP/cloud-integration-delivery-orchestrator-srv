@@ -25,13 +25,13 @@ type NativeDeliverRequest struct {
 func (h *Handler) NativeDeliver(ctx *gin.Context) {
 	var deliverRequest NativeDeliverRequest
 	if err := ctx.BindJSON(&deliverRequest); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"msg": "Failed to bind native deliver request json: " + err.Error()})
+		Fail(ctx, http.StatusBadRequest, "Failed to bind native deliver request json: "+err.Error())
 		return
 	}
 
 	srcClient, err := h.cpi.Get(ctx, deliverRequest.SrcCpiTenant)
 	if err != nil {
-		ctx.JSON(500, gin.H{"error": "Failed to create CPI client: " + err.Error()})
+		Fail(ctx, 500, "Failed to create CPI client: "+err.Error())
 		return
 	}
 
@@ -44,7 +44,7 @@ func (h *Handler) NativeDeliver(ctx *gin.Context) {
 		case "ScriptCollection":
 			scItem, err := srcClient.GetDesignTimeScriptCollection(ctx, artifact.ArtifactID, artifact.ArtifactVersion)
 			if err != nil {
-				ctx.JSON(500, gin.H{"error": "Failed to get script collection:" + err.Error()})
+				Fail(ctx, 500, "Failed to get script collection:"+err.Error())
 				return
 			}
 			packageID = scItem.PackageID
@@ -53,7 +53,7 @@ func (h *Handler) NativeDeliver(ctx *gin.Context) {
 		case "IntegrationFlow":
 			iflowItem, err := srcClient.GetDesignTimeIflow(ctx, artifact.ArtifactID, artifact.ArtifactVersion)
 			if err != nil {
-				ctx.JSON(500, gin.H{"error": "Failed to get integration flow:" + err.Error()})
+				Fail(ctx, 500, "Failed to get integration flow:"+err.Error())
 				return
 			}
 			packageID = iflowItem.PackageID
@@ -61,12 +61,12 @@ func (h *Handler) NativeDeliver(ctx *gin.Context) {
 		}
 
 		if err := srcClient.DownloadArtifact(ctx, artifact.ArtifactID, artifact.ArtifactVersion, packageID, artifact.ArtifactType); err != nil {
-			ctx.JSON(500, gin.H{"error": "Failed to download artifact:" + err.Error()})
+			Fail(ctx, 500, "Failed to download artifact:"+err.Error())
 			return
 		}
 
 		if err := srcClient.SyncToGithub(artifact.ArtifactID, artifact.ArtifactVersion, artifact.ArtifactType, packageID, srcBranch, modifiedBy, modifiedAt, deliverRequest.DeliverComment); err != nil {
-			ctx.JSON(500, gin.H{"error": "Failed to sync Artifact to github:" + err.Error()})
+			Fail(ctx, 500, "Failed to sync Artifact to github:"+err.Error())
 			return
 		}
 
@@ -79,12 +79,12 @@ func (h *Handler) NativeDeliver(ctx *gin.Context) {
 		for _, destTenant := range deliverRequest.DestCpiTenants {
 			destClient, err := h.cpi.Get(ctx, destTenant)
 			if err != nil {
-				ctx.JSON(500, gin.H{"error": "Failed to create destination CPI client: " + err.Error()})
+				Fail(ctx, 500, "Failed to create destination CPI client: "+err.Error())
 				return
 			}
 
 			if err := destClient.UploadArtifact(ctx, artifact.ArtifactID, artifact.ArtifactVersion, packageID, artifact.ArtifactType); err != nil {
-				ctx.JSON(500, gin.H{"error": "Failed to upload artifact to destination tenant: " + err.Error()})
+				Fail(ctx, 500, "Failed to upload artifact to destination tenant: "+err.Error())
 				return
 			}
 
@@ -94,7 +94,7 @@ func (h *Handler) NativeDeliver(ctx *gin.Context) {
 			for i := 0; i < 5; i++ {
 				runtimeArtifact, err := destClient.RuntimeArtifact(ctx, artifact.ArtifactID)
 				if err != nil {
-					ctx.JSON(500, gin.H{"error": "Failed to check deploy status on destination tenant: " + err.Error()})
+					Fail(ctx, 500, "Failed to check deploy status on destination tenant: "+err.Error())
 					return
 				}
 				if runtimeArtifact.ID != "" && runtimeArtifact.Status == "STARTED" {

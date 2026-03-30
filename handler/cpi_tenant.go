@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -14,7 +13,7 @@ import (
 func (h *Handler) UpsertCpiTenant(ctx *gin.Context) {
 	var tenant db.CpiTenant
 	if err := ctx.ShouldBindJSON(&tenant); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": err.Error()})
+		Fail(ctx, 400, err.Error())
 		return
 	}
 	user := service.UserID(ctx)
@@ -23,20 +22,20 @@ func (h *Handler) UpsertCpiTenant(ctx *gin.Context) {
 		tenant.CreatedBy = user
 	}
 	if err := h.db.Save(&tenant).Error; err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
+		Fail(ctx, 500, err.Error())
 		return
 	}
-	ctx.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": tenant})
+	OK(ctx, tenant)
 }
 
 // List all
 func (h *Handler) GetCpiTenants(ctx *gin.Context) {
 	var tenants []db.CpiTenant
 	if err := h.db.Find(&tenants).Error; err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
+		Fail(ctx, 500, err.Error())
 		return
 	}
-	ctx.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": tenants})
+	OK(ctx, tenants)
 }
 
 // Get by id
@@ -44,17 +43,17 @@ func (h *Handler) GetCpiTenant(ctx *gin.Context) {
 	idStr := ctx.Param("id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "invalid id"})
+		Fail(ctx, 400, "invalid id")
 		return
 	}
 
 	var tenant db.CpiTenant
 	if err := h.db.First(&tenant, id).Error; err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
+		Fail(ctx, 500, err.Error())
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": tenant})
+	OK(ctx, tenant)
 }
 
 // Delete by id
@@ -62,23 +61,23 @@ func (h *Handler) DeleteCpiTenant(ctx *gin.Context) {
 	idStr := ctx.Param("id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "invalid id"})
+		Fail(ctx, 400, "invalid id")
 		return
 	}
 
 	if err := h.db.Delete(&db.CpiTenant{}, id).Error; err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
+		Fail(ctx, 500, err.Error())
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": id})
+	OK(ctx, id)
 }
 
 func (h *Handler) CpiTenantCounts(ctx *gin.Context) {
 	var res StatusCount
 	if err := h.db.Model(&db.CpiTenant{}).Count(&res.Total).Error; err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
+		Fail(ctx, 500, err.Error())
 		return
 	}
-	ctx.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": res})
+	OK(ctx, res)
 }

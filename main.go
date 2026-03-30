@@ -128,14 +128,14 @@ func AuthMiddleware() gin.HandlerFunc {
 			return keyFromJKU(jku, kid)
 		})
 		if err != nil || !token.Valid {
-			c.AbortWithStatusJSON(403, gin.H{"error": "invalid token:" + err.Error()})
+			c.AbortWithStatusJSON(403, gin.H{"message": "invalid token: " + err.Error()})
 			return
 		}
 		claims := token.Claims.(*db.UaaClaims)
 
 		// Check token expiration
 		if claims.ExpiresAt != nil && claims.ExpiresAt.Before(time.Now()) {
-			c.AbortWithStatusJSON(401, gin.H{"error": "token has expired"})
+			c.AbortWithStatusJSON(401, gin.H{"message": "token has expired"})
 			return
 		}
 
@@ -152,9 +152,7 @@ func RequireScope(requiredScope string) gin.HandlerFunc {
 		claims, exists := c.Get("uaa_claim")
 		if !exists {
 			c.AbortWithStatusJSON(403, gin.H{
-				"error":          "forbidden",
-				"message":        "No authentication claims found in request",
-				"required_scope": requiredScope,
+				"message": "No authentication claims found in request",
 			})
 			return
 		}
@@ -166,10 +164,7 @@ func RequireScope(requiredScope string) gin.HandlerFunc {
 			}
 		}
 		c.AbortWithStatusJSON(403, gin.H{
-			"error":          "insufficient_scope",
-			"message":        fmt.Sprintf("User '%s' does not have the required scope '%s'. Contact your administrator to assign the appropriate Role Collection.", uaaClaims.UserName, requiredScope),
-			"required_scope": requiredScope,
-			"user_scopes":    uaaClaims.Scope,
+			"message": fmt.Sprintf("User '%s' does not have the required scope '%s'. Contact your administrator to assign the appropriate Role Collection.", uaaClaims.UserName, requiredScope),
 		})
 	}
 }

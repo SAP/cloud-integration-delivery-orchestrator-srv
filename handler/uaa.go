@@ -11,18 +11,18 @@ func (h *Handler) HandleUaaUserEmailSearch(c *gin.Context) {
 	origin := service.UaaOrigin(c)
 	document, err := h.xsuaa.SearchByEmail(c, email, origin)
 	if err != nil {
-		c.JSON(500, gin.H{"status": 500, "error": err.Error()})
+		Fail(c, 500, err.Error())
 		return
 	}
-	c.JSON(200, gin.H{"status": 200, "result": document})
+	OK(c, document)
 }
 
 func (h *Handler) HandleUaaUserIDSearch(c *gin.Context) {
 	uid := c.Param("id")
 	userInfo, err := h.xsuaa.UserInfo(c, uid)
 	if err != nil {
-		c.JSON(500, gin.H{"status": 500, "error": err.Error()})
+		Fail(c, 500, err.Error())
 		return
 	}
-	c.JSON(200, gin.H{"status": 200, "result": userInfo})
+	OK(c, userInfo)
 }

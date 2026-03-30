@@ -16,24 +16,24 @@ func (h *Handler) TriggerVersionCompareHandler(ctx *gin.Context) {
 	idStr := ctx.Param("id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil || id <= 0 {
-		ctx.JSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "invalid id"})
+		Fail(ctx, http.StatusBadRequest, "invalid id")
 		return
 	}
 
 	triggeredBy := service.UserEmail(ctx)
 	result, err := h.svc.TriggerVersionCompare(uint(id), triggeredBy)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
+		Fail(ctx, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	switch result.Status {
 	case consts.TriggerStatusRateLimited:
-		ctx.JSON(http.StatusTooManyRequests, gin.H{"status": "fail", "code": 429, "result": result})
+		FailErrors(ctx, http.StatusTooManyRequests, "rate limited", result)
 	case consts.TriggerStatusConflict:
-		ctx.JSON(http.StatusConflict, gin.H{"status": "fail", "code": 409, "result": result})
+		FailErrors(ctx, http.StatusConflict, "conflict", result)
 	default:
-		ctx.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": result})
+		OK(ctx, result)
 	}
 }
 
@@ -42,7 +42,7 @@ func (h *Handler) QueryVersionCompareHandler(ctx *gin.Context) {
 	idStr := ctx.Param("id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil || id <= 0 {
-		ctx.JSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "invalid id"})
+		Fail(ctx, http.StatusBadRequest, "invalid id")
 		return
 	}
 
@@ -55,44 +55,44 @@ func (h *Handler) QueryVersionCompareHandler(ctx *gin.Context) {
 
 	resp, err := h.svc.QueryVersionCompare(uint(id), params)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
+		Fail(ctx, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": resp})
+	OK(ctx, resp)
 }
 
 // VersionCompareSummaryHandler handles GET /api/v1/versionCompare/summary
 func (h *Handler) VersionCompareSummaryHandler(ctx *gin.Context) {
 	items, err := h.svc.GetVersionCompareSummary()
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
+		Fail(ctx, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": items})
+	OK(ctx, items)
 }
 
 // VersionCompareCountsHandler handles GET /api/v1/versionCompare/counts
 func (h *Handler) VersionCompareCountsHandler(ctx *gin.Context) {
 	counts, err := h.svc.GetVersionCompareCounts()
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
+		Fail(ctx, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": counts})
+	OK(ctx, counts)
 }
 
 // IncludedPackagesHandler handles GET /api/v1/versionCompare/includedPackages
 func (h *Handler) IncludedPackagesHandler(ctx *gin.Context) {
 	packages, err := h.svc.GetIncludedPackages()
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
+		Fail(ctx, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": gin.H{"packages": packages}})
+	OK(ctx, gin.H{"packages": packages})
 }
 
 // UpdateIncludedPackagesHandler handles PUT /api/v1/versionCompare/includedPackages
@@ -101,18 +101,18 @@ func (h *Handler) UpdateIncludedPackagesHandler(ctx *gin.Context) {
 		Packages []service.IncludedPackageInput `json:"packages"`
 	}
 	if err := ctx.ShouldBindJSON(&body); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "invalid request body: " + err.Error()})
+		Fail(ctx, http.StatusBadRequest, "invalid request body: "+err.Error())
 		return
 	}
 
 	updatedBy := service.UserEmail(ctx)
 	packages, err := h.svc.UpdateIncludedPackages(body.Packages, updatedBy)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": err.Error()})
+		Fail(ctx, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": gin.H{"packages": packages}})
+	OK(ctx, gin.H{"packages": packages})
 }
 
 // HandlePreviewDRFromMismatch handles GET /api/v1/deliveryRule/:id/versionCompare/previewDR
@@ -120,7 +120,7 @@ func (h *Handler) HandlePreviewDRFromMismatch(ctx *gin.Context) {
 	idStr := ctx.Param("id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil || id <= 0 {
-		ctx.JSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "invalid id"})
+		Fail(ctx, http.StatusBadRequest, "invalid id")
 		return
 	}
 
@@ -129,16 +129,16 @@ func (h *Handler) HandlePreviewDRFromMismatch(ctx *gin.Context) {
 		errMsg := err.Error()
 		switch {
 		case strings.Contains(errMsg, "not found"):
-			ctx.JSON(http.StatusNotFound, gin.H{"status": "fail", "code": 404, "error": errMsg})
+			Fail(ctx, http.StatusNotFound, errMsg)
 		case strings.Contains(errMsg, "no design-time mismatches"):
-			ctx.JSON(http.StatusConflict, gin.H{"status": "fail", "code": 409, "error": errMsg})
+			Fail(ctx, http.StatusConflict, errMsg)
 		default:
-			ctx.JSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": errMsg})
+			Fail(ctx, http.StatusInternalServerError, errMsg)
 		}
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": resp})
+	OK(ctx, resp)
 }
 
 // HandleCreateDRFromMismatch handles POST /api/v1/deliveryRule/:id/versionCompare/createDR
@@ -146,13 +146,13 @@ func (h *Handler) HandleCreateDRFromMismatch(ctx *gin.Context) {
 	idStr := ctx.Param("id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil || id <= 0 {
-		ctx.JSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "invalid id"})
+		Fail(ctx, http.StatusBadRequest, "invalid id")
 		return
 	}
 
 	var req service.CreateDRFromMismatchRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": "invalid request body: " + err.Error()})
+		Fail(ctx, http.StatusBadRequest, "invalid request body: "+err.Error())
 		return
 	}
 
@@ -162,18 +162,18 @@ func (h *Handler) HandleCreateDRFromMismatch(ctx *gin.Context) {
 		errMsg := err.Error()
 		switch {
 		case strings.Contains(errMsg, "not found"):
-			ctx.JSON(http.StatusNotFound, gin.H{"status": "fail", "code": 404, "error": errMsg})
+			Fail(ctx, http.StatusNotFound, errMsg)
 		case strings.Contains(errMsg, "completedAt mismatch"):
-			ctx.JSON(http.StatusConflict, gin.H{"status": "fail", "code": 409, "error": errMsg})
+			Fail(ctx, http.StatusConflict, errMsg)
 		case strings.Contains(errMsg, "artifactKeys must not be empty"),
 			strings.Contains(errMsg, "jira link is required"),
 			strings.Contains(errMsg, "no artifacts passed validation"):
-			ctx.JSON(http.StatusBadRequest, gin.H{"status": "fail", "code": 400, "error": errMsg, "result": resp.Summary})
+			FailErrors(ctx, http.StatusBadRequest, errMsg, resp.Summary)
 		default:
-			ctx.JSON(http.StatusInternalServerError, gin.H{"status": "fail", "code": 500, "error": errMsg})
+			Fail(ctx, http.StatusInternalServerError, errMsg)
 		}
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"status": "success", "code": 200, "result": resp})
+	OK(ctx, resp)
 }
