@@ -92,7 +92,7 @@ func main() {
 	v1Group := router.Group("/api/v1")
 	v2Group := router.Group("/api/v2")
 
-	h.SetupRoutes(v1Group, v2Group)
+	h.SetupRoutes(v1Group, v2Group, RequireScope)
 
 	if err := router.Run(":8080"); err != nil {
 		panic(err)
@@ -144,5 +144,32 @@ func AuthMiddleware() gin.HandlerFunc {
 		c.Set("origin", claims.Origin)
 		c.Set("uaa_claim", *claims)
 		c.Next()
+	}
+}
+
+func RequireScope(requiredScope string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		claims, exists := c.Get("uaa_claim")
+		if !exists {
+			c.AbortWithStatusJSON(403, gin.H{
+				"error":          "forbidden",
+				"message":        "No authentication claims found in request",
+				"required_scope": requiredScope,
+			})
+			return
+		}
+		uaaClaims := claims.(db.UaaClaims)
+		for _, s := range uaaClaims.Scope {
+			if strings.HasSuffix(s, "."+requiredScope) {
+				c.Next()
+				return
+			}
+		}
+		c.AbortWithStatusJSON(403, gin.H{
+			"error":          "insufficient_scope",
+			"message":        fmt.Sprintf("User '%s' does not have the required scope '%s'. Contact your administrator to assign the appropriate Role Collection.", uaaClaims.UserName, requiredScope),
+			"required_scope": requiredScope,
+			"user_scopes":    uaaClaims.Scope,
+		})
 	}
 }

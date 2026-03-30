@@ -53,78 +53,104 @@ func NewHandler(
 }
 
 // SetupRoutes registers all API routes on the given router group.
-func (h *Handler) SetupRoutes(v1 *gin.RouterGroup, v2 *gin.RouterGroup) {
-	// CPI tenant artifacts
-	v1.GET("/tanant/packages", h.GetPackagesHandler)
-	v1.GET("/tenant/packages/artifacts", h.GetPackageArtifactsHandler)
-	v1.GET("/tenant/runtime", h.GetRuntimeArtifacts)
+// Routes are grouped by required RBAC scope (Viewer / Operator / Admin).
+func (h *Handler) SetupRoutes(v1 *gin.RouterGroup, v2 *gin.RouterGroup, requireScope func(string) gin.HandlerFunc) {
+	// --- Viewer (read-only) — 22 endpoints ---
+	viewer := v1.Group("")
+	viewer.Use(requireScope("Viewer"))
+	{
+		// CPI tenant artifacts
+		viewer.GET("/tanant/packages", h.GetPackagesHandler)
+		viewer.GET("/tenant/packages/artifacts", h.GetPackageArtifactsHandler)
+		viewer.GET("/tenant/runtime", h.GetRuntimeArtifacts)
 
-	// TMS
-	v1.GET("/tms/nodes", h.GetTmsNodesHandler)
-	v1.GET("/tms/trs", h.GetTranportRequestsHandler)
-	v1.GET("/tms/routes", h.GetRoutesHandler)
+		// TMS
+		viewer.GET("/tms/nodes", h.GetTmsNodesHandler)
+		viewer.GET("/tms/trs", h.GetTranportRequestsHandler)
+		viewer.GET("/tms/routes", h.GetRoutesHandler)
 
-	// Destinations
-	v1.GET("/destinations", h.GetDestinationsHandler)
+		// Destinations
+		viewer.GET("/destinations", h.GetDestinationsHandler)
 
-	// CPI tenant CRUD
-	v1.GET("/cpiTenant", h.GetCpiTenants)
-	v1.GET("/cpiTenant/:id", h.GetCpiTenant)
-	v1.POST("/cpiTenant", h.UpsertCpiTenant)
-	v1.DELETE("/cpiTenant/:id", h.DeleteCpiTenant)
+		// CPI Tenant (read)
+		viewer.GET("/cpiTenant", h.GetCpiTenants)
+		viewer.GET("/cpiTenant/:id", h.GetCpiTenant)
 
-	// Delivery rule
-	v1.GET("/deliveryRule", h.GetDeliveryRules)
-	v1.GET("/deliveryRule/:id", h.GetDeliveryRule)
-	v1.POST("/deliveryRule", h.UpsertDeliveryRule)
-	v1.DELETE("/deliveryRule/:id", h.DeleteDeliveryRule)
-	v1.POST("/deliveryRule/ruleCheck", h.RuleCheck)
+		// Delivery Rule (read)
+		viewer.GET("/deliveryRule", h.GetDeliveryRules)
+		viewer.GET("/deliveryRule/:id", h.GetDeliveryRule)
 
-	// Delivery request
-	v1.GET("/deliveryRequest", h.GetAllDr)
-	v1.GET("/deliveryRequest/:id", h.GetDeliveryRequest)
-	v1.POST("/deliveryRequest", h.CreateDr)
-	v1.PUT("/deliveryRequest", h.UpdateDr)
-	v1.DELETE("/deliveryRequest/:id", h.DeleteDr)
-	v1.POST("/deliveryRequest/import", h.HandleImportOps)
-	v1.POST("/deliveryRequest/deploy", h.HandleDeployOps)
-	v1.POST("/deliveryRequest/syncState/:deliveryRequestId", h.HandleSyncState)
-	v1.POST("/deliveryRequest/deleteOps", h.HandleDeleteOps)
-	v1.POST("/deliveryRequest/insertOps", h.HandleInsertOps)
-	v1.PUT("/deliveryRequest/updateOps", h.HandleUpdateOps)
-	v1.POST("/deliveryRequest/checkTr", h.HandleCheckTr)
+		// Delivery Request (read)
+		viewer.GET("/deliveryRequest", h.GetAllDr)
+		viewer.GET("/deliveryRequest/:id", h.GetDeliveryRequest)
 
-	// Approval
-	v1.POST("/deliveryRequest/requestApproval", h.HandleRequestApproval)
-	v1.POST("/deliveryRequest/approve", h.HandleApproveDeliveryRequest)
+		// Counts
+		viewer.GET("/deliveryRequest/counts", h.DeliveryRequestCounts)
+		viewer.GET("/cpiTenant/counts", h.CpiTenantCounts)
+		viewer.GET("/deliveryRule/counts", h.DeliveryRuleCounts)
+		viewer.GET("/versionCompare/counts", h.VersionCompareCountsHandler)
 
-	// Cancel
-	v1.POST("/deliveryRequest/cancel", h.HandleCancelDr)
+		// Version Compare (read)
+		viewer.GET("/deliveryRule/:id/versionCompare", h.QueryVersionCompareHandler)
+		viewer.GET("/versionCompare/summary", h.VersionCompareSummaryHandler)
+		viewer.GET("/versionCompare/includedPackages", h.IncludedPackagesHandler)
+		viewer.GET("/deliveryRule/:id/versionCompare/previewDR", h.HandlePreviewDRFromMismatch)
 
-	// UAA
-	v1.GET("/uaa/search/:email", h.HandleUaaUserEmailSearch)
-	v1.GET("/uaa/id/:id", h.HandleUaaUserIDSearch)
+		// Events (SSE)
+		viewer.GET("/events", h.SSEHandler)
+	}
 
-	// Counts
-	v1.GET("/deliveryRequest/counts", h.DeliveryRequestCounts)
-	v1.GET("/cpiTenant/counts", h.CpiTenantCounts)
-	v1.GET("/deliveryRule/counts", h.DeliveryRuleCounts)
-	v1.GET("/versionCompare/counts", h.VersionCompareCountsHandler)
+	// --- Operator (delivery lifecycle) — 18 endpoints ---
+	operator := v1.Group("")
+	operator.Use(requireScope("Operator"))
+	{
+		// Delivery Request CRUD & operations
+		operator.POST("/deliveryRequest", h.CreateDr)
+		operator.PUT("/deliveryRequest", h.UpdateDr)
+		operator.DELETE("/deliveryRequest/:id", h.DeleteDr)
+		operator.POST("/deliveryRequest/import", h.HandleImportOps)
+		operator.POST("/deliveryRequest/deploy", h.HandleDeployOps)
+		operator.POST("/deliveryRequest/syncState/:deliveryRequestId", h.HandleSyncState)
+		operator.POST("/deliveryRequest/deleteOps", h.HandleDeleteOps)
+		operator.POST("/deliveryRequest/insertOps", h.HandleInsertOps)
+		operator.PUT("/deliveryRequest/updateOps", h.HandleUpdateOps)
+		operator.POST("/deliveryRequest/checkTr", h.HandleCheckTr)
 
-	// Version Compare
-	v1.POST("/deliveryRule/:id/versionCompare/trigger", h.TriggerVersionCompareHandler)
-	v1.GET("/deliveryRule/:id/versionCompare", h.QueryVersionCompareHandler)
-	v1.GET("/versionCompare/summary", h.VersionCompareSummaryHandler)
-	v1.GET("/versionCompare/includedPackages", h.IncludedPackagesHandler)
-	v1.PUT("/versionCompare/includedPackages", h.UpdateIncludedPackagesHandler)
+		// Approval
+		operator.POST("/deliveryRequest/requestApproval", h.HandleRequestApproval)
+		operator.POST("/deliveryRequest/approve", h.HandleApproveDeliveryRequest)
 
-	// Auto-Create DR from Version Compare Mismatch
-	v1.GET("/deliveryRule/:id/versionCompare/previewDR", h.HandlePreviewDRFromMismatch)
-	v1.POST("/deliveryRule/:id/versionCompare/createDR", h.HandleCreateDRFromMismatch)
+		// Cancel
+		operator.POST("/deliveryRequest/cancel", h.HandleCancelDr)
 
-	// Events
-	v1.GET("/events", h.SSEHandler)
+		// UAA (needed for approval flow)
+		operator.GET("/uaa/search/:email", h.HandleUaaUserEmailSearch)
+		operator.GET("/uaa/id/:id", h.HandleUaaUserIDSearch)
 
-	// v2
-	v2.POST("/deliver", h.NativeDeliver)
+		// Version Compare (write operations)
+		operator.POST("/deliveryRule/:id/versionCompare/trigger", h.TriggerVersionCompareHandler)
+		operator.PUT("/versionCompare/includedPackages", h.UpdateIncludedPackagesHandler)
+		operator.POST("/deliveryRule/:id/versionCompare/createDR", h.HandleCreateDRFromMismatch)
+	}
+
+	// --- Admin (system configuration) — 5 endpoints ---
+	admin := v1.Group("")
+	admin.Use(requireScope("Admin"))
+	{
+		// CPI Tenant management
+		admin.POST("/cpiTenant", h.UpsertCpiTenant)
+		admin.DELETE("/cpiTenant/:id", h.DeleteCpiTenant)
+
+		// Delivery Rule management
+		admin.POST("/deliveryRule", h.UpsertDeliveryRule)
+		admin.DELETE("/deliveryRule/:id", h.DeleteDeliveryRule)
+		admin.POST("/deliveryRule/ruleCheck", h.RuleCheck)
+	}
+
+	// --- v2 API (Operator scope) — 1 endpoint ---
+	v2Operator := v2.Group("")
+	v2Operator.Use(requireScope("Operator"))
+	{
+		v2Operator.POST("/deliver", h.NativeDeliver)
+	}
 }

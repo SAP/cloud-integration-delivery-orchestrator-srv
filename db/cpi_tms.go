@@ -87,4 +87,5 @@ type UaaClaims struct {
 	jwt.RegisteredClaims
 	Origin string `json:"origin"` //maco.accounts400.ondemand.com
 	UserID string `json:"user_id"`
+	ZoneID string `json:"zid"`
 }
