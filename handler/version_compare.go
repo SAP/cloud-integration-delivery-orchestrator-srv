@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -176,4 +177,30 @@ func (h *Handler) HandleCreateDRFromMismatch(ctx *gin.Context) {
 	}
 
 	OK(ctx, resp)
+}
+
+// AdhocVersionCompare handles POST /api/v1/versionCompare/adhoc
+func (h *Handler) AdhocVersionCompare(c *gin.Context) {
+	var req struct {
+		TenantIDs []uint `json:"tenantIDs" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	if len(req.TenantIDs) < 2 {
+		Fail(c, http.StatusBadRequest, "at least 2 tenants required")
+		return
+	}
+
+	resp, err := h.svc.AdhocVersionCompare(c.Request.Context(), req.TenantIDs)
+	if err != nil {
+		if err.Error() == "rate_limited" {
+			Fail(c, http.StatusTooManyRequests, fmt.Sprintf("adhoc version compare is rate limited, please wait %v", service.AdhocCooldown))
+			return
+		}
+		Fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	OK(c, resp)
 }

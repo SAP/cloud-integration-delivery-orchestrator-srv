@@ -20,6 +20,15 @@ import (
 // versionCompareCooldown is the minimum interval between triggers for the same rule.
 const versionCompareCooldown = 5 * time.Minute
 
+// AdhocCooldown is the minimum interval between adhoc version compare calls (global).
+const AdhocCooldown = 5 * time.Minute
+
+// Global cooldown state for adhoc version compare.
+var (
+	adhocLastRun time.Time
+	adhocMu      sync.Mutex
+)
+
 // TriggerResult is returned immediately by TriggerVersionCompare.
 type TriggerResult struct {
 	Status consts.TriggerStatus `json:"status"`
@@ -30,7 +39,7 @@ type TriggerResult struct {
 // Flow:
 //  1. Load DeliveryRule with SourceTenant + IncludedTenants.
 //  2. Rate-limit check: if a completed snapshot exists within cooldown, return rate_limited.
-//  3. Atomic DB upsert: set status="running". If already running → conflict.
+//  3. Atomic DB upsert: set status="running". If already running -> conflict.
 //  4. Launch background goroutine (context.Background()) to collect snapshots.
 //  5. Return immediately with trigger status.
 func (s *Service) TriggerVersionCompare(ruleID uint, triggeredBy string) (TriggerResult, error) {
@@ -160,13 +169,41 @@ func (s *Service) collectVersionSnapshot(rule db.DeliveryRule) {
 		}
 	}
 
-	// Pre-fetch runtime artifacts for each tenant (one call per tenant)
-	// map[tenantID] -> map[artifactID] -> RuntimeArtifact
+	// Pre-fetch runtime artifacts for each tenant
+	runtimeIndex := s.fetchRuntimeIndex(ctx, allTenants)
+
+	// Fetch design-time artifacts per package per tenant
+	pkgSnapshots := s.collectAllPackageSnapshots(ctx, packages, allTenants, runtimeIndex)
+
+	// Assemble final snapshot data
+	snapshotData := db.SnapshotData{
+		SourceTenantID:  rule.SourceTenantID,
+		ComparedTenants: comparedTenantIDs,
+		Packages:        pkgSnapshots,
+	}
+
+	// Update DB with completed snapshot
+	now := time.Now()
+	s.DB.Model(&db.VersionCompareSnapshot{}).
+		Where(&db.VersionCompareSnapshot{DeliveryRuleID: rule.ID}).
+		Select("Status", "CompletedAt", "Data", "Error").
+		Updates(db.VersionCompareSnapshot{
+			Status:      consts.SnapshotStatusCompleted,
+			CompletedAt: &now,
+			Data:        snapshotData,
+			Error:       "",
+		})
+}
+
+// fetchRuntimeIndex pre-fetches runtime artifacts for each tenant in parallel.
+// Returns map[tenantID] -> map[artifactID] -> RuntimeArtifact.
+// Individual tenant failures are logged as warnings; an empty map is stored for that tenant.
+func (s *Service) fetchRuntimeIndex(ctx context.Context, tenants []db.CpiTenant) map[uint]map[string]cpi.RuntimeArtifact {
 	runtimeIndex := make(map[uint]map[string]cpi.RuntimeArtifact)
 	var rtMu sync.Mutex
 	rtGroup, rtCtx := errgroup.WithContext(ctx)
 
-	for _, tenant := range allTenants {
+	for _, tenant := range tenants {
 		tenant := tenant // capture loop variable
 		rtGroup.Go(func() error {
 			client, err := s.CPI(rtCtx, tenant.CpiEndpoint.Name)
@@ -198,12 +235,13 @@ func (s *Service) collectVersionSnapshot(rule db.DeliveryRule) {
 			return nil
 		})
 	}
-	if err := rtGroup.Wait(); err != nil {
-		completeWithError(fmt.Sprintf("failed to fetch runtime artifacts: %s", err))
-		return
-	}
+	_ = rtGroup.Wait()
+	return runtimeIndex
+}
 
-	// Fetch design-time artifacts per package per tenant, build PackageSnapshots
+// collectAllPackageSnapshots fetches design-time artifacts per package across all tenants in parallel.
+// Individual package failures are logged as warnings and skipped.
+func (s *Service) collectAllPackageSnapshots(ctx context.Context, packages []cpi.CPIPackage, tenants []db.CpiTenant, runtimeIndex map[uint]map[string]cpi.RuntimeArtifact) []db.PackageSnapshot {
 	var pkgSnapshots []db.PackageSnapshot
 	var pkgMu sync.Mutex
 	pkgGroup, pkgCtx := errgroup.WithContext(ctx)
@@ -213,7 +251,7 @@ func (s *Service) collectVersionSnapshot(rule db.DeliveryRule) {
 	for _, pkg := range packages {
 		pkg := pkg
 		pkgGroup.Go(func() error {
-			pkgSnapshot, err := s.collectPackageSnapshot(pkgCtx, pkg.ID, allTenants, runtimeIndex)
+			pkgSnapshot, err := s.collectPackageSnapshot(pkgCtx, pkg.ID, tenants, runtimeIndex)
 			if err != nil {
 				s.Logger.Warnf("version-compare: failed to collect package %s: %s", pkg.ID, err)
 				// Don't fail the whole operation, skip this package
@@ -225,29 +263,8 @@ func (s *Service) collectVersionSnapshot(rule db.DeliveryRule) {
 			return nil
 		})
 	}
-	if err := pkgGroup.Wait(); err != nil {
-		completeWithError(fmt.Sprintf("failed to collect package snapshots: %s", err))
-		return
-	}
-
-	// Assemble final snapshot data
-	snapshotData := db.SnapshotData{
-		SourceTenantID:  rule.SourceTenantID,
-		ComparedTenants: comparedTenantIDs,
-		Packages:        pkgSnapshots,
-	}
-
-	// Update DB with completed snapshot
-	now := time.Now()
-	s.DB.Model(&db.VersionCompareSnapshot{}).
-		Where(&db.VersionCompareSnapshot{DeliveryRuleID: rule.ID}).
-		Select("Status", "CompletedAt", "Data", "Error").
-		Updates(db.VersionCompareSnapshot{
-			Status:      consts.SnapshotStatusCompleted,
-			CompletedAt: &now,
-			Data:        snapshotData,
-			Error:       "",
-		})
+	_ = pkgGroup.Wait()
+	return pkgSnapshots
 }
 
 // collectPackageSnapshot fetches design-time artifacts for one package across all tenants
@@ -423,18 +440,33 @@ func (s *Service) QueryVersionCompare(ruleID uint, params VersionCompareQueryPar
 	if err := s.DB.Where("id IN ?", tenantIDs).Find(&tenants).Error; err != nil {
 		return resp, fmt.Errorf("failed to load tenants: %w", err)
 	}
+
+	result := buildVersionCompareResponse(snapshot.Data, tenants, snapshot.Data.SourceTenantID, params)
+	result.Status = snapshot.Status
+	result.TriggeredAt = &snapshot.TriggeredAt
+	result.CompletedAt = snapshot.CompletedAt
+	result.TriggeredBy = snapshot.TriggeredBy
+	result.Error = snapshot.Error
+	return result, nil
+}
+
+// buildVersionCompareResponse constructs a VersionCompareResponse from snapshot data and tenant info.
+func buildVersionCompareResponse(data db.SnapshotData, tenants []db.CpiTenant, sourceTenantID uint, params VersionCompareQueryParams) VersionCompareResponse {
+	var resp VersionCompareResponse
+
 	tenantMap := make(map[uint]db.CpiTenant, len(tenants))
 	for _, t := range tenants {
 		tenantMap[t.ID] = t
 	}
 
-	// Build tenant info list
+	// Build tenant info list (preserve order: source first, then compared)
+	tenantIDs := append([]uint{sourceTenantID}, data.ComparedTenants...)
 	for _, id := range tenantIDs {
 		if t, ok := tenantMap[id]; ok {
 			resp.Tenants = append(resp.Tenants, VersionCompareTenantInfo{
 				ID:       t.ID,
 				Name:     t.Name,
-				IsSource: t.ID == snapshot.Data.SourceTenantID,
+				IsSource: t.ID == sourceTenantID,
 			})
 		}
 	}
@@ -446,7 +478,7 @@ func (s *Service) QueryVersionCompare(ruleID uint, params VersionCompareQueryPar
 	}
 
 	// Process packages with match computation
-	for _, pkg := range snapshot.Data.Packages {
+	for _, pkg := range data.Packages {
 		// Apply package filter
 		if len(pkgFilter) > 0 && !pkgFilter[pkg.PackageID] {
 			continue
@@ -454,7 +486,7 @@ func (s *Service) QueryVersionCompare(ruleID uint, params VersionCompareQueryPar
 
 		var filteredArtifacts []VersionCompareArtifact
 		for _, art := range pkg.Artifacts {
-			sourceVersion, sourceHasData := art.Versions[snapshot.Data.SourceTenantID]
+			sourceVersion, sourceHasData := art.Versions[sourceTenantID]
 			hasMismatch := false
 
 			versions := make(map[uint]VersionCompareArtifactTenantInfo, len(art.Versions))
@@ -466,11 +498,11 @@ func (s *Service) QueryVersionCompare(ruleID uint, params VersionCompareQueryPar
 				if params.DesignTime {
 					info.DesignTimeVersion = vi.DesignTimeVersion
 					info.DesignTimeDraft = strings.EqualFold(vi.DesignTimeVersion, "active")
-					if tenantID == snapshot.Data.SourceTenantID {
+					if tenantID == sourceTenantID {
 						info.ModifiedBy = vi.ModifiedBy
 						info.ModifiedAt = vi.ModifiedAt
 					}
-					if tenantID != snapshot.Data.SourceTenantID && sourceHasData {
+					if tenantID != sourceTenantID && sourceHasData {
 						match := vi.DesignTimeVersion == sourceVersion.DesignTimeVersion
 						info.DesignTimeMatch = &match
 						if !match {
@@ -482,7 +514,7 @@ func (s *Service) QueryVersionCompare(ruleID uint, params VersionCompareQueryPar
 				if params.RunTime {
 					info.RuntimeVersion = vi.RuntimeVersion
 					info.RuntimeStatus = vi.RuntimeStatus
-					if tenantID != snapshot.Data.SourceTenantID && sourceHasData {
+					if tenantID != sourceTenantID && sourceHasData {
 						match := vi.RuntimeVersion == sourceVersion.RuntimeVersion
 						info.RuntimeMatch = &match
 						if !match {
@@ -515,7 +547,82 @@ func (s *Service) QueryVersionCompare(ruleID uint, params VersionCompareQueryPar
 		}
 	}
 
-	return resp, nil
+	return resp
+}
+
+// AdhocVersionCompare performs a synchronous version compare across the specified tenants.
+// tenantIDs[0] is used as the source/baseline tenant.
+// No data is persisted -- the result is returned directly.
+func (s *Service) AdhocVersionCompare(ctx context.Context, tenantIDs []uint) (*VersionCompareResponse, error) {
+	// 1. Global cooldown check
+	adhocMu.Lock()
+	if time.Since(adhocLastRun) < AdhocCooldown {
+		adhocMu.Unlock()
+		return nil, fmt.Errorf("rate_limited")
+	}
+	adhocLastRun = time.Now()
+	adhocMu.Unlock()
+
+	// 2. Load tenants from DB
+	var tenants []db.CpiTenant
+	if err := s.DB.Where("id IN ?", tenantIDs).Find(&tenants).Error; err != nil {
+		return nil, fmt.Errorf("failed to load tenants: %w", err)
+	}
+	if len(tenants) < 2 {
+		return nil, fmt.Errorf("at least 2 valid tenants required, found %d", len(tenants))
+	}
+
+	// Reorder tenants to match tenantIDs order (first = source)
+	tenantMap := make(map[uint]db.CpiTenant)
+	for _, t := range tenants {
+		tenantMap[t.ID] = t
+	}
+	ordered := make([]db.CpiTenant, 0, len(tenantIDs))
+	for _, id := range tenantIDs {
+		if t, ok := tenantMap[id]; ok {
+			ordered = append(ordered, t)
+		}
+	}
+	tenants = ordered
+	sourceTenantID := tenants[0].ID
+
+	// 3. Get source CPI client and fetch packages
+	sourceClient, err := s.CPI(ctx, tenants[0].CpiEndpoint.Name)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get source CPI client: %w", err)
+	}
+	packages, err := sourceClient.GetPackages(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get packages: %w", err)
+	}
+	// No included packages filter for adhoc (compare all)
+
+	// 4. Fetch runtime index
+	runtimeIndex := s.fetchRuntimeIndex(ctx, tenants)
+
+	// 5. Collect package snapshots
+	pkgSnapshots := s.collectAllPackageSnapshots(ctx, packages, tenants, runtimeIndex)
+
+	// 6. Build compared tenant IDs
+	comparedTenantIDs := make([]uint, 0, len(tenants)-1)
+	for _, t := range tenants[1:] {
+		comparedTenantIDs = append(comparedTenantIDs, t.ID)
+	}
+
+	// 7. Build response
+	snapshotData := db.SnapshotData{
+		SourceTenantID:  sourceTenantID,
+		ComparedTenants: comparedTenantIDs,
+		Packages:        pkgSnapshots,
+	}
+
+	params := VersionCompareQueryParams{DesignTime: true, RunTime: true}
+	resp := buildVersionCompareResponse(snapshotData, tenants, sourceTenantID, params)
+	resp.Status = consts.SnapshotStatusCompleted
+	now := time.Now()
+	resp.CompletedAt = &now
+
+	return &resp, nil
 }
 
 // --- Summary & Counts (for Rule card list and HomeView) ---
@@ -810,7 +917,7 @@ func (s *Service) PreviewDRFromMismatch(ruleID uint) (PreviewDRResponse, error) 
 		return PreviewDRResponse{}, fmt.Errorf("failed to query active delivery requests: %w", err)
 	}
 
-	// Build existing ops index: (artifactTechID, artifactVersion) → DR info
+	// Build existing ops index: (artifactTechID, artifactVersion) -> DR info
 	type dupKey struct {
 		techID  string
 		version string
