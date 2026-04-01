@@ -1,6 +1,7 @@
 package notify
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"mmt-delivery/pkg/env"
@@ -27,11 +28,11 @@ type EmailMessage struct {
 	IsHTML  bool
 }
 
-// NewEmailClient creates a new email client using the mail service destination
-func NewEmailClient() (*EmailClient, error) {
-	dest, err := env.GetDestination("Mail_Server")
+// NewEmailClient creates a new email client by resolving the given destination name.
+func NewEmailClient(resolver *env.DestinationResolver, destName string) (*EmailClient, error) {
+	dest, err := resolver.Get(context.Background(), destName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get mail service destination: %s", err)
+		return nil, fmt.Errorf("failed to get mail service destination '%s': %s", destName, err)
 	}
 
 	if dest.User == "" || dest.Password == "" {
@@ -59,8 +60,8 @@ func NewEmailClient() (*EmailClient, error) {
 }
 
 // SendEmail sends an email to the specified users
-func SendEmail(to []string, subject string, body string, isHTML bool) error {
-	client, err := NewEmailClient()
+func SendEmail(resolver *env.DestinationResolver, destName string, to []string, subject string, body string, isHTML bool) error {
+	client, err := NewEmailClient(resolver, destName)
 	if err != nil {
 		env.Logger().Error("Failed to create email client: %s", err)
 		return err
@@ -126,7 +127,7 @@ func (c *EmailClient) Send(msg *EmailMessage) error {
 }
 
 // SendDeliveryNotification sends a delivery notification email
-func SendDeliveryNotification(to []string, deliveryRequestID uint, status string, message string) error {
+func SendDeliveryNotification(resolver *env.DestinationResolver, destName string, to []string, deliveryRequestID uint, status string, message string) error {
 	subject := fmt.Sprintf("Delivery Request #%d - %s", deliveryRequestID, status)
 
 	body := fmt.Sprintf(`
@@ -142,11 +143,11 @@ func SendDeliveryNotification(to []string, deliveryRequestID uint, status string
 </html>
 `, deliveryRequestID, status, message)
 
-	return SendEmail(to, subject, body, true)
+	return SendEmail(resolver, destName, to, subject, body, true)
 }
 
 // SendApprovalRequest sends an approval request email
-func SendApprovalRequest(to []string, deliveryRequestID uint, requestor string, description string) error {
+func SendApprovalRequest(resolver *env.DestinationResolver, destName string, to []string, deliveryRequestID uint, requestor string, description string) error {
 	subject := fmt.Sprintf("Approval Required: Delivery Request #%d", deliveryRequestID)
 
 	body := fmt.Sprintf(`
@@ -166,11 +167,11 @@ func SendApprovalRequest(to []string, deliveryRequestID uint, requestor string, 
 </html>
 `, deliveryRequestID, requestor, description)
 
-	return SendEmail(to, subject, body, true)
+	return SendEmail(resolver, destName, to, subject, body, true)
 }
 
 // SendDeploymentNotification sends a deployment notification email
-func SendDeploymentNotification(to []string, tenantName string, artifacts []string, status string) error {
+func SendDeploymentNotification(resolver *env.DestinationResolver, destName string, to []string, tenantName string, artifacts []string, status string) error {
 	subject := fmt.Sprintf("Deployment %s - %s", status, tenantName)
 
 	artifactList := ""
@@ -194,5 +195,5 @@ func SendDeploymentNotification(to []string, tenantName string, artifacts []stri
 </html>
 `, status, tenantName, status, artifactList)
 
-	return SendEmail(to, subject, body, true)
+	return SendEmail(resolver, destName, to, subject, body, true)
 }

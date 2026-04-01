@@ -3,6 +3,7 @@ package cpi
 import (
 	"context"
 	"fmt"
+	"mmt-delivery/pkg/env"
 	"sync"
 )
 
@@ -10,12 +11,13 @@ import (
 // Clients are created lazily on first access and reused thereafter.
 // Token refresh is handled by the underlying HttpClient's 401 retry mechanism.
 type Manager struct {
-	mu      sync.RWMutex
-	clients map[string]*CpiClient
+	mu       sync.RWMutex
+	clients  map[string]*CpiClient
+	resolver *env.DestinationResolver
 }
 
-func NewManager() *Manager {
-	return &Manager{clients: make(map[string]*CpiClient)}
+func NewManager(resolver *env.DestinationResolver) *Manager {
+	return &Manager{clients: make(map[string]*CpiClient), resolver: resolver}
 }
 
 // Get returns a cached CPI client for the given tenant, creating one if needed.
@@ -35,7 +37,7 @@ func (m *Manager) Get(ctx context.Context, tenant string) (*CpiClient, error) {
 	if cli, ok := m.clients[tenant]; ok {
 		return cli, nil
 	}
-	cli, err := NewClient(ctx, tenant)
+	cli, err := NewClient(ctx, tenant, m.resolver)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create CPI client for tenant %s: %w", tenant, err)
 	}

@@ -47,11 +47,10 @@ type CpiClient struct {
 	*env.HttpClient
 }
 
-func NewClient(ctx context.Context, tenant string) (*CpiClient, error) {
-	var cpiDest env.Destination
-	var ok bool
-	if cpiDest, ok = env.Destinations()[tenant]; !ok {
-		return nil, fmt.Errorf("cpi tenant %s not found in destinations", tenant)
+func NewClient(ctx context.Context, tenant string, resolver *env.DestinationResolver) (*CpiClient, error) {
+	cpiDest, err := resolver.Get(ctx, tenant)
+	if err != nil {
+		return nil, fmt.Errorf("cpi tenant %s not found in destinations: %w", tenant, err)
 	}
 	apiUrl := fmt.Sprintf("%s/v1", cpiDest.URL)
 	client, err := env.NewClient(ctx, cpiDest.ClientId, cpiDest.ClientSecret, cpiDest.TokenServiceURL, apiUrl)

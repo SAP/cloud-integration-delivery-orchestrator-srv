@@ -2,7 +2,6 @@ package handler
 
 import (
 	"fmt"
-	"strings"
 
 	"mmt-delivery/service"
 
@@ -74,15 +73,19 @@ type DestinationResp struct {
 }
 
 func (h *Handler) GetDestinationsHandler(ctx *gin.Context) {
+	dests, err := h.resolver.List(ctx)
+	if err != nil {
+		h.logger.Errorf("error fetching destinations: %s", err)
+		Fail(ctx, 500, err.Error())
+		return
+	}
 	var destList []DestinationResp
-	for i, v := range h.destinations {
-		if strings.HasPrefix(i, "DEST_CPIAPI") {
-			destList = append(destList, DestinationResp{
-				Name: v.Name,
-				Type: v.Type,
-				Url:  v.URL,
-			})
-		}
+	for _, v := range dests {
+		destList = append(destList, DestinationResp{
+			Name: v.Name,
+			Type: v.Type,
+			Url:  v.URL,
+		})
 	}
 	OK(ctx, destList)
 }

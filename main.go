@@ -38,6 +38,12 @@ func main() {
 
 	ctx := context.Background()
 
+	// --- Create DestinationResolver (replaces static destinationMap) ---
+	resolver, err := env.NewDestinationResolver()
+	if err != nil {
+		panic("failed to create destination resolver: " + err.Error())
+	}
+
 	// --- Create long-lived clients ---
 	tmsClient, err := tms.NewClient(ctx)
 	if err != nil {
@@ -49,7 +55,7 @@ func main() {
 		panic("failed to create XSUAA client: " + err.Error())
 	}
 
-	cpiManager := cpi.NewManager()
+	cpiManager := cpi.NewManager(resolver)
 
 	var eventBus *service.EventBus
 	if enableSSE {
@@ -65,7 +71,7 @@ func main() {
 			return cpiManager.Get(ctx, tenant)
 		},
 		GetUserEmail: xsuaa.GetUserEmail,
-		Notifier:     service.NewDefaultNotifier(),
+		Notifier:     service.NewDefaultNotifier(resolver, database),
 		EventBus:     eventBus,
 	}
 
@@ -77,7 +83,7 @@ func main() {
 		tmsClient,
 		cpiManager,
 		xsuaaClient,
-		env.Destinations(),
+		resolver,
 		eventBus,
 	)
 

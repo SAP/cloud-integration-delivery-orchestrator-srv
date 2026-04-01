@@ -12,7 +12,6 @@ import (
 	"mmt-delivery/consts"
 	"mmt-delivery/pkg/env"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"time"
@@ -29,13 +28,16 @@ var githubClient *github.Client
 
 var gitRepo *git.Repository
 
-// gitAuth returns git credentials lazily from env.Destinations().
-// Must be called after env.Init().
-func gitAuth() *auth.BasicAuth {
-	return &auth.BasicAuth{
-		Username: env.Destinations()["API_GIT_MMT_SCC"].User,
-		Password: env.Destinations()["API_GIT_MMT_SCC"].Password,
+// gitAuth returns git credentials by resolving the destination from the resolver.
+func gitAuth(resolver *env.DestinationResolver, destName string) (*auth.BasicAuth, error) {
+	dest, err := resolver.Get(context.Background(), destName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve git destination '%s': %w", destName, err)
 	}
+	return &auth.BasicAuth{
+		Username: dest.User,
+		Password: dest.Password,
+	}, nil
 }
 
 var Cpi_Base_Repo = "mmt-cpi-packages"
@@ -43,36 +45,12 @@ var Artifact_Base_Dir = "./artifacts"
 
 // temporarily disable github sync
 func init_disable() {
-	if _, err := os.Stat("./mmt-cpi-packages/"); os.IsNotExist(err) {
-		gitRepo, err = git.PlainClone("./mmt-cpi-packages/", false, &git.CloneOptions{
-			URL:      "https://github.wdf.sap.corp/MaCo-MMT/mmt-cpi-packages",
-			Progress: os.Stdout,
-			Auth:     gitAuth(),
-		})
-		if err != nil {
-			panic(fmt.Errorf("error when cloning git repo: %w", err))
-		}
-	} else {
-		gitRepo, err = git.PlainOpen("./mmt-cpi-packages/") // open existing git repo
-		if err != nil {
-			panic(fmt.Errorf("error when opening git repo: %w", err))
-		}
-	}
-
-	tp := github.BasicAuthTransport{
-		Username: env.Destinations()["API_GIT_MMT_SCC"].User,
-		Password: env.Destinations()["API_GIT_MMT_SCC"].Password,
-	}
-	// https://github.wdf.sap.corp/api/v3
-	githubClient = github.NewClient(tp.Client())
-	baseURL, err := url.Parse("https://github.wdf.sap.corp" + "/api/v3/")
-	if err != nil {
-		panic(fmt.Errorf("invalid URL in API_GIT_MMT_SCC destination: %w", err))
-	}
-	githubClient.BaseURL = baseURL
+	// NOTE: This function is disabled. When re-enabled, it must receive
+	// a *env.DestinationResolver and destName to resolve git credentials.
+	panic("init_disable is not supported — github sync requires DestinationResolver")
 }
 
-func (c *CpiClient) SyncToGithub(artifactId, artifactVersion, artifactType, packageID, branch, modifiedBy, modifiedAt, comment string) error {
+func (c *CpiClient) SyncToGithub(resolver *env.DestinationResolver, destName string, artifactId, artifactVersion, artifactType, packageID, branch, modifiedBy, modifiedAt, comment string) error {
 
 	// Unzip the artifact content, put it to git repo
 	if err := unzipSource(artifactId, artifactVersion, packageID); err != nil {
@@ -93,7 +71,7 @@ func (c *CpiClient) SyncToGithub(artifactId, artifactVersion, artifactType, pack
 
 	// https://github.com/go-git/go-git/blob/main/_examples/tag-create-push/main.go
 	// sync to github
-	if err := CommitAndPushChanges(fmt.Sprintf("%s/%s/", packageID, artifactId), tag, branch, modifiedBy, modifiedAt, commitMessage); err != nil {
+	if err := CommitAndPushChanges(resolver, destName, fmt.Sprintf("%s/%s/", packageID, artifactId), tag, branch, modifiedBy, modifiedAt, commitMessage); err != nil {
 		return fmt.Errorf("failed to commit and push changes for artifact %s:%s: %w", artifactId, artifactVersion, err)
 	}
 
@@ -328,7 +306,7 @@ func unzipSource(artifactId, artifactVersion, packageId string) error {
 }
 
 // path: relative path of artifact from package directory
-func CommitAndPushChanges(path string, tag string, branch, modifiedBy, modifiedAt, commitMessage string) error {
+func CommitAndPushChanges(resolver *env.DestinationResolver, destName string, path string, tag string, branch, modifiedBy, modifiedAt, commitMessage string) error {
 	worktree, err := gitRepo.Worktree()
 	if err != nil {
 		return fmt.Errorf("failed to get worktree: %w", err)
@@ -383,8 +361,12 @@ func CommitAndPushChanges(path string, tag string, branch, modifiedBy, modifiedA
 	}
 
 	// Push the changes
+	gitCreds, err := gitAuth(resolver, destName)
+	if err != nil {
+		return fmt.Errorf("failed to resolve git credentials: %w", err)
+	}
 	if err := gitRepo.Push(&git.PushOptions{
-		Auth:       gitAuth(),
+		Auth:       gitCreds,
 		FollowTags: true,
 		Force:      true,
 	}); err != nil {

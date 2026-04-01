@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"mmt-delivery/db"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -65,9 +67,14 @@ func (h *Handler) NativeDeliver(ctx *gin.Context) {
 			return
 		}
 
-		if err := srcClient.SyncToGithub(artifact.ArtifactID, artifact.ArtifactVersion, artifact.ArtifactType, packageID, srcBranch, modifiedBy, modifiedAt, deliverRequest.DeliverComment); err != nil {
-			Fail(ctx, 500, "Failed to sync Artifact to github:"+err.Error())
-			return
+		githubConfig, err := db.GetIntegrationConfig(h.db, "github")
+		if err != nil {
+			h.logger.Warnf("failed to read github integration config, skipping sync: %s", err)
+		} else if githubConfig.Enabled {
+			if err := srcClient.SyncToGithub(h.resolver, githubConfig.DestinationName, artifact.ArtifactID, artifact.ArtifactVersion, artifact.ArtifactType, packageID, srcBranch, modifiedBy, modifiedAt, deliverRequest.DeliverComment); err != nil {
+				Fail(ctx, 500, "Failed to sync Artifact to github:"+err.Error())
+				return
+			}
 		}
 
 		// TODO: upload to SAP JFrog

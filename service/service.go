@@ -6,6 +6,7 @@ import (
 	"mmt-delivery/consts"
 	"mmt-delivery/db"
 	"mmt-delivery/pkg/cpi"
+	"mmt-delivery/pkg/env"
 	"mmt-delivery/pkg/notify"
 	"mmt-delivery/pkg/tms"
 
@@ -67,20 +68,51 @@ type Service struct {
 
 // --- Default Notifier implementation (wraps pkg/notify package functions) ---
 
-type defaultNotifier struct{}
+type defaultNotifier struct {
+	resolver *env.DestinationResolver
+	database *gorm.DB
+}
 
-func NewDefaultNotifier() Notifier {
-	return &defaultNotifier{}
+func NewDefaultNotifier(resolver *env.DestinationResolver, database *gorm.DB) Notifier {
+	return &defaultNotifier{resolver: resolver, database: database}
+}
+
+func (n *defaultNotifier) smtpDest() string {
+	cfg, err := db.GetIntegrationConfig(n.database, "smtp")
+	if err != nil || !cfg.Enabled {
+		return ""
+	}
+	return cfg.DestinationName
+}
+
+func (n *defaultNotifier) jiraDest() string {
+	cfg, err := db.GetIntegrationConfig(n.database, "jira")
+	if err != nil || !cfg.Enabled {
+		return ""
+	}
+	return cfg.DestinationName
 }
 
 func (n *defaultNotifier) SendApprovalRequest(to []string, drID uint, requestor string, description string) error {
-	return notify.SendApprovalRequest(to, drID, requestor, description)
+	dest := n.smtpDest()
+	if dest == "" {
+		return nil // SMTP not configured, silently skip
+	}
+	return notify.SendApprovalRequest(n.resolver, dest, to, drID, requestor, description)
 }
 
 func (n *defaultNotifier) SendDeliveryNotification(to []string, drID uint, status string, message string) error {
-	return notify.SendDeliveryNotification(to, drID, status, message)
+	dest := n.smtpDest()
+	if dest == "" {
+		return nil
+	}
+	return notify.SendDeliveryNotification(n.resolver, dest, to, drID, status, message)
 }
 
 func (n *defaultNotifier) AddDeliveryComment(issueKey string, drID uint, message string, status string) error {
-	return notify.AddDeliveryComment(issueKey, drID, message, status)
+	dest := n.jiraDest()
+	if dest == "" {
+		return nil // JIRA not configured, silently skip
+	}
+	return notify.AddDeliveryComment(n.resolver, dest, issueKey, drID, message, status)
 }

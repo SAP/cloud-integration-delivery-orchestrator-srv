@@ -1,19 +1,14 @@
 package env
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
-	"strings"
 
 	"github.com/cloudfoundry-community/go-cfenv"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
 
-var destinationMap map[string]Destination
 var logLevel zapcore.Level
 var logger *zap.SugaredLogger
 
@@ -28,8 +23,8 @@ func Logger() *zap.SugaredLogger {
 	return logger
 }
 
-// Init initializes the env package: loads CF environment, creates logger, fetches destinations.
-// Must be called explicitly in main() before using TmsCredential/UaaCredential/Destinations.
+// Init initializes the env package: loads CF environment and creates logger.
+// Must be called explicitly in main() before using TmsCredential/UaaCredential/NewDestinationResolver.
 func Init() error {
 	var err error
 	appEnv, err = cfenv.Current()
@@ -38,28 +33,7 @@ func Init() error {
 	}
 	logLevel = zap.InfoLevel
 	logger = NewLogger()
-	if err := initDestinations(); err != nil {
-		return fmt.Errorf("failed to init destinations: %w", err)
-	}
 	return nil
-}
-
-func Destinations() map[string]Destination {
-	return destinationMap
-}
-
-// GetDestination retrieves a destination by name
-func GetDestination(name string) (*Destination, error) {
-	dest, ok := destinationMap[name]
-	if !ok {
-		return nil, fmt.Errorf("destination '%s' not found", name)
-	}
-	return &dest, nil
-}
-
-// GetJiraDestination retrieves the JIRA service destination named "JIRA_Service"
-func GetJiraDestination() (*Destination, error) {
-	return GetDestination("JIRA_Service")
 }
 
 func TmsCredential() Credentials {
@@ -141,48 +115,6 @@ type Destination struct {
 	User                string `json:"user"`
 	Password            string `json:"password"`
 	Port                string `json:"port"` // SMTP port, etc.
-}
-
-// initDestinations fetches destinations from the destination service.
-func initDestinations() error {
-	ctx := context.Background()
-	services, err := appEnv.Services.WithLabel("destination")
-	if err != nil || len(services) == 0 {
-		return fmt.Errorf("failed to get service with label 'destination'")
-	}
-	service := services[0]
-	authUrl, _ := service.CredentialString("url")
-	if !strings.HasSuffix(authUrl, "/oauth/token") {
-		authUrl = fmt.Sprintf("%s/oauth/token", authUrl)
-	}
-	apiUrl, _ := service.CredentialString("uri")
-	clientId, _ := service.CredentialString("clientid")
-	clientSecret, _ := service.CredentialString("clientsecret")
-	client, err := NewClient(ctx, clientId, clientSecret, authUrl, apiUrl)
-	if err != nil {
-		return fmt.Errorf("error creating destination client: %w", err)
-	}
-
-	apiUrl = fmt.Sprintf("%s/destination-configuration/v1/subaccountDestinations", apiUrl)
-	req := &HttpRequest{
-		ApiURL: apiUrl,
-		Method: http.MethodGet,
-	}
-	resp, _, err := client.Do(ctx, req)
-	if err != nil {
-		return fmt.Errorf("error getting subaccount destinations: %w", err)
-	}
-	var destinations []Destination
-	if err := json.Unmarshal(*resp, &destinations); err != nil {
-		return fmt.Errorf("failed to unmarshal destinations: %w", err)
-	}
-
-	m := make(map[string]Destination)
-	for _, v := range destinations {
-		m[v.Name] = v
-	}
-	destinationMap = m
-	return nil
 }
 
 func NewLogger() *zap.SugaredLogger {

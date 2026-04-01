@@ -18,8 +18,6 @@ modules:
       - name: mmt-tms
       - name: mmt_devops_connectivity
       - name: uaa-api
-    properties:
-      REMOTE: true
 
 resources:
   - name: mmt-devops-pgsql

@@ -27,24 +27,18 @@ func Connect() (*gorm.DB, error) {
 
 	var conn *sql.DB
 	var err error
-	remote, ok := os.LookupEnv("REMOTE")
-	if ok && remote == "true" {
-		env.Logger().Info("Connecting to remote database...")
-		dbUri := env.PostgreUri()
-		conn, err = sql.Open("pgx", dbUri)
-		if err != nil {
-			return nil, fmt.Errorf("failed to connect to remote database: %w", err)
-		}
+
+	dbUri := os.Getenv("LOCAL_POSTGRES_URI")
+	if dbUri != "" {
+		env.Logger().Info("Connecting to local database (LOCAL_POSTGRES_URI)...")
 	} else {
-		env.Logger().Info("Connecting to local database...")
-		localDbUri := os.Getenv("LOCAL_POSTGRES_URI")
-		if localDbUri == "" {
-			return nil, fmt.Errorf("LOCAL_POSTGRES_URI environment variable is not set")
-		}
-		conn, err = sql.Open("pgx", localDbUri)
-		if err != nil {
-			return nil, fmt.Errorf("failed to connect to local database: %w", err)
-		}
+		env.Logger().Info("Connecting to CF-managed database (VCAP_SERVICES)...")
+		dbUri = env.PostgreUri()
+	}
+
+	conn, err = sql.Open("pgx", dbUri)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
 	db, err = gorm.Open(
@@ -58,8 +52,15 @@ func Connect() (*gorm.DB, error) {
 	if err := db.AutoMigrate(
 		&CpiTenant{}, &DeliveryRule{}, &DeliveryRequest{}, &ArtifactTenantOperation{}, &BatchJob{},
 		&Artifact{}, &Condition{}, &VersionCompareSnapshot{}, &VersionCompareIncludedPackage{},
+		&IntegrationConfig{},
 	); err != nil {
 		return nil, fmt.Errorf("failed to migrate: %w", err)
 	}
+
+	// Seed predefined integration types (idempotent — skips existing records)
+	if err := SeedIntegrationConfigs(db); err != nil {
+		return nil, fmt.Errorf("failed to seed integration configs: %w", err)
+	}
+
 	return db, nil
 }

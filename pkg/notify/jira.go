@@ -2,11 +2,12 @@ package notify
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"mmt-delivery/pkg/env"
+	"net/http"
 )
 
 // JiraClient represents a JIRA API client
@@ -81,11 +82,11 @@ type AddCommentRequest struct {
 	Visibility *JiraVisibility    `json:"visibility,omitempty"`
 }
 
-// NewJiraClient creates a new JIRA client using the JIRA_Service destination
-func NewJiraClient() (*JiraClient, error) {
-	dest, err := env.GetJiraDestination()
+// NewJiraClient creates a new JIRA client by resolving the given destination name.
+func NewJiraClient(resolver *env.DestinationResolver, destName string) (*JiraClient, error) {
+	dest, err := resolver.Get(context.Background(), destName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get JIRA destination: %s", err)
+		return nil, fmt.Errorf("failed to get JIRA destination '%s': %s", destName, err)
 	}
 
 	return &JiraClient{
@@ -281,8 +282,8 @@ func (c *JiraClient) GetSubtasks(issueKey string) ([]JiraSubtask, error) {
 }
 
 // AddDeliveryComment adds a delivery-related comment to a JIRA issue
-func AddDeliveryComment(issueKey string, deliveryRequestID uint, message string, status string) error {
-	client, err := NewJiraClient()
+func AddDeliveryComment(resolver *env.DestinationResolver, destName string, issueKey string, deliveryRequestID uint, message string, status string) error {
+	client, err := NewJiraClient(resolver, destName)
 	if err != nil {
 		env.Logger().Error("Failed to create JIRA client: %s", err)
 		return err

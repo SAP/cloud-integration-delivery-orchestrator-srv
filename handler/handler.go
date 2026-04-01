@@ -15,14 +15,14 @@ import (
 // Handler holds all injected dependencies for the HTTP handler layer.
 // All gin handler functions are methods on this struct.
 type Handler struct {
-	svc          *service.Service
-	db           *gorm.DB
-	logger       *zap.SugaredLogger
-	tms          *tms.TmsClient
-	cpi          *cpi.Manager
-	xsuaa        *xsuaa.UaaClient
-	destinations map[string]env.Destination
-	eventBus     *service.EventBus
+	svc      *service.Service
+	db       *gorm.DB
+	logger   *zap.SugaredLogger
+	tms      *tms.TmsClient
+	cpi      *cpi.Manager
+	xsuaa    *xsuaa.UaaClient
+	resolver *env.DestinationResolver
+	eventBus *service.EventBus
 }
 
 type StatusCount struct {
@@ -59,18 +59,18 @@ func NewHandler(
 	tmsClient *tms.TmsClient,
 	cpiManager *cpi.Manager,
 	xsuaaClient *xsuaa.UaaClient,
-	destinations map[string]env.Destination,
+	resolver *env.DestinationResolver,
 	eventBus *service.EventBus,
 ) *Handler {
 	return &Handler{
-		svc:          svc,
-		db:           db,
-		logger:       logger,
-		tms:          tmsClient,
-		cpi:          cpiManager,
-		xsuaa:        xsuaaClient,
-		destinations: destinations,
-		eventBus:     eventBus,
+		svc:      svc,
+		db:       db,
+		logger:   logger,
+		tms:      tmsClient,
+		cpi:      cpiManager,
+		xsuaa:    xsuaaClient,
+		resolver: resolver,
+		eventBus: eventBus,
 	}
 }
 
@@ -191,6 +191,23 @@ func (h *Handler) SetupRoutes(v1 *gin.RouterGroup, v2 *gin.RouterGroup, requireS
 	vcAdhoc.Use(requireScope("VersionCompare.Adhoc"))
 	{
 		vcAdhoc.POST("/versionCompare/adhoc", h.AdhocVersionCompare)
+	}
+
+	// --- Cookie Service Proxy (Integration.Read scope — same as CPI artifact access) ---
+	cookieProxy := v1.Group("")
+	cookieProxy.Use(requireScope("Integration.Read"))
+	{
+		cookieProxy.GET("/cookie-service/*path", h.ProxyCookieService)
+		cookieProxy.POST("/cookie-service/*path", h.ProxyCookieService)
+	}
+
+	// --- System Configuration (CpiTenant.Manage scope — admin-level) ---
+	system := v1.Group("/system")
+	system.Use(requireScope("CpiTenant.Manage"))
+	{
+		system.GET("/integrations", h.GetIntegrations)
+		system.PUT("/integrations/:type", h.UpdateIntegration)
+		system.GET("/connectivity", h.CheckConnectivity)
 	}
 
 	// --- v2 API (DeliveryRequest.Operate) ---
