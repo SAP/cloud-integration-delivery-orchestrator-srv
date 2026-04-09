@@ -184,8 +184,8 @@ type CpiTenant struct {
 	// in the subaccount's destination service.  Required for CAS to invoke the assembly worker.
 	ContentAssemblyDestStatus lifecycle.PrerequisiteStatus `gorm:"default:'missing'"`
 
-	// TransportManagementDestStatus tracks the BTP destination named per
-	// TmsTransportDestinationName in the subaccount's destination service.
+	// TransportManagementDestStatus tracks the BTP destination named "TransportManagementService"
+	// in the subaccount's destination service.
 	// Required for CAS to push the assembled MTAR package to TMS.
 	TransportManagementDestStatus lifecycle.PrerequisiteStatus `gorm:"default:'missing'"`
 
@@ -231,14 +231,6 @@ type CpiTenant struct {
 
 	// TmsNodeRegistrationStatus tracks whether the TMS source node is registered.
 	TmsNodeRegistrationStatus lifecycle.PrerequisiteStatus `gorm:"default:'missing'"`
-
-	// TmsTransportDestinationName is the name of the BTP destination in this subaccount
-	// that points to the central TMS.  Defaults to "TransportManagementService" (SAP convention).
-	// Users may override this if their landscape uses a non-standard destination name.
-	// Used as the "transportDestination" field in every CAS export request body.
-	// Note: this destination is read by CAS (not cpi-delivery) to push MTAR to TMS.
-	// The cpi-delivery app uses CentralTmsContext.TmsApiDestinationName for TMS API calls.
-	TmsTransportDestinationName string `gorm:"default:'TransportManagementService'"`
 
 	// CentralTmsContextID is the FK to the CentralTmsContext that owns this tenant's
 	// TMS source node.  Set by CentralTmsRegistrar after successful node registration.
