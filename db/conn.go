@@ -49,12 +49,20 @@ func Connect() (*gorm.DB, error) {
 		return nil, fmt.Errorf("failed to connect database: %w", err)
 	}
 	// AutoMigrate core legacy models plus new lifecycle models
+	if err := PreAutoMigrate013(db); err != nil {
+		return nil, fmt.Errorf("pre-migration rfc013 failed: %w", err)
+	}
 	if err := db.AutoMigrate(
 		&CpiTenant{}, &DeliveryRule{}, &DeliveryRequest{}, &ArtifactTenantOperation{}, &BatchJob{},
 		&Artifact{}, &Condition{}, &VersionCompareSnapshot{}, &VersionCompareIncludedPackage{},
 		&IntegrationConfig{},
+		// RFC 013: subaccount-centric CpiTenant + bootstrap state machine
+		&CentralTmsContext{}, &TenantBootstrapJob{},
 	); err != nil {
 		return nil, fmt.Errorf("failed to migrate: %w", err)
+	}
+	if err := PostAutoMigrate013(db); err != nil {
+		return nil, fmt.Errorf("post-migration rfc013 failed: %w", err)
 	}
 
 	// Seed predefined integration types (idempotent — skips existing records)

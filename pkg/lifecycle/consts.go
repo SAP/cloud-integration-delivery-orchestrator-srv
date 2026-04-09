@@ -73,6 +73,102 @@ const (
 	CondSuccess ConditionState = "Success"
 )
 
+// ── RFC 013: Tenant Bootstrap Types ──────────────────────────────────────────
+
+// TenantLifecycleState is the top-level readiness state of a CpiTenant.
+// It is the single authoritative indicator of whether a tenant can participate
+// in the transport workflow.  Only the service layer (TransitionLifecycle) may
+// write this field; handlers must not modify it directly.
+type TenantLifecycleState string
+
+const (
+	// TenantDraft is set on creation, or whenever a key subaccount field is
+	// changed (SubaccountID, Region, CfSpace, IntegrationSuiteEndpoint).
+	// It means no reliable readiness conclusion exists yet.
+	TenantDraft TenantLifecycleState = "draft"
+
+	// TenantNotReady means the most recent inspection found at least one
+	// blocking prerequisite.  The BlockingReason field explains what.
+	TenantNotReady TenantLifecycleState = "not_ready"
+
+	// TenantReadying means a bootstrap apply or retry job is actively running.
+	TenantReadying TenantLifecycleState = "readying"
+
+	// TenantReady means all local prerequisites are satisfied AND the TMS source
+	// node is registered in the central TMS context.  This is equivalent to
+	// "Transport Ready" — the Generate TRs flow is unblocked.
+	TenantReady TenantLifecycleState = "ready"
+)
+
+// BootstrapJobType describes why a TenantBootstrapJob was created.
+type BootstrapJobType string
+
+const (
+	JobTypePreview  BootstrapJobType = "preview"  // read-only inspection; no side effects
+	JobTypeApply    BootstrapJobType = "apply"     // creates all missing prerequisites
+	JobTypeRetry    BootstrapJobType = "retry"     // resumes apply from the last failed step
+	JobTypeValidate BootstrapJobType = "validate"  // re-checks readiness after manual operator action
+)
+
+// BootstrapJobState is the execution state of a TenantBootstrapJob.
+type BootstrapJobState string
+
+const (
+	// JobRunning means the goroutine is actively executing steps.
+	JobRunning BootstrapJobState = "running"
+
+	// JobWaitingUserAction means execution is paused; a human must complete a
+	// prerequisite (e.g. subscribe to Integration Suite, create TMS node in TMS UI)
+	// before the job can continue via a validate or retry call.
+	JobWaitingUserAction BootstrapJobState = "waiting_user_action"
+
+	// JobPartiallyApplied means some steps succeeded before a failure occurred.
+	// Partial state may exist in the target subaccount; retry is safe because all
+	// steps are idempotent (create-or-reuse semantics).
+	JobPartiallyApplied BootstrapJobState = "partially_applied"
+
+	// JobFailed is a terminal failure state.  See FailureType and CurrentStep for
+	// diagnosis.
+	JobFailed BootstrapJobState = "failed"
+
+	// JobFinished means all required steps completed successfully.
+	// The owning CpiTenant.LifecycleState transitions to TenantReady.
+	JobFinished BootstrapJobState = "finished"
+)
+
+// BootstrapFailureType classifies the root cause when a bootstrap job does not
+// reach JobFinished.  Used to determine the correct remediation path.
+type BootstrapFailureType string
+
+const (
+	// FailureWaitingUserAction: a human must complete a manual prerequisite before
+	// the bootstrap can continue (e.g. subscribe Integration Suite, create TMS node).
+	FailureWaitingUserAction BootstrapFailureType = "waiting_user_action"
+
+	// FailurePermissionBlocked: the bootstrap technical principal lacked the required
+	// BTP/CF permissions.  An admin must grant the appropriate roles.
+	FailurePermissionBlocked BootstrapFailureType = "permission_blocked"
+
+	// FailureRemoteSystemError: a remote API (CF, BTP, TMS) returned an unexpected error.
+	// Retry may succeed once the remote system recovers.
+	FailureRemoteSystemError BootstrapFailureType = "remote_system_error"
+
+	// FailureConfigMismatch: a required resource already exists but its configuration
+	// does not match what bootstrap expects (e.g. wrong destination URL, wrong node type).
+	// Requires human review before retry — bootstrap will not overwrite existing resources.
+	FailureConfigMismatch BootstrapFailureType = "config_mismatch"
+)
+
+// PrerequisiteStatus is the last-known state of a single local bootstrap prerequisite
+// (service instance, service key, or BTP destination) stored on CpiTenant.
+type PrerequisiteStatus string
+
+const (
+	PrereqMissing PrerequisiteStatus = "missing" // resource does not exist yet
+	PrereqReady   PrerequisiteStatus = "ready"   // resource exists and is correctly configured
+	PrereqFailed  PrerequisiteStatus = "failed"  // resource exists but is in an error state
+)
+
 // DeriveImport maps TMS transport node state to our ImportState.
 // WARNING is treated as successful import (deploy may proceed); REPEAT means TR was reset and may be imported again.
 func DeriveImport(state string) ImportState {

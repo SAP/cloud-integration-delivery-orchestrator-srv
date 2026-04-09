@@ -110,6 +110,16 @@ func (h *Handler) SetupRoutes(v1 *gin.RouterGroup, v2 *gin.RouterGroup, requireS
 	{
 		tenantManage.POST("/cpiTenant", h.UpsertCpiTenant)
 		tenantManage.DELETE("/cpiTenant/:id", h.DeleteCpiTenant)
+
+		// RFC 013: bootstrap lifecycle endpoints
+		tenantManage.POST("/cpiTenant/:id/bootstrap/preview", h.PreviewBootstrap)
+		tenantManage.POST("/cpiTenant/:id/bootstrap/apply", h.ApplyBootstrap)
+		tenantManage.GET("/cpiTenant/:id/bootstrap/status", h.GetBootstrapStatus)
+		tenantManage.POST("/cpiTenant/:id/bootstrap/retry", h.RetryBootstrap)
+
+		// RFC 013: central TMS context (admin-level, single record per v1 deployment)
+		tenantManage.GET("/centralTmsContext", h.GetCentralTmsContext)
+		tenantManage.PUT("/centralTmsContext", h.UpsertCentralTmsContext)
 	}
 
 	// --- DeliveryRule.Read ---
