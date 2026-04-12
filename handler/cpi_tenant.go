@@ -17,22 +17,21 @@ import (
 // previous bootstrap inspection.  Modifying any of them forces LifecycleState
 // back to DRAFT and clears all prerequisite status caches.
 var keySubaccountFields = []string{
-	"SubaccountID",
-	"Region",
+	"CfApiEndpoint",
+	"CfOrg",
 	"CfSpace",
-	"IntegrationSuiteEndpoint",
 }
 
 // UpsertCpiTenant creates or updates a CpiTenant.
 //
 // Create semantics (ID == 0):
 //   - Sets LifecycleState = DRAFT.
-//   - Returns 409 if SubaccountID is already in use by another active tenant.
+//   - Returns 409 if (CfApiEndpoint, CfOrg) pair is already in use by another active tenant.
 //
 // Update semantics (ID > 0):
-//   - If any key subaccount field changed (SubaccountID, Region, CfSpace,
-//     IntegrationSuiteEndpoint), resets LifecycleState to DRAFT and clears all
-//     prerequisite status fields so stale bootstrap results are not trusted.
+//   - If any key CF identity field changed (CfApiEndpoint, CfOrg, CfSpace),
+//     resets LifecycleState to DRAFT and clears all prerequisite status fields
+//     so stale bootstrap results are not trusted.
 //   - LifecycleState is never writable by callers; it is managed by the service layer.
 func (h *Handler) UpsertCpiTenant(ctx *gin.Context) {
 	var input db.CpiTenant
@@ -52,13 +51,13 @@ func (h *Handler) UpsertCpiTenant(ctx *gin.Context) {
 		// New tenants always start in DRAFT; bootstrap has not run yet.
 		input.LifecycleState = lifecycle.TenantDraft
 
-		// Reject duplicate SubaccountID among active (non-deleted) tenants.
-		if input.SubaccountID != "" {
+		// Reject duplicate (CfApiEndpoint, CfOrg) pair among active (non-deleted) tenants.
+		if input.CfOrg != "" {
 			var existing db.CpiTenant
-			err := h.db.Where(&db.CpiTenant{SubaccountID: input.SubaccountID}).
+			err := h.db.Where("cf_api_endpoint = ? AND cf_org = ?", input.CfApiEndpoint, input.CfOrg).
 				First(&existing).Error
 			if err == nil {
-				Fail(ctx, 409, fmt.Sprintf("BTP subaccount %q is already registered as a CPI tenant", input.SubaccountID))
+				Fail(ctx, 409, fmt.Sprintf("CF org %q on %q is already registered as a CPI tenant", input.CfOrg, input.CfApiEndpoint))
 				return
 			}
 			if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -87,15 +86,15 @@ func (h *Handler) UpsertCpiTenant(ctx *gin.Context) {
 		return
 	}
 
-	// Reject SubaccountID change to a value already owned by another active tenant.
-	if input.SubaccountID != "" && input.SubaccountID != existing.SubaccountID {
+	// Reject CfOrg change to a value already owned by another active tenant on the same endpoint.
+	if input.CfOrg != "" && (input.CfOrg != existing.CfOrg || input.CfApiEndpoint != existing.CfApiEndpoint) {
 		var conflict db.CpiTenant
-		err := h.db.Where("subaccount_id = ? AND id != ?", input.SubaccountID, input.ID).
+		err := h.db.Where("cf_api_endpoint = ? AND cf_org = ? AND id != ?", input.CfApiEndpoint, input.CfOrg, input.ID).
 			First(&conflict).Error
 		if err == nil {
 			Fail(ctx, 409, fmt.Sprintf(
-				"BTP subaccount %q is already registered as CPI tenant %q (id=%d)",
-				input.SubaccountID, conflict.Name, conflict.ID,
+				"CF org %q on %q is already registered as CPI tenant %q (id=%d)",
+				input.CfOrg, input.CfApiEndpoint, conflict.Name, conflict.ID,
 			))
 			return
 		}
@@ -122,13 +121,12 @@ func (h *Handler) UpsertCpiTenant(ctx *gin.Context) {
 	OK(ctx, input)
 }
 
-// keyFieldChanged returns true if any bootstrap-sensitive field differs between
-// the stored tenant and the incoming update.
+// keyFieldChanged returns true if any bootstrap-sensitive CF identity field
+// differs between the stored tenant and the incoming update.
 func keyFieldChanged(existing, input db.CpiTenant) bool {
-	return existing.SubaccountID != input.SubaccountID ||
-		existing.Region != input.Region ||
-		existing.CfSpace != input.CfSpace ||
-		existing.IntegrationSuiteEndpoint != input.IntegrationSuiteEndpoint
+	return existing.CfApiEndpoint != input.CfApiEndpoint ||
+		existing.CfOrg != input.CfOrg ||
+		existing.CfSpace != input.CfSpace
 }
 
 // clearPrerequisiteStatuses resets all local prerequisite status fields to
@@ -144,7 +142,45 @@ func clearPrerequisiteStatuses(t *db.CpiTenant) {
 	t.TmsNodeRegistrationStatus = lifecycle.PrereqMissing
 }
 
-// GetCpiTenants lists all active tenants.
+// SaveCfIdentity persists the CF identity fields (CfApiEndpoint, CfOrg, CfSpace)
+// for the tenant and validates the operator's cfToken against the CF API.
+//
+// This is the terminal action of Wizard Step 1.  On success the tenant
+// transitions to LifecycleState = CONFIGURED and the caller can proceed to
+// Wizard Steps 2–3 (Inspect + Apply) within the same cfToken session.
+//
+// Requires: { "cfApiEndpoint", "cfOrg", "cfSpace", "cfToken" } in the request body.
+// cfToken is never persisted — it is used only for the in-request CF validation.
+//
+// PUT /api/v1/cpiTenant/:id/cfIdentity
+func (h *Handler) SaveCfIdentity(ctx *gin.Context) {
+	tenantID, ok := parseTenantID(ctx)
+	if !ok {
+		return
+	}
+
+	var body struct {
+		service.CfIdentityInput
+		CfToken string `json:"cfToken" binding:"required"`
+	}
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		Fail(ctx, 400, err.Error())
+		return
+	}
+
+	if err := h.svc.SaveCfIdentity(ctx.Request.Context(), tenantID, body.CfIdentityInput, body.CfToken); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			Fail(ctx, 404, "tenant not found")
+			return
+		}
+		Fail(ctx, 500, err.Error())
+		return
+	}
+
+	OK(ctx, gin.H{"tenantId": tenantID})
+}
+
+
 func (h *Handler) GetCpiTenants(ctx *gin.Context) {
 	var tenants []db.CpiTenant
 	if err := h.db.Find(&tenants).Error; err != nil {

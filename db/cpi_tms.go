@@ -81,13 +81,19 @@ type ApiEndpoint struct {
 //
 // # Lifecycle (LifecycleState)
 //
-// A tenant progresses through four top-level states:
+// A tenant progresses through five top-level states driven by a Wizard flow:
 //
-//	DRAFT      → newly created, or key fields changed; no reliable readiness conclusion yet.
-//	NOT_READY  → at least one required prerequisite is missing or misconfigured.
-//	READYING   → a bootstrap job is actively executing.
-//	READY      → all local prerequisites satisfied AND the TMS source node is registered;
-//	             the tenant is fully transport-ready and the "Generate TRs" flow is unblocked.
+//	DRAFT       → newly created, or key CF identity fields changed; no reliable
+//	              readiness conclusion exists yet.  Wizard Step 1 not yet complete.
+//	CONFIGURED  → CF identity fields saved and validated against the CF API
+//	              (space accessible + operator has Space Developer role).
+//	              Wizard Step 1 complete; Inspect + Apply can proceed.
+//	NOT_READY   → at least one required prerequisite is missing or misconfigured;
+//	              the BlockingReason field explains the primary obstacle.
+//	READYING    → a bootstrap apply or retry job is actively executing.
+//	READY       → all local prerequisites satisfied AND the TMS source node is
+//	              registered; the tenant is fully transport-ready and the
+//	              "Generate TRs" flow is unblocked.
 //
 // Only the bootstrapper service (via TransitionLifecycle) may advance or regress this field.
 // Direct writes from handlers are forbidden.
@@ -122,38 +128,23 @@ type CpiTenant struct {
 	// Group is an informal tag for grouping tenants (e.g. "prod", "ctest", "ep").
 	Group string
 
-	// ── Subaccount Identity ───────────────────────────────────────────────────────────
+	// ── CF Identity ──────────────────────────────────────────────────────────────────
 
-	// SubaccountID is the BTP subaccount GUID that this tenant maps to 1-to-1.
-	// It is the primary identity key for all BTP/CF API calls made during bootstrap.
-	// Unique constraint excludes soft-deleted rows; duplicate subaccount IDs are rejected with HTTP 409.
-	SubaccountID string `gorm:"uniqueIndex:ux_subaccount_id,where:deleted_at IS NULL"`
+	// CfApiEndpoint is the CF API root URL for this tenant's BTP landscape.
+	// This is the primary first-hand identity field provided by the Operator at
+	// registration time.  Example: "https://api.cf.eu10.hana.ondemand.com"
+	// Combined with CfOrg, uniquely identifies the target subaccount.
+	// Unique constraint is composite with CfOrg; excludes soft-deleted rows.
+	CfApiEndpoint string `gorm:"uniqueIndex:ux_cf_identity,where:deleted_at IS NULL"`
 
-	// GlobalAccountID is the parent BTP global account; used for entitlement queries.
-	GlobalAccountID string
-
-	// Region is the BTP region code of this subaccount (e.g. "eu10", "us10").
-	// Determines which CF API domain and BTP endpoints are used during bootstrap.
-	Region string
-
-	// CfOrg is the Cloud Foundry organisation GUID; optional, inferred when blank.
-	CfOrg string
+	// CfOrg is the Cloud Foundry organisation GUID for this tenant's subaccount.
+	// This is the CF-level identity of the subaccount (1-to-1 with the BTP subaccount).
+	// Unique constraint is composite with CfApiEndpoint; excludes soft-deleted rows.
+	CfOrg string `gorm:"uniqueIndex:ux_cf_identity,where:deleted_at IS NULL"`
 
 	// CfSpace is the default CF space where service instances (PIR, CAS) are created.
 	// Must exist and be accessible to the bootstrap technical principal.
 	CfSpace string
-
-	// ── Integration Suite ─────────────────────────────────────────────────────────────
-
-	// IntegrationSuiteEndpoint is the runtime URL of the Cloud Integration API.
-	// This is the canonical endpoint going forward; CpiEndpoint is the legacy alias.
-	// Example: "https://<tenant>.it-cpi001.cfapps.eu10.hana.ondemand.com"
-	IntegrationSuiteEndpoint string
-
-	// IntegrationSuiteSubscribed is set to true once the bootstrap inspector has
-	// confirmed that the subaccount has an active Integration Suite subscription.
-	// Subscription must exist before any service instances can be created.
-	IntegrationSuiteSubscribed bool
 
 	// ── Local Prerequisite Status ─────────────────────────────────────────────────────
 	//
@@ -284,4 +275,10 @@ type UaaClaims struct {
 	Origin string `json:"origin"` //maco.accounts400.ondemand.com
 	UserID string `json:"user_id"`
 	ZoneID string `json:"zid"`
+}
+
+// CfApiURL returns the CF API root URL for this tenant.
+// It is the direct value of CfApiEndpoint, provided by the Operator at registration.
+func (t *CpiTenant) CfApiURL() string {
+	return t.CfApiEndpoint
 }

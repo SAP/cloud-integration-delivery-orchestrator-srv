@@ -8,37 +8,42 @@ import (
 //
 // # Why this is needed
 //
-// RFC 013 adds SubaccountID to CpiTenant with a unique index.  GORM AutoMigrate
-// would first ADD COLUMN (setting every existing row to ""), then try to CREATE
-// UNIQUE INDEX — which fails immediately if multiple active tenants exist.
+// RFC 013 adds CfApiEndpoint and CfOrg to CpiTenant with a composite unique index.
+// GORM AutoMigrate would first ADD COLUMN (setting every existing row to ""), then
+// try to CREATE UNIQUE INDEX — which fails immediately if multiple active tenants exist.
 //
-// This function detects that situation and pre-populates SubaccountID with
-// distinct placeholder values ("PENDING_<id>") so AutoMigrate can create the
-// index without conflict.  Operators then fill in the real SubaccountIDs via
-// the CpiTenant update API.
+// This function detects that situation and pre-populates CfOrg with distinct placeholder
+// values ("PENDING_<id>") so AutoMigrate can create the index without conflict.
+// Operators then fill in the real CfApiEndpoint and CfOrg values via the CpiTenant
+// update API before bootstrapping.
 //
-// Idempotent: if subaccount_id already exists (i.e. migration already ran),
-// this function is a no-op.
+// Idempotent: if cf_org already exists (i.e. migration already ran), this function
+// is a no-op.
 func PreAutoMigrate013(db *gorm.DB) error {
-	if db.Migrator().HasColumn(&CpiTenant{}, "subaccount_id") {
+	if db.Migrator().HasColumn(&CpiTenant{}, "cf_org") {
 		// Column already exists — either migration already ran, or this is a
 		// fresh database.  Either way, nothing to do.
 		return nil
 	}
 
-	// Add the column manually without the unique index so we can safely
-	// populate it before AutoMigrate creates the constraint.
+	// Add both columns manually without the unique index so we can safely
+	// populate them before AutoMigrate creates the constraint.
 	if err := db.Exec(
-		`ALTER TABLE cpi_tenants ADD COLUMN IF NOT EXISTS subaccount_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE cpi_tenants ADD COLUMN IF NOT EXISTS cf_api_endpoint TEXT NOT NULL DEFAULT ''`,
+	).Error; err != nil {
+		return err
+	}
+	if err := db.Exec(
+		`ALTER TABLE cpi_tenants ADD COLUMN IF NOT EXISTS cf_org TEXT NOT NULL DEFAULT ''`,
 	).Error; err != nil {
 		return err
 	}
 
-	// Assign a unique placeholder to every existing tenant so the unique index
-	// can be created successfully.  The "PENDING_" prefix signals to operators
-	// that a real SubaccountID must be filled in before bootstrapping.
+	// Assign a unique placeholder to every existing tenant so the composite unique
+	// index can be created successfully.  The "PENDING_" prefix signals to operators
+	// that real CfApiEndpoint and CfOrg values must be filled in before bootstrapping.
 	if err := db.Exec(
-		`UPDATE cpi_tenants SET subaccount_id = 'PENDING_' || id::text WHERE subaccount_id = ''`,
+		`UPDATE cpi_tenants SET cf_org = 'PENDING_' || id::text WHERE cf_org = ''`,
 	).Error; err != nil {
 		return err
 	}

@@ -109,6 +109,7 @@ func (h *Handler) SetupRoutes(v1 *gin.RouterGroup, v2 *gin.RouterGroup, requireS
 	tenantManage.Use(requireScope("CpiTenant.Manage"))
 	{
 		tenantManage.POST("/cpiTenant", h.UpsertCpiTenant)
+		tenantManage.PUT("/cpiTenant/:id/cfIdentity", h.SaveCfIdentity)
 		tenantManage.DELETE("/cpiTenant/:id", h.DeleteCpiTenant)
 
 		// RFC 013: bootstrap lifecycle endpoints

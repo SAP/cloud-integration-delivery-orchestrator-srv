@@ -82,10 +82,22 @@ const (
 type TenantLifecycleState string
 
 const (
-	// TenantDraft is set on creation, or whenever a key subaccount field is
-	// changed (SubaccountID, Region, CfSpace, IntegrationSuiteEndpoint).
+	// TenantDraft is set on creation, or whenever a key CF identity field is
+	// changed (CfApiEndpoint, CfOrg, CfSpace).
 	// It means no reliable readiness conclusion exists yet.
 	TenantDraft TenantLifecycleState = "draft"
+
+	// TenantConfigured means the operator has saved the CF identity fields
+	// (CfApiEndpoint, CfOrg, CfSpace) and validated them against the CF API
+	// using a short-lived cfToken.  The subaccount is reachable and the operator
+	// holds at least Space Developer role.
+	//
+	// This is the terminal state of Wizard Step 1.  Inspect + Apply (Steps 2–3)
+	// can be triggered from here in the same cfToken session.
+	//
+	// Transitions back to TenantDraft if any key CF identity field is subsequently
+	// changed via UpsertCpiTenant.
+	TenantConfigured TenantLifecycleState = "configured"
 
 	// TenantNotReady means the most recent inspection found at least one
 	// blocking prerequisite.  The BlockingReason field explains what.

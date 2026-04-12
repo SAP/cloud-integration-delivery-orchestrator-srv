@@ -156,8 +156,8 @@ func (i *TenantInspector) InspectTenant(ctx context.Context, tenant *db.CpiTenan
 
 	// ── CHECK_SPACE_CONTEXT ──────────────────────────────────────────────────
 	//
-	// Resolve CF space → org GUID, verify operator permissions, and check the
-	// Destination Service entitlement + instance state.
+	// Resolve CF space → org GUID and verify that the operator token holds the
+	// space_developer role.  Does NOT check any service instances.
 	if err := i.checkSpaceContext(ctx, tenant, result); err != nil {
 		return result, fmt.Errorf("inspector: %s: %w", StepCheckSpaceContext, err)
 	}

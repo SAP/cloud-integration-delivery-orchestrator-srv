@@ -91,9 +91,8 @@ type CentralTmsContext struct {
 
 	// DefaultNodeNamePattern is a template for auto-generating TMS source node names
 	// during bootstrap.  Supported variables:
-	//   {TenantName}   — CpiTenant.Name
-	//   {SubaccountID} — CpiTenant.SubaccountID (truncated to TMS name length limits)
-	//   {Region}       — CpiTenant.Region
+	//   {TenantName} — CpiTenant.Name
+	//   {CfOrg}      — CpiTenant.CfOrg (truncated to TMS name length limits)
 	// Default: "CI_{TenantName}"  (aligns with existing PoC convention: NODE_MMT_CF_DEV)
 	DefaultNodeNamePattern string
 

@@ -1,46 +1,144 @@
 package handler
 
 import (
+	"errors"
+	"strconv"
+
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
-// PreviewBootstrap triggers a read-only inspection of the tenant's local
-// prerequisites and returns a preview of what would be created by ApplyBootstrap.
-// Runs synchronously (typically < 5 s).
-//
-// POST /api/v1/cpiTenant/:id/bootstrap/preview
-//
-// TODO (Phase 2): implement TenantInspector and wire result into a bootstrap job.
-func (h *Handler) PreviewBootstrap(ctx *gin.Context) {
-	Fail(ctx, 501, "not implemented — Phase 2")
+// parseTenantID extracts and validates the :id URL parameter.
+// Returns (id, true) on success; calls Fail and returns (0, false) on error.
+func parseTenantID(ctx *gin.Context) (uint, bool) {
+	idStr := ctx.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil || id <= 0 {
+		Fail(ctx, 400, "invalid tenant id")
+		return 0, false
+	}
+	return uint(id), true
 }
 
-// ApplyBootstrap creates all missing local prerequisites identified by a prior
-// preview, then registers the TMS source node.  Runs asynchronously; returns
-// the job ID immediately.  Poll GetBootstrapStatus for progress.
+// PreviewBootstrap runs a read-only inspection of the tenant's local
+// prerequisites and returns a BootstrapPreview describing what is present,
+// what is missing, and what ApplyBootstrap would create.
+//
+// Requires: { "cfToken": "<bearer-token>" } in the request body.
+//
+// POST /api/v1/cpiTenant/:id/bootstrap/preview
+func (h *Handler) PreviewBootstrap(ctx *gin.Context) {
+	tenantID, ok := parseTenantID(ctx)
+	if !ok {
+		return
+	}
+
+	var body struct {
+		CfToken string `json:"cfToken" binding:"required"`
+	}
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		Fail(ctx, 400, "cfToken is required")
+		return
+	}
+
+	preview, err := h.svc.PreviewBootstrap(ctx.Request.Context(), tenantID, body.CfToken)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			Fail(ctx, 404, "tenant not found")
+			return
+		}
+		Fail(ctx, 500, err.Error())
+		return
+	}
+
+	OK(ctx, preview)
+}
+
+// ApplyBootstrap creates an "apply" bootstrap job and launches it
+// asynchronously.  Returns the job ID immediately; use GetBootstrapStatus
+// to poll progress.
+//
+// Requires: { "cfToken": "<bearer-token>" } in the request body.
 //
 // POST /api/v1/cpiTenant/:id/bootstrap/apply
-//
-// TODO (Phase 2): implement TenantBootstrapper and async job execution.
 func (h *Handler) ApplyBootstrap(ctx *gin.Context) {
-	Fail(ctx, 501, "not implemented — Phase 2")
+	tenantID, ok := parseTenantID(ctx)
+	if !ok {
+		return
+	}
+
+	var body struct {
+		CfToken string `json:"cfToken" binding:"required"`
+	}
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		Fail(ctx, 400, "cfToken is required")
+		return
+	}
+
+	jobID, err := h.svc.ApplyBootstrap(ctx.Request.Context(), tenantID, body.CfToken)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			Fail(ctx, 404, "tenant not found")
+			return
+		}
+		Fail(ctx, 500, err.Error())
+		return
+	}
+
+	OK(ctx, gin.H{"jobId": jobID})
 }
 
 // GetBootstrapStatus returns the most recent TenantBootstrapJob for the tenant.
 //
 // GET /api/v1/cpiTenant/:id/bootstrap/status
-//
-// TODO (Phase 2): query TenantBootstrapJob by CpiTenantID, return latest.
 func (h *Handler) GetBootstrapStatus(ctx *gin.Context) {
-	Fail(ctx, 501, "not implemented — Phase 2")
+	tenantID, ok := parseTenantID(ctx)
+	if !ok {
+		return
+	}
+
+	job, err := h.svc.GetBootstrapStatus(tenantID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			Fail(ctx, 404, "no bootstrap job found for tenant")
+			return
+		}
+		Fail(ctx, 500, err.Error())
+		return
+	}
+
+	OK(ctx, job)
 }
 
-// RetryBootstrap resumes a failed or waiting bootstrap job from the step it
-// last failed at.  Runs asynchronously; returns the new job ID immediately.
+// RetryBootstrap creates a "retry" bootstrap job that continues from the step
+// where the previous job failed.  Runs asynchronously; returns the new job ID.
+//
+// Requires: { "cfToken": "<bearer-token>" } in the request body.
 //
 // POST /api/v1/cpiTenant/:id/bootstrap/retry
-//
-// TODO (Phase 2): implement retry logic in TenantBootstrapper.
 func (h *Handler) RetryBootstrap(ctx *gin.Context) {
-	Fail(ctx, 501, "not implemented — Phase 2")
+	tenantID, ok := parseTenantID(ctx)
+	if !ok {
+		return
+	}
+
+	var body struct {
+		CfToken string `json:"cfToken" binding:"required"`
+	}
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		Fail(ctx, 400, "cfToken is required")
+		return
+	}
+
+	jobID, err := h.svc.RetryBootstrap(ctx.Request.Context(), tenantID, body.CfToken)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			Fail(ctx, 404, "tenant not found")
+			return
+		}
+		Fail(ctx, 409, err.Error())
+		return
+	}
+
+	OK(ctx, gin.H{"jobId": jobID})
 }

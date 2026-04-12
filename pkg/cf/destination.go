@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -35,6 +36,7 @@ type DestinationServiceClient struct {
 // Destination is a BTP destination configuration entry.
 type Destination struct {
 	Name                 string            `json:"Name"`
+	Description          string            `json:"Description,omitempty"`
 	Type                 string            `json:"Type"`
 	URL                  string            `json:"URL,omitempty"`
 	Authentication       string            `json:"Authentication"`
@@ -77,10 +79,13 @@ func NewDestinationServiceClient(ctx context.Context, credentials map[string]any
 }
 
 func (c *DestinationServiceClient) refreshToken(ctx context.Context) error {
-	body := fmt.Sprintf("grant_type=client_credentials&client_id=%s&client_secret=%s",
-		c.clientID, c.clientSecret)
+	vals := url.Values{
+		"grant_type":    {"client_credentials"},
+		"client_id":     {c.clientID},
+		"client_secret": {c.clientSecret},
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.authURL,
-		bytes.NewBufferString(body))
+		bytes.NewBufferString(vals.Encode()))
 	if err != nil {
 		return fmt.Errorf("cf/dest: build token request: %w", err)
 	}
