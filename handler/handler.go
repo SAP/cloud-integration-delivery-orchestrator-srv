@@ -117,6 +117,7 @@ func (h *Handler) SetupRoutes(v1 *gin.RouterGroup, v2 *gin.RouterGroup, requireS
 		tenantManage.POST("/cpiTenant/:id/bootstrap/apply", h.ApplyBootstrap)
 		tenantManage.GET("/cpiTenant/:id/bootstrap/status", h.GetBootstrapStatus)
 		tenantManage.POST("/cpiTenant/:id/bootstrap/retry", h.RetryBootstrap)
+		tenantManage.POST("/cpiTenant/:id/bootstrap/reset", h.ResetBootstrap)
 
 		// RFC 013: central TMS context (admin-level, single record per v1 deployment)
 		tenantManage.GET("/centralTmsContext", h.GetCentralTmsContext)

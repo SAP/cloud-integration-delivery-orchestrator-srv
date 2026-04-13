@@ -48,22 +48,28 @@ func (h *Handler) UpsertCpiTenant(ctx *gin.Context) {
 
 		input.CreatedBy = user
 
+		// CfApiEndpoint and CfOrg are required: without them the tenant cannot enter
+		// any meaningful bootstrap flow, and the DB unique index cannot protect
+		// against multiple empty-string rows at the business-logic level.
+		if input.CfApiEndpoint == "" || input.CfOrg == "" {
+			Fail(ctx, 400, "cfApiEndpoint and cfOrg are required")
+			return
+		}
+
 		// New tenants always start in DRAFT; bootstrap has not run yet.
 		input.LifecycleState = lifecycle.TenantDraft
 
 		// Reject duplicate (CfApiEndpoint, CfOrg) pair among active (non-deleted) tenants.
-		if input.CfOrg != "" {
-			var existing db.CpiTenant
-			err := h.db.Where("cf_api_endpoint = ? AND cf_org = ?", input.CfApiEndpoint, input.CfOrg).
-				First(&existing).Error
-			if err == nil {
-				Fail(ctx, 409, fmt.Sprintf("CF org %q on %q is already registered as a CPI tenant", input.CfOrg, input.CfApiEndpoint))
-				return
-			}
-			if !errors.Is(err, gorm.ErrRecordNotFound) {
-				Fail(ctx, 500, err.Error())
-				return
-			}
+		var existing db.CpiTenant
+		err := h.db.Where("cf_api_endpoint = ? AND cf_org = ?", input.CfApiEndpoint, input.CfOrg).
+			First(&existing).Error
+		if err == nil {
+			Fail(ctx, 409, fmt.Sprintf("CF org %q on %q is already registered as a CPI tenant", input.CfOrg, input.CfApiEndpoint))
+			return
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			Fail(ctx, 500, err.Error())
+			return
 		}
 
 		if err := h.db.Create(&input).Error; err != nil {

@@ -142,3 +142,28 @@ func (h *Handler) RetryBootstrap(ctx *gin.Context) {
 
 	OK(ctx, gin.H{"jobId": jobID})
 }
+
+// ResetBootstrap is the operator escape hatch for a tenant stuck in readying
+// state.  It marks the active running job as failed and transitions the tenant
+// back to not_ready so a normal RetryBootstrap can proceed.
+//
+// No request body required.
+//
+// POST /api/v1/cpiTenant/:id/bootstrap/reset
+func (h *Handler) ResetBootstrap(ctx *gin.Context) {
+	tenantID, ok := parseTenantID(ctx)
+	if !ok {
+		return
+	}
+
+	if err := h.svc.ResetBootstrap(tenantID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			Fail(ctx, 404, "tenant not found")
+			return
+		}
+		Fail(ctx, 409, err.Error())
+		return
+	}
+
+	OK(ctx, gin.H{"tenantId": tenantID})
+}

@@ -8,6 +8,7 @@ import (
 
 	"mmt-delivery/db"
 	"mmt-delivery/pkg/cf"
+	"mmt-delivery/pkg/env"
 	"mmt-delivery/pkg/lifecycle"
 )
 
@@ -56,6 +57,14 @@ func (s *Service) ApplyBootstrap(ctx context.Context, tenantID uint, cfToken str
 	tenant, err := s.getTenantForBootstrap(tenantID)
 	if err != nil {
 		return 0, err
+	}
+
+	// Guard: reject if a bootstrap job is already in progress.
+	// A job row is created below; we must confirm no other goroutine owns the
+	// tenant before writing it, otherwise a concurrent Apply call would produce
+	// an orphaned job row (state=running, ended_at=null) that never completes.
+	if tenant.LifecycleState == lifecycle.TenantReadying {
+		return 0, fmt.Errorf("apply: a bootstrap job is already running for tenant %d", tenantID)
 	}
 
 	// ── Synchronous inspect phase ────────────────────────────────────────────
@@ -164,6 +173,46 @@ func (s *Service) GetBootstrapStatus(tenantID uint) (*db.TenantBootstrapJob, err
 	return &job, nil
 }
 
+// ResetBootstrap is an operator escape hatch for tenants stuck in the readying
+// state due to an irrecoverable goroutine failure (e.g. DB unavailable when
+// runBootstrap tried to write its final lifecycle transition).
+//
+// The operator calls this endpoint after observing that the tenant has been in
+// readying for longer than expected.  The reset marks the active running job as
+// failed and transitions the tenant back to not_ready, after which a normal
+// RetryBootstrap can be issued.
+//
+// POST /api/v1/cpiTenant/:id/bootstrap/reset
+func (s *Service) ResetBootstrap(tenantID uint) error {
+	tenant, err := s.getTenantForBootstrap(tenantID)
+	if err != nil {
+		return err
+	}
+
+	if tenant.LifecycleState != lifecycle.TenantReadying {
+		return fmt.Errorf("reset: tenant %d is not in readying state (current: %s); nothing to reset",
+			tenantID, tenant.LifecycleState)
+	}
+
+	// Mark the most recent running job as failed.
+	now := time.Now()
+	if err := s.DB.Model(&db.TenantBootstrapJob{}).
+		Where("cpi_tenant_id = ? AND state = ?", tenantID, lifecycle.JobRunning).
+		Updates(map[string]any{
+			"state":        lifecycle.JobFailed,
+			"failure_type": lifecycle.FailureRemoteSystemError,
+			"ended_at":     &now,
+		}).Error; err != nil {
+		return fmt.Errorf("reset: mark job failed: %w", err)
+	}
+
+	// Transition tenant back to not_ready so RetryBootstrap can proceed.
+	if err := s.TransitionLifecycle(tenantID, EventBootstrapFailed); err != nil {
+		return fmt.Errorf("reset: transition lifecycle: %w", err)
+	}
+	return nil
+}
+
 // ── BootstrapPreview ──────────────────────────────────────────────────────────
 
 // BootstrapPreview is the read-only result of a PreviewBootstrap call.
@@ -203,10 +252,17 @@ func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string,
 			"failure_type": failureType,
 			"current_step": step,
 			"ended_at":     &now,
+			"error_detail": reason,
 		})
-		_ = s.TransitionLifecycle(tenant.ID, EventBootstrapFailed)
-		s.DB.Model(&db.CpiTenant{}).Where("id = ?", tenant.ID).
-			Update("blocking_reason", reason)
+		if err := s.TransitionLifecycle(tenant.ID, EventBootstrapFailed); err != nil {
+			env.Logger().Errorw("bootstrap: failed to transition lifecycle after job failure; tenant may be stuck in readying",
+				"tenantID", tenant.ID, "jobID", jobID, "error", err)
+		}
+		if err := s.DB.Model(&db.CpiTenant{}).Where("id = ?", tenant.ID).
+			Update("blocking_reason", reason).Error; err != nil {
+			env.Logger().Errorw("bootstrap: failed to persist blocking_reason",
+				"tenantID", tenant.ID, "jobID", jobID, "error", err)
+		}
 	}
 
 	finish := func() {
@@ -215,7 +271,10 @@ func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string,
 			"state":    lifecycle.JobFinished,
 			"ended_at": &now,
 		})
-		_ = s.TransitionLifecycle(tenant.ID, EventBootstrapFinished)
+		if err := s.TransitionLifecycle(tenant.ID, EventBootstrapFinished); err != nil {
+			env.Logger().Errorw("bootstrap: failed to transition lifecycle after job completion; tenant may be stuck in readying",
+				"tenantID", tenant.ID, "jobID", jobID, "error", err)
+		}
 	}
 
 	setStep := func(step string) {

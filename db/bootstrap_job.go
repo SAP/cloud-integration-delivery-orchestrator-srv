@@ -75,6 +75,13 @@ type TenantBootstrapJob struct {
 	// Empty when State is JobRunning or JobFinished.
 	FailureType lifecycle.BootstrapFailureType
 
+	// ErrorDetail stores the raw error message from the step that caused this job
+	// to fail.  Set only when State is failed or waiting_user_action.
+	// This is the human-readable diagnosis that persists across retries,
+	// complementing the machine-readable FailureType + CurrentStep codes.
+	// Example: "create service key (PIR_API): CF API returned 403 Forbidden: CF-NotAuthorized"
+	ErrorDetail string
+
 	// MissingPrerequisites is a JSON snapshot of every prerequisite item that was absent
 	// when this job started its inspection phase.  Shape: []string (blocking reason codes).
 	// Example: ["CAS_APPLICATION_MISSING", "CLOUD_INTEGRATION_DEST_MISSING"]
