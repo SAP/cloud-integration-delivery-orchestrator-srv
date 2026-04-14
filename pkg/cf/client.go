@@ -15,6 +15,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -315,4 +316,41 @@ func (c *CFClient) GetOrgForSpace(ctx context.Context, spaceGUID string) (string
 		return "", fmt.Errorf("cf: space %s has no organization relationship", spaceGUID)
 	}
 	return space.Relationships.Organization.Data.GUID, nil
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Error classification helpers
+// ──────────────────────────────────────────────────────────────────────────────
+
+// HTTPStatusCode extracts the HTTP status code from a go-cfclient error.
+// Returns 0 if err is nil or is not a recognisable CF HTTP error.
+//
+// Use this to classify CF API errors at call sites without importing the
+// resource package directly:
+//
+//	switch cf.HTTPStatusCode(err) {
+//	case 404: // not found
+//	case 401, 403: // auth / permission
+//	default: // network or unknown — propagate
+//	}
+func HTTPStatusCode(err error) int {
+	if err == nil {
+		return 0
+	}
+	var httpErr resource.CloudFoundryHTTPError
+	if errors.As(err, &httpErr) {
+		return httpErr.StatusCode
+	}
+	var cfErr resource.CloudFoundryError
+	if errors.As(err, &cfErr) {
+		// CF error code 10002 = CF-NotAuthenticated (maps to 401)
+		// CF error code 10003 = CF-NotAuthorized   (maps to 403)
+		switch cfErr.Code {
+		case 10002:
+			return 401
+		case 10003:
+			return 403
+		}
+	}
+	return 0
 }

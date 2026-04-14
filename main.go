@@ -87,7 +87,7 @@ func main() {
 		eventBus,
 	)
 
-	svc.StartBackgroundSync(ctx, 15*time.Second)
+	// svc.StartBackgroundSync(ctx, 15*time.Second)
 
 	// --- Setup Gin router ---
 	router := gin.New()

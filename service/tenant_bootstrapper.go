@@ -295,6 +295,7 @@ func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string,
 	// CHECK_PIR_API → create instance + service key if missing
 	setStep(StepCheckPirApi)
 	acts, err := bootstrapper.ensureInstanceAndKey(ctx, offeringPIR, planPirApi,
+		instanceNamePirApi, keyNamePirApi,
 		missingCodePirApi, &result.PirApiInstanceGUID, result)
 	if err != nil {
 		fail(lifecycle.FailureRemoteSystemError, StepCheckPirApi, err.Error())
@@ -308,6 +309,7 @@ func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string,
 	// provider-side CPIDELIVERY_CAS_{id} destination.
 	setStep(StepCheckCasApplication)
 	acts, err = bootstrapper.ensureInstanceAndKey(ctx, offeringCAS, planCasApplication,
+		instanceNameCasApplication, keyNameCasApplication,
 		missingCodeCasApplication, &result.CasApplicationInstanceGUID, result)
 	if err != nil {
 		fail(lifecycle.FailureRemoteSystemError, StepCheckCasApplication, err.Error())
@@ -318,6 +320,7 @@ func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string,
 	// CHECK_CAS_STANDARD → create instance + service key if missing
 	setStep(StepCheckCasStandard)
 	acts, err = bootstrapper.ensureInstanceAndKey(ctx, offeringCAS, planCasStandard,
+		instanceNameCasStandard, keyNameCasStandard,
 		missingCodeCasStandard, &result.CasStandardInstanceGUID, result)
 	if err != nil {
 		fail(lifecycle.FailureRemoteSystemError, StepCheckCasStandard, err.Error())
@@ -328,10 +331,15 @@ func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string,
 	// CHECK_DESTINATION_SERVICE → create instance if missing.
 	// Grouped with CHECK_DESTINATIONS: the instance is the vehicle for writing
 	// the destination configs that depend on the PIR/CAS credentials above.
+	//
+	// Unlike PIR/CAS, the Destination Service does NOT need a persistent service
+	// key managed here.  ensureDestinations creates a short-lived temporary key
+	// (deleted via defer) solely to call the Destination Service REST API, so
+	// ensureInstanceAndKey is not used for this service.
 	setStep(StepCheckDestinationService)
 	if result.DestinationServiceInstanceGUID == "" {
 		guid, err := bootstrapper.ensureServiceInstance(ctx, offeringDestination, planDestinationLite,
-			"cpidelivery-destination-svc")
+			instanceNameDestinationLite)
 		if err != nil {
 			fail(lifecycle.FailureRemoteSystemError, StepCheckDestinationService, err.Error())
 			return
@@ -400,11 +408,15 @@ func newBootstrapApplier(tenant *db.CpiTenant, cfToken string, result *Inspectio
 
 // ensureServiceInstance creates a managed service instance if one does not yet
 // exist.  Returns the instance GUID (existing or newly created).
+//
+// Lookup is by instanceName (not by plan) so that cpi-delivery's dedicated
+// instance is found unambiguously, even if other instances of the same plan
+// exist in the subscriber's space.
 func (b *bootstrapApplier) ensureServiceInstance(ctx context.Context, offering, plan, instanceName string) (string, error) {
-	// Instance may have been found during inspection — return early.
-	existing, err := b.cfClient.GetServiceInstance(ctx, b.spaceGUID, plan)
+	// Look up the cpi-delivery–owned instance by its fixed name.
+	existing, err := b.cfClient.GetServiceInstanceByName(ctx, b.spaceGUID, instanceName)
 	if err != nil {
-		return "", fmt.Errorf("check instance (plan=%s): %w", plan, err)
+		return "", fmt.Errorf("check instance (name=%s): %w", instanceName, err)
 	}
 	if existing != nil {
 		return existing.GUID, nil
@@ -428,13 +440,13 @@ func (b *bootstrapApplier) ensureServiceInstance(ctx context.Context, offering, 
 func (b *bootstrapApplier) ensureInstanceAndKey(
 	ctx context.Context,
 	offering, plan string,
+	instanceName, keyName string,
 	missingCode string,
 	instanceGUIDPtr *string,
 	result *InspectionResult,
 ) ([]credentialAction, error) {
 	// Ensure instance exists.
 	if *instanceGUIDPtr == "" {
-		instanceName := fmt.Sprintf("cpidelivery-%s", plan)
 		guid, err := b.ensureServiceInstance(ctx, offering, plan, instanceName)
 		if err != nil {
 			return nil, err
@@ -448,7 +460,6 @@ func (b *bootstrapApplier) ensureInstanceAndKey(
 		return nil, nil // already present; nothing to do
 	}
 
-	keyName := fmt.Sprintf("cpidelivery-%s-key", plan)
 	keyGUID, err := b.cfClient.CreateServiceKey(ctx, instanceGUID, keyName)
 	if err != nil {
 		return nil, fmt.Errorf("create service key (%s): %w", missingCode, err)
@@ -458,18 +469,47 @@ func (b *bootstrapApplier) ensureInstanceAndKey(
 	return []credentialAction{{DestinationName: keyName, ActionType: "created"}}, nil
 }
 
-// ensureDestinations creates the three required subaccount destinations
-// (CloudIntegration, ContentAssemblyService, TransportManagementService) plus
-// the two provider-side per-tenant destinations (CPIDELIVERY_CAS_*, CPIDELIVERY_PIR_*).
+// ensureDestinations manages all destination writes for one bootstrap run.
 //
-// All destination writes go through a temporary Destination Service service key
-// that is created and deleted within this function.
+// ── Subscriber-side (this function) ──────────────────────────────────────────
+// Creates or updates destinations inside the subscriber's own Destination
+// Service instance (result.DestinationServiceInstanceGUID).  A temporary
+// service key is created on that instance, used for the CF Destination Service
+// REST API calls, then deleted via defer.
+//
+// Destinations written into the subscriber's Destination Service:
+//
+//   - CloudIntegration       (PIR api credentials)
+//     URL: <pirRoot>/api/1.0/transportmodule/Transport
+//     Read by CAS to invoke the CPI Transport Module API.
+//
+//   - ContentAssemblyService (CAS standard credentials)
+//     Read by CAS to invoke the content-agent-assembly worker.
+//
+//   - TransportManagementService
+//     Deferred to Phase 3 — URL comes from CentralTmsContext after TMS node
+//     registration.
+//
+// ── Provider-side (NOT created here) ─────────────────────────────────────────
+// Two per-tenant destinations in cpi-delivery's own provider-side environment:
+//
+//   - CPIDELIVERY_CAS_{id}   (CAS application credentials)
+//     Used by TrResolver at transport time to call the subscriber's CAS export API.
+//
+//   - CPIDELIVERY_PIR_{id}   (PIR api credentials)
+//     Used by TrResolver to call the subscriber's PIR runtime.
+//
+// These names are recorded on the tenant struct by buildRequiredDestinations,
+// but the actual Destination Service entries in the provider environment are
+// created in Phase 5 (SaaS migration), not here.
 func (b *bootstrapApplier) ensureDestinations(ctx context.Context, tenant *db.CpiTenant, result *InspectionResult) ([]credentialAction, error) {
 	if result.DestinationServiceInstanceGUID == "" {
 		return nil, fmt.Errorf("destination service instance GUID is empty")
 	}
 
-	// Create a temporary service key on the subscriber's Destination Service instance.
+	// ── Subscriber-side: create a temporary key on the subscriber's Destination
+	// Service instance to authenticate against the Destination Service REST API.
+	// The key is deleted immediately after this function returns.
 	tempKeyName := fmt.Sprintf("cpidelivery-bootstrap-%d", time.Now().Unix())
 	keyGUID, err := b.cfClient.CreateServiceKey(ctx, result.DestinationServiceInstanceGUID, tempKeyName)
 	if err != nil {
@@ -489,12 +529,15 @@ func (b *bootstrapApplier) ensureDestinations(ctx context.Context, tenant *db.Cp
 
 	var actions []credentialAction
 
-	// Build required destinations from service key credentials.
+	// Build the subscriber-side destination payloads from service key credentials.
+	// Provider-side destination names (CPIDELIVERY_*) are also recorded on the
+	// tenant struct inside this call, but no provider-side writes occur here.
 	destinations, err := b.buildRequiredDestinations(ctx, result, tenant)
 	if err != nil {
 		return nil, err
 	}
 
+	// Upsert each subscriber-side destination into the subscriber's Destination Service.
 	for _, dest := range destinations {
 		existing, err := destClient.GetDestination(ctx, dest.Name)
 		if err != nil {
@@ -513,29 +556,36 @@ func (b *bootstrapApplier) ensureDestinations(ctx context.Context, tenant *db.Cp
 	return actions, nil
 }
 
-// buildRequiredDestinations constructs the cf.Destination entries for the
-// subscriber subaccount's Destination Service.  These three destinations are
-// fixed names that CAS reads by convention — they are not configurable.
+// buildRequiredDestinations constructs the cf.Destination payloads for the
+// subscriber's Destination Service.
 //
-// Subscriber-side destinations created here:
+// ── Subscriber-side destinations (returned, written by ensureDestinations) ───
 //
-//   - CloudIntegration       ← PIR api service key
+//   - CloudIntegration       ← PIR api service key credentials
 //     URL: <pirRoot>/api/1.0/transportmodule/Transport
-//     Used by CAS to reach the CPI Transport Module API.
+//     Read by CAS to invoke the CPI Transport Module API.
 //
-//   - ContentAssemblyService ← CAS standard service key
-//     Used by CAS to invoke the assembly worker (content-agent-assembly).
+//   - ContentAssemblyService ← CAS standard service key credentials
+//     Read by CAS to invoke the content-agent-assembly worker.
 //
-//   - TransportManagementService ← deferred to Phase 3
-//     URL comes from CentralTmsContext after TMS node registration.
+//   - TransportManagementService
+//     Deferred to Phase 3 — not included in the returned slice yet.
 //
-// Provider-side destinations (CPIDELIVERY_CAS_{id}, CPIDELIVERY_PIR_{id}) are
-// NOT created here — they are populated in Phase 5 (SaaS migration).  The CAS
-// application service key (content-agent/application) is consumed exclusively
-// by TrResolver at transport time via CPIDELIVERY_CAS_{id}.
+// ── Provider-side destinations (names recorded only, NOT written here) ───────
 //
-// It also records the provider-side destination names on the tenant struct for
-// persistence by the caller.
+// The two provider-side destinations live in cpi-delivery's own environment
+// (provider Destination Service), not in the subscriber's space:
+//
+//   - CPIDELIVERY_CAS_{id}   ← CAS application service key (content-agent/application)
+//     Used by TrResolver at transport time to call the subscriber's CAS export API.
+//     Created in Phase 5 (SaaS migration).
+//
+//   - CPIDELIVERY_PIR_{id}   ← PIR api service key (it-rt/api)
+//     Used by TrResolver to call the subscriber's PIR runtime.
+//     Created in Phase 5 (SaaS migration).
+//
+// This function records these names on the tenant struct for persistence by
+// the caller, but does not write anything to the provider environment.
 func (b *bootstrapApplier) buildRequiredDestinations(ctx context.Context, result *InspectionResult, tenant *db.CpiTenant) ([]cf.Destination, error) {
 	var dests []cf.Destination
 

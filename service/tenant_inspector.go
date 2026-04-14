@@ -36,6 +36,28 @@ const (
 	planDestinationLite = "lite"
 )
 
+// ── cpi-delivery–owned service instance and key names ─────────────────────────
+//
+// All service instances and persistent service keys created by cpi-delivery
+// bootstrap use fixed names so that bootstrap is idempotent and the resources
+// are unambiguously owned by cpi-delivery (not accidentally reusing an unrelated
+// instance of the same plan that may exist in the subscriber's space).
+//
+// Instance naming:  cpidelivery-<service>-<plan>-svc
+// Key naming:       cpidelivery-<service>-<plan>-key  (persistent keys only;
+//                   Destination Service keys are temporary and deleted after use)
+
+const (
+	instanceNameDestinationLite = "cpidelivery-dest-lite-svc"
+	instanceNamePirApi          = "cpidelivery-pir-api-svc"
+	instanceNameCasApplication  = "cpidelivery-cas-app-svc"
+	instanceNameCasStandard     = "cpidelivery-cas-std-svc"
+
+	keyNamePirApi         = "cpidelivery-pir-api-key"
+	keyNameCasApplication = "cpidelivery-cas-app-key"
+	keyNameCasStandard    = "cpidelivery-cas-std-key"
+)
+
 // ── Missing-item / label codes ────────────────────────────────────────────────
 //
 // These codes are used as prefixes for WaitingUserAction / MissingItems entries
@@ -102,6 +124,12 @@ type InspectionResult struct {
 	// WaitingUserAction lists items that require a human to act before bootstrap
 	// can continue.  A PIR_API_ENTITLEMENT_MISSING entry implies Integration Suite
 	// is not yet subscribed in this subaccount.
+	//
+	// Space-related codes set by checkSpaceContext:
+	//   CF_SPACE_NOT_FOUND      — the CfSpace GUID does not resolve to any space;
+	//                             operator must correct the GUID in the tenant record.
+	//   CF_TOKEN_UNAUTHORIZED   — the cfToken is expired or invalid;
+	//                             operator must re-authenticate and retry.
 	WaitingUserAction []string
 }
 
@@ -176,7 +204,7 @@ func (i *TenantInspector) InspectTenant(ctx context.Context, tenant *db.CpiTenan
 	// used as the "jumpboard" in CHECK_DESTINATIONS to manage subaccount
 	// destinations via the Destination Service REST API.
 	if err := i.checkServiceInstance(ctx, result.OrgGUID, tenant.CfSpace, offeringDestination, planDestinationLite,
-		missingCodeDestinationService, &result.DestinationServiceInstanceGUID, result); err != nil {
+		instanceNameDestinationLite, missingCodeDestinationService, &result.DestinationServiceInstanceGUID, result); err != nil {
 		return result, fmt.Errorf("inspector: %s: %w", StepCheckDestinationService, err)
 	}
 
@@ -185,19 +213,19 @@ func (i *TenantInspector) InspectTenant(ctx context.Context, tenant *db.CpiTenan
 	// Entitlement layer: PIR plan visibility in the CF org marketplace.
 	// PIR_API_ENTITLEMENT_MISSING implies Integration Suite is not subscribed.
 	if err := i.checkServiceInstance(ctx, result.OrgGUID, tenant.CfSpace, offeringPIR, planPirApi,
-		missingCodePirApi, &result.PirApiInstanceGUID, result); err != nil {
+		instanceNamePirApi, missingCodePirApi, &result.PirApiInstanceGUID, result); err != nil {
 		return result, fmt.Errorf("inspector: %s: %w", StepCheckPirApi, err)
 	}
 
 	// ── CHECK_CAS_APPLICATION ────────────────────────────────────────────────
 	if err := i.checkServiceInstance(ctx, result.OrgGUID, tenant.CfSpace, offeringCAS, planCasApplication,
-		missingCodeCasApplication, &result.CasApplicationInstanceGUID, result); err != nil {
+		instanceNameCasApplication, missingCodeCasApplication, &result.CasApplicationInstanceGUID, result); err != nil {
 		return result, fmt.Errorf("inspector: %s: %w", StepCheckCasApplication, err)
 	}
 
 	// ── CHECK_CAS_STANDARD ───────────────────────────────────────────────────
 	if err := i.checkServiceInstance(ctx, result.OrgGUID, tenant.CfSpace, offeringCAS, planCasStandard,
-		missingCodeCasStandard, &result.CasStandardInstanceGUID, result); err != nil {
+		instanceNameCasStandard, missingCodeCasStandard, &result.CasStandardInstanceGUID, result); err != nil {
 		return result, fmt.Errorf("inspector: %s: %w", StepCheckCasStandard, err)
 	}
 
@@ -237,8 +265,22 @@ func (i *TenantInspector) checkSpaceContext(ctx context.Context, tenant *db.CpiT
 	// Confirm the space is accessible and resolve the parent org GUID.
 	space, err := i.cfClient.GetSpace(ctx, tenant.CfSpace)
 	if err != nil {
-		// Space lookup failed — treat as not accessible; skip remaining checks.
-		return nil //nolint:nilerr
+		switch cf.HTTPStatusCode(err) {
+		case 404:
+			// Space GUID does not exist: operator must correct the value in the
+			// tenant record and re-run the wizard.
+			result.WaitingUserAction = append(result.WaitingUserAction, "CF_SPACE_NOT_FOUND")
+			return nil
+		case 401, 403:
+			// Token is expired or lacks permission: operator must re-authenticate
+			// and provide a fresh cfToken.
+			result.WaitingUserAction = append(result.WaitingUserAction, "CF_TOKEN_UNAUTHORIZED")
+			return nil
+		default:
+			// Network error, 5xx, or other unexpected failure: not an operator
+			// configuration issue — propagate so the job ends as REMOTE_SYSTEM_ERROR.
+			return fmt.Errorf("get space %s: %w", tenant.CfSpace, err)
+		}
 	}
 	result.SpaceAccessible = true
 
@@ -249,7 +291,15 @@ func (i *TenantInspector) checkSpaceContext(ctx context.Context, tenant *db.CpiT
 	// Verify operator permission.
 	hasDev, err := i.cfClient.HasSpaceDeveloperRole(ctx, tenant.CfSpace, i.userID)
 	if err != nil {
-		return fmt.Errorf("roles check: %w", err)
+		switch cf.HTTPStatusCode(err) {
+		case 401, 403:
+			// Token expired between GetSpace and role check; treat the same as a
+			// token failure on GetSpace.
+			result.WaitingUserAction = append(result.WaitingUserAction, "CF_TOKEN_UNAUTHORIZED")
+			return nil
+		default:
+			return fmt.Errorf("roles check: %w", err)
+		}
 	}
 	result.HasSpaceDeveloperRole = hasDev
 	return nil
@@ -257,6 +307,11 @@ func (i *TenantInspector) checkSpaceContext(ctx context.Context, tenant *db.CpiT
 
 // checkServiceInstance performs the two-layer check (entitlement → instance)
 // for a single service instance type and updates result accordingly.
+//
+// instanceName is the fixed name under which cpi-delivery creates and looks up
+// its dedicated instance (e.g. "cpidelivery-pir-api-svc").  Lookup is by name,
+// not by plan, so that an unrelated instance of the same plan in the space is
+// never accidentally reused.
 //
 // missingCode is the prefix used in error codes (e.g. "PIR_API", "CAS_APPLICATION").
 // Entitlement failures append "<missingCode>_ENTITLEMENT_MISSING" to WaitingUserAction.
@@ -267,6 +322,7 @@ func (i *TenantInspector) checkServiceInstance(
 	ctx context.Context,
 	orgGUID, spaceGUID string,
 	offering, plan string,
+	instanceName string,
 	missingCode string,
 	instanceGUIDOut *string,
 	result *InspectionResult,
@@ -284,10 +340,12 @@ func (i *TenantInspector) checkServiceInstance(
 		}
 	}
 
-	// Layer 2 — instance existence.
-	instance, err := i.cfClient.GetServiceInstance(ctx, spaceGUID, plan)
+	// Layer 2 — instance existence: look up by the cpi-delivery–owned name only.
+	// Using GetServiceInstanceByName instead of GetServiceInstance(plan) ensures
+	// we never accidentally reuse an unrelated instance of the same plan.
+	instance, err := i.cfClient.GetServiceInstanceByName(ctx, spaceGUID, instanceName)
 	if err != nil {
-		return fmt.Errorf("instance check (plan=%s): %w", plan, err)
+		return fmt.Errorf("instance check (name=%s): %w", instanceName, err)
 	}
 	if instance == nil {
 		result.MissingItems = append(result.MissingItems, missingCode+"_INSTANCE_MISSING")

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"strings"
 
 	"mmt-delivery/pkg/env"
 
@@ -13,6 +14,16 @@ import (
 )
 
 var db *gorm.DB
+
+// withSimpleProtocol appends the pgx simple query protocol parameter to a
+// PostgreSQL URI, preventing prepared-statement caching errors (SQLSTATE 0A000)
+// that occur after schema migrations invalidate cached plans.
+func withSimpleProtocol(uri string) string {
+	if strings.Contains(uri, "?") {
+		return uri + "&default_query_exec_mode=simple_protocol"
+	}
+	return uri + "?default_query_exec_mode=simple_protocol"
+}
 
 // Conn returns the global database connection.
 // Must be called after Connect().
@@ -36,7 +47,7 @@ func Connect() (*gorm.DB, error) {
 		dbUri = env.PostgreUri()
 	}
 
-	conn, err = sql.Open("pgx", dbUri)
+	conn, err = sql.Open("pgx", withSimpleProtocol(dbUri))
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
