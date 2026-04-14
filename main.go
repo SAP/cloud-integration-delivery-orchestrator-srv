@@ -87,7 +87,11 @@ func main() {
 		eventBus,
 	)
 
-	// svc.StartBackgroundSync(ctx, 15*time.Second)
+	// Background sync and SSE are coupled: auto-sync only makes sense when
+	// real-time push is available; otherwise users trigger sync manually.
+	if enableSSE {
+		svc.StartBackgroundSync(ctx, 15*time.Second)
+	}
 
 	// --- Setup Gin router ---
 	router := gin.New()
