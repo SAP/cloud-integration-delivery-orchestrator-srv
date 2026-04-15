@@ -6,8 +6,8 @@ import (
 
 	"mmt-delivery/consts"
 	"mmt-delivery/db"
+	"mmt-delivery/pkg/cf"
 	"mmt-delivery/pkg/cpi"
-	"mmt-delivery/pkg/env"
 	"mmt-delivery/pkg/notify"
 	"mmt-delivery/pkg/tms"
 
@@ -65,7 +65,7 @@ type Service struct {
 	GetUserEmail func(ctx context.Context, userID string) (string, error)
 	Notifier     Notifier
 	EventBus     *EventBus
-	ProviderDest *env.DestinationResolver // provider-side Destination Service; used by bootstrap to write per-tenant CPIDELIVERY_* destinations
+	ProviderDest *cf.DestinationServiceClient // provider-side Destination Service; used by bootstrap to write per-tenant CPIDELIVERY_* destinations
 
 	// drSyncLocks prevents concurrent SyncDeliveryStatus calls for the same DR.
 	// Without this guard, two simultaneous sync requests can both read "no op exists"
@@ -77,11 +77,11 @@ type Service struct {
 // --- Default Notifier implementation (wraps pkg/notify package functions) ---
 
 type defaultNotifier struct {
-	resolver *env.DestinationResolver
+	resolver *cf.DestinationServiceClient
 	database *gorm.DB
 }
 
-func NewDefaultNotifier(resolver *env.DestinationResolver, database *gorm.DB) Notifier {
+func NewDefaultNotifier(resolver *cf.DestinationServiceClient, database *gorm.DB) Notifier {
 	return &defaultNotifier{resolver: resolver, database: database}
 }
 

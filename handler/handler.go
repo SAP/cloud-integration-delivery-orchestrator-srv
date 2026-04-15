@@ -1,8 +1,8 @@
 package handler
 
 import (
+	"mmt-delivery/pkg/cf"
 	"mmt-delivery/pkg/cpi"
-	"mmt-delivery/pkg/env"
 	"mmt-delivery/pkg/tms"
 	"mmt-delivery/pkg/xsuaa"
 	"mmt-delivery/service"
@@ -21,7 +21,7 @@ type Handler struct {
 	tms      *tms.TmsClient
 	cpi      *cpi.Manager
 	xsuaa    *xsuaa.UaaClient
-	resolver *env.DestinationResolver
+	destSvc  *cf.DestinationServiceClient
 	eventBus *service.EventBus
 }
 
@@ -59,7 +59,7 @@ func NewHandler(
 	tmsClient *tms.TmsClient,
 	cpiManager *cpi.Manager,
 	xsuaaClient *xsuaa.UaaClient,
-	resolver *env.DestinationResolver,
+	destSvc *cf.DestinationServiceClient,
 	eventBus *service.EventBus,
 ) *Handler {
 	return &Handler{
@@ -69,7 +69,7 @@ func NewHandler(
 		tms:      tmsClient,
 		cpi:      cpiManager,
 		xsuaa:    xsuaaClient,
-		resolver: resolver,
+		destSvc:  destSvc,
 		eventBus: eventBus,
 	}
 }

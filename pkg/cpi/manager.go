@@ -3,7 +3,7 @@ package cpi
 import (
 	"context"
 	"fmt"
-	"mmt-delivery/pkg/env"
+	"mmt-delivery/pkg/cf"
 	"sync"
 )
 
@@ -13,10 +13,10 @@ import (
 type Manager struct {
 	mu       sync.RWMutex
 	clients  map[string]*CpiClient
-	resolver *env.DestinationResolver
+	resolver *cf.DestinationServiceClient
 }
 
-func NewManager(resolver *env.DestinationResolver) *Manager {
+func NewManager(resolver *cf.DestinationServiceClient) *Manager {
 	return &Manager{clients: make(map[string]*CpiClient), resolver: resolver}
 }
 

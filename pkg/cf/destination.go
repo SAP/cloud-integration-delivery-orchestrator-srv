@@ -7,30 +7,56 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
+	"sync"
 	"time"
+
+	"github.com/cloudfoundry-community/go-cfenv"
 )
 
-// DestinationServiceClient calls the BTP Destination Service REST API on behalf
-// of a subscriber subaccount.
+const defaultDestTTL = 5 * time.Minute
+
+// DestinationServiceClient is the single entry point for all BTP Destination
+// Service operations — reads and writes, provider-side and subscriber-side.
 //
-// Bootstrap path for destination management:
-//  1. Obtain CF token (operator provides at apply/retry time).
-//  2. Find the subscriber subaccount's Destination Service instance via CF API.
-//  3. Create a temporary service key for that instance to get client credentials.
-//  4. Use those credentials (client_credentials OAuth) to call the Destination
-//     Service API — list, create, update destinations.
-//  5. After bootstrap, delete the temporary service key.
+// Provider-side (long-lived singleton, TTL cache enabled):
 //
-// This client is constructed with the credentials from step 4 and is scoped to
-// one bootstrap job.  It is never persisted.
+//	NewDestinationServiceClientFromVCAP reads credentials from VCAP_SERVICES
+//	(the "destination" service binding).  Used by runtime callers (TrResolver,
+//	notify, handler) to look up CPIDELIVERY_PIR_{id}, CPIDELIVERY_CAS_{id},
+//	SMTP, JIRA, and github destinations.
+//
+// Subscriber-side (ephemeral, no cache):
+//
+//	NewDestinationServiceClient accepts a raw credentials map obtained from a
+//	temporary CF service key.  Used during tenant bootstrap to read/write
+//	CloudIntegration / ContentAssemblyService destinations in the subscriber's
+//	own Destination Service instance.  The client is discarded after the job.
+//
+// Destination Service endpoints used:
+//
+//	GET  /destination-configuration/v1/subaccountDestinations       (list)
+//	GET  /destination-configuration/v1/subaccountDestinations/{name} (get)
+//	POST /destination-configuration/v1/subaccountDestinations       (create)
+//	PUT  /destination-configuration/v1/subaccountDestinations       (update)
 type DestinationServiceClient struct {
-	httpClient *http.Client
-	apiURL     string      // e.g. "https://destination.cfapps.eu10.hana.ondemand.com"
-	token      string      // Bearer token obtained via client_credentials flow
-	tokenExp   time.Time
-	clientID   string
+	httpClient   *http.Client
+	apiURL       string // e.g. "https://destination.cfapps.eu10.hana.ondemand.com"
+	token        string // Bearer token obtained via client_credentials flow
+	tokenExp     time.Time
+	clientID     string
 	clientSecret string
-	authURL    string      // OAuth token endpoint
+	authURL      string // OAuth token endpoint
+
+	// TTL cache — optional.  Zero ttl disables caching.
+	ttl   time.Duration
+	mu    sync.RWMutex
+	cache map[string]*cachedDest
+}
+
+type cachedDest struct {
+	dest      Destination
+	fetchedAt time.Time
 }
 
 // Destination is a BTP destination configuration entry.
@@ -61,8 +87,9 @@ type Destination struct {
 //
 // The credentials map is the raw JSON from
 // GET /v3/service_credential_bindings/{guid}/details → .credentials
+//
+// Used for subscriber-side bootstrap operations (ephemeral, no TTL cache).
 func NewDestinationServiceClient(ctx context.Context, credentials map[string]any) (*DestinationServiceClient, error) {
-	// Extract standard fields from Destination Service service key credentials.
 	clientID, _ := credentials["clientid"].(string)
 	clientSecret, _ := credentials["clientsecret"].(string)
 	tokenURL, _ := credentials["url"].(string)
@@ -71,11 +98,7 @@ func NewDestinationServiceClient(ctx context.Context, credentials map[string]any
 	if clientID == "" || clientSecret == "" || tokenURL == "" || apiURL == "" {
 		return nil, fmt.Errorf("cf/dest: incomplete Destination Service credentials (missing clientid/clientsecret/url/uri)")
 	}
-	// Normalise token URL.
-	if len(tokenURL) > 0 && tokenURL[len(tokenURL)-1] != '/' {
-		tokenURL += "/"
-	}
-	tokenURL += "oauth/token"
+	tokenURL = normaliseTokenURL(tokenURL)
 
 	c := &DestinationServiceClient{
 		httpClient:   &http.Client{Timeout: 30 * time.Second},
@@ -83,11 +106,63 @@ func NewDestinationServiceClient(ctx context.Context, credentials map[string]any
 		clientID:     clientID,
 		clientSecret: clientSecret,
 		authURL:      tokenURL,
+		// ttl == 0: no cache for ephemeral subscriber clients
 	}
 	if err := c.refreshToken(ctx); err != nil {
 		return nil, err
 	}
 	return c, nil
+}
+
+// NewDestinationServiceClientFromVCAP constructs a DestinationServiceClient from
+// the "destination" service binding in VCAP_SERVICES.
+//
+// Used to create the long-lived provider-side client in main().  TTL cache is
+// enabled (defaultDestTTL = 5 min) to reduce Destination Service round-trips
+// during normal runtime operation.
+func NewDestinationServiceClientFromVCAP(appEnv *cfenv.App) (*DestinationServiceClient, error) {
+	if appEnv == nil {
+		return nil, fmt.Errorf("cf/dest: appEnv is nil — env.Init() must be called first")
+	}
+	services, err := appEnv.Services.WithLabel("destination")
+	if err != nil || len(services) == 0 {
+		return nil, fmt.Errorf("cf/dest: no service with label 'destination' found in VCAP_SERVICES")
+	}
+	svc := services[0]
+	authURL, _ := svc.CredentialString("url")
+	apiURL, _ := svc.CredentialString("uri")
+	clientID, _ := svc.CredentialString("clientid")
+	clientSecret, _ := svc.CredentialString("clientsecret")
+
+	if clientID == "" || clientSecret == "" || authURL == "" || apiURL == "" {
+		return nil, fmt.Errorf("cf/dest: incomplete 'destination' service credentials in VCAP_SERVICES")
+	}
+	authURL = normaliseTokenURL(authURL)
+
+	c := &DestinationServiceClient{
+		httpClient:   &http.Client{Timeout: 30 * time.Second},
+		apiURL:       apiURL,
+		clientID:     clientID,
+		clientSecret: clientSecret,
+		authURL:      authURL,
+		ttl:          defaultDestTTL,
+		cache:        make(map[string]*cachedDest),
+	}
+	if err := c.refreshToken(context.Background()); err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+// normaliseTokenURL ensures the token URL ends with /oauth/token.
+func normaliseTokenURL(u string) string {
+	if strings.HasSuffix(u, "/oauth/token") {
+		return u
+	}
+	if !strings.HasSuffix(u, "/") {
+		u += "/"
+	}
+	return u + "oauth/token"
 }
 
 func (c *DestinationServiceClient) refreshToken(ctx context.Context) error {
@@ -169,8 +244,7 @@ func (c *DestinationServiceClient) doJSON(ctx context.Context, method, path stri
 	return buf.Bytes(), resp.StatusCode, nil
 }
 
-// ListDestinations returns all subaccount-level destinations in the subscriber
-// subaccount's Destination Service instance.
+// ListDestinations returns all subaccount-level destinations.
 //
 // API: GET /destination-configuration/v1/subaccountDestinations
 func (c *DestinationServiceClient) ListDestinations(ctx context.Context) ([]Destination, error) {
@@ -190,9 +264,22 @@ func (c *DestinationServiceClient) ListDestinations(ctx context.Context) ([]Dest
 }
 
 // GetDestination returns a single destination by name, or nil if not found.
+// Results are TTL-cached when the client was created with a non-zero ttl
+// (i.e. NewDestinationServiceClientFromVCAP).
 //
 // API: GET /destination-configuration/v1/subaccountDestinations/{name}
 func (c *DestinationServiceClient) GetDestination(ctx context.Context, name string) (*Destination, error) {
+	// Fast path: read cache
+	if c.ttl > 0 {
+		c.mu.RLock()
+		if entry, ok := c.cache[name]; ok && time.Since(entry.fetchedAt) < c.ttl {
+			dest := entry.dest
+			c.mu.RUnlock()
+			return &dest, nil
+		}
+		c.mu.RUnlock()
+	}
+
 	data, status, err := c.doJSON(ctx, http.MethodGet,
 		"/destination-configuration/v1/subaccountDestinations/"+name, nil)
 	if err != nil {
@@ -208,12 +295,41 @@ func (c *DestinationServiceClient) GetDestination(ctx context.Context, name stri
 	if err := json.Unmarshal(data, &dest); err != nil {
 		return nil, fmt.Errorf("cf/dest: decode destination %q: %w", name, err)
 	}
+
+	// Populate cache
+	if c.ttl > 0 {
+		c.mu.Lock()
+		c.cache[name] = &cachedDest{dest: dest, fetchedAt: time.Now()}
+		c.mu.Unlock()
+	}
+
 	return &dest, nil
+}
+
+// Invalidate removes a specific destination from the cache.
+func (c *DestinationServiceClient) Invalidate(name string) {
+	if c.ttl == 0 {
+		return
+	}
+	c.mu.Lock()
+	delete(c.cache, name)
+	c.mu.Unlock()
+}
+
+// InvalidateAll clears the entire destination cache.
+func (c *DestinationServiceClient) InvalidateAll() {
+	if c.ttl == 0 {
+		return
+	}
+	c.mu.Lock()
+	c.cache = make(map[string]*cachedDest)
+	c.mu.Unlock()
 }
 
 // UpsertDestination creates a new destination or fully replaces an existing one.
 // It first checks whether the destination already exists; if so it uses PUT
 // (update), otherwise POST (create).
+// Invalidates the cache entry for dest.Name on success.
 //
 // API: POST /destination-configuration/v1/subaccountDestinations  (create)
 //
@@ -237,5 +353,6 @@ func (c *DestinationServiceClient) UpsertDestination(ctx context.Context, dest D
 	if status < 200 || status >= 300 {
 		return fmt.Errorf("cf/dest: upsert destination %q returned HTTP %d: %s", dest.Name, status, string(data))
 	}
+	c.Invalidate(dest.Name)
 	return nil
 }

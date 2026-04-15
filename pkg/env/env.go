@@ -36,6 +36,12 @@ func Init() error {
 	return nil
 }
 
+// AppEnv returns the parsed CF application environment.
+// Returns nil if Init() has not been called yet.
+func AppEnv() *cfenv.App {
+	return appEnv
+}
+
 func TmsCredential() Credentials {
 	services, err := appEnv.Services.WithLabel("transport")
 	if err != nil || len(services) == 0 {

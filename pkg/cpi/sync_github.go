@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"mmt-delivery/consts"
+	"mmt-delivery/pkg/cf"
 	"mmt-delivery/pkg/env"
 	"net/http"
 	"os"
@@ -29,8 +30,8 @@ var githubClient *github.Client
 var gitRepo *git.Repository
 
 // gitAuth returns git credentials by resolving the destination from the resolver.
-func gitAuth(resolver *env.DestinationResolver, destName string) (*auth.BasicAuth, error) {
-	dest, err := resolver.Get(context.Background(), destName)
+func gitAuth(resolver *cf.DestinationServiceClient, destName string) (*auth.BasicAuth, error) {
+	dest, err := resolver.GetDestination(context.Background(), destName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve git destination '%s': %w", destName, err)
 	}
@@ -50,7 +51,7 @@ func init_disable() {
 	panic("init_disable is not supported — github sync requires DestinationResolver")
 }
 
-func (c *CpiClient) SyncToGithub(resolver *env.DestinationResolver, destName string, artifactId, artifactVersion, artifactType, packageID, branch, modifiedBy, modifiedAt, comment string) error {
+func (c *CpiClient) SyncToGithub(resolver *cf.DestinationServiceClient, destName string, artifactId, artifactVersion, artifactType, packageID, branch, modifiedBy, modifiedAt, comment string) error {
 
 	// Unzip the artifact content, put it to git repo
 	if err := unzipSource(artifactId, artifactVersion, packageID); err != nil {
@@ -306,7 +307,7 @@ func unzipSource(artifactId, artifactVersion, packageId string) error {
 }
 
 // path: relative path of artifact from package directory
-func CommitAndPushChanges(resolver *env.DestinationResolver, destName string, path string, tag string, branch, modifiedBy, modifiedAt, commitMessage string) error {
+func CommitAndPushChanges(resolver *cf.DestinationServiceClient, destName string, path string, tag string, branch, modifiedBy, modifiedAt, commitMessage string) error {
 	worktree, err := gitRepo.Worktree()
 	if err != nil {
 		return fmt.Errorf("failed to get worktree: %w", err)

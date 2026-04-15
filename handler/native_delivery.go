@@ -71,7 +71,7 @@ func (h *Handler) NativeDeliver(ctx *gin.Context) {
 		if err != nil {
 			h.logger.Warnf("failed to read github integration config, skipping sync: %s", err)
 		} else if githubConfig.Enabled {
-			if err := srcClient.SyncToGithub(h.resolver, githubConfig.DestinationName, artifact.ArtifactID, artifact.ArtifactVersion, artifact.ArtifactType, packageID, srcBranch, modifiedBy, modifiedAt, deliverRequest.DeliverComment); err != nil {
+			if err := srcClient.SyncToGithub(h.destSvc, githubConfig.DestinationName, artifact.ArtifactID, artifact.ArtifactVersion, artifact.ArtifactType, packageID, srcBranch, modifiedBy, modifiedAt, deliverRequest.DeliverComment); err != nil {
 				Fail(ctx, 500, "Failed to sync Artifact to github:"+err.Error())
 				return
 			}

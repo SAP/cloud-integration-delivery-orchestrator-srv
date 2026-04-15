@@ -9,6 +9,7 @@ import (
 
 	"mmt-delivery/db"
 	"mmt-delivery/handler"
+	"mmt-delivery/pkg/cf"
 	"mmt-delivery/pkg/cpi"
 	"mmt-delivery/pkg/env"
 	"mmt-delivery/pkg/tms"
@@ -38,10 +39,10 @@ func main() {
 
 	ctx := context.Background()
 
-	// --- Create DestinationResolver (replaces static destinationMap) ---
-	resolver, err := env.NewDestinationResolver()
+	// --- Create Destination Service client (provider-side, TTL cache enabled) ---
+	resolver, err := cf.NewDestinationServiceClientFromVCAP(env.AppEnv())
 	if err != nil {
-		panic("failed to create destination resolver: " + err.Error())
+		panic("failed to create destination service client: " + err.Error())
 	}
 
 	// --- Create long-lived clients ---

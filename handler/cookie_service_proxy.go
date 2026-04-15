@@ -21,7 +21,7 @@ func (h *Handler) ProxyCookieService(ctx *gin.Context) {
 		return
 	}
 
-	dest, err := h.resolver.Get(ctx, config.DestinationName)
+	dest, err := h.destSvc.GetDestination(ctx, config.DestinationName)
 	if err != nil {
 		h.logger.Errorf("failed to resolve cookie-service destination '%s': %s", config.DestinationName, err)
 		Fail(ctx, 502, fmt.Sprintf("failed to resolve cookie-service destination: %s", err))

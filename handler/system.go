@@ -45,7 +45,7 @@ func (h *Handler) UpdateIntegration(ctx *gin.Context) {
 	}
 
 	// Invalidate resolver cache for this destination so next access fetches fresh data
-	h.resolver.Invalidate(req.DestinationName)
+	h.destSvc.Invalidate(req.DestinationName)
 
 	OK(ctx, config)
 }
@@ -93,7 +93,7 @@ func (h *Handler) CheckConnectivity(ctx *gin.Context) {
 	h.db.Find(&tenants)
 	for _, t := range tenants {
 		destName := t.CpiEndpoint.Name
-		dest, err := h.resolver.Get(checkCtx, destName)
+		dest, err := h.destSvc.GetDestination(checkCtx, destName)
 		if err != nil {
 			results = append(results, ConnectivityStatus{
 				Name: t.Name, Type: "cpi_tenant", Status: "error",
@@ -124,7 +124,7 @@ func (h *Handler) CheckConnectivity(ctx *gin.Context) {
 			})
 			continue
 		}
-		_, err := h.resolver.Get(checkCtx, cfg.DestinationName)
+		_, err := h.destSvc.GetDestination(checkCtx, cfg.DestinationName)
 		if err != nil {
 			results = append(results, ConnectivityStatus{
 				Name: cfg.Type, Type: "integration", Status: "error",

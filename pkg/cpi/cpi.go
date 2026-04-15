@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"mmt-delivery/consts"
+	"mmt-delivery/pkg/cf"
 	"mmt-delivery/pkg/env"
 
 	"go.uber.org/zap"
@@ -47,8 +48,8 @@ type CpiClient struct {
 	*env.HttpClient
 }
 
-func NewClient(ctx context.Context, tenant string, resolver *env.DestinationResolver) (*CpiClient, error) {
-	cpiDest, err := resolver.Get(ctx, tenant)
+func NewClient(ctx context.Context, tenant string, resolver *cf.DestinationServiceClient) (*CpiClient, error) {
+	cpiDest, err := resolver.GetDestination(ctx, tenant)
 	if err != nil {
 		return nil, fmt.Errorf("cpi tenant %s not found in destinations: %w", tenant, err)
 	}

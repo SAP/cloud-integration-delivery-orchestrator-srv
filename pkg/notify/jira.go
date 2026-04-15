@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mmt-delivery/pkg/cf"
 	"mmt-delivery/pkg/env"
 	"net/http"
 )
@@ -83,8 +84,8 @@ type AddCommentRequest struct {
 }
 
 // NewJiraClient creates a new JIRA client by resolving the given destination name.
-func NewJiraClient(resolver *env.DestinationResolver, destName string) (*JiraClient, error) {
-	dest, err := resolver.Get(context.Background(), destName)
+func NewJiraClient(resolver *cf.DestinationServiceClient, destName string) (*JiraClient, error) {
+	dest, err := resolver.GetDestination(context.Background(), destName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get JIRA destination '%s': %s", destName, err)
 	}
@@ -282,7 +283,7 @@ func (c *JiraClient) GetSubtasks(issueKey string) ([]JiraSubtask, error) {
 }
 
 // AddDeliveryComment adds a delivery-related comment to a JIRA issue
-func AddDeliveryComment(resolver *env.DestinationResolver, destName string, issueKey string, deliveryRequestID uint, message string, status string) error {
+func AddDeliveryComment(resolver *cf.DestinationServiceClient, destName string, issueKey string, deliveryRequestID uint, message string, status string) error {
 	client, err := NewJiraClient(resolver, destName)
 	if err != nil {
 		env.Logger().Error("Failed to create JIRA client: %s", err)

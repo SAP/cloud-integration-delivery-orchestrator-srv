@@ -73,7 +73,7 @@ type DestinationResp struct {
 }
 
 func (h *Handler) GetDestinationsHandler(ctx *gin.Context) {
-	dests, err := h.resolver.List(ctx)
+	dests, err := h.destSvc.ListDestinations(ctx)
 	if err != nil {
 		h.logger.Errorf("error fetching destinations: %s", err)
 		Fail(ctx, 500, err.Error())
