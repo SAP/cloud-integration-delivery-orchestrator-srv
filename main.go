@@ -73,6 +73,7 @@ func main() {
 		GetUserEmail: xsuaa.GetUserEmail,
 		Notifier:     service.NewDefaultNotifier(resolver, database),
 		EventBus:     eventBus,
+		ProviderDest: resolver,
 	}
 
 	// --- Build handler with all injected dependencies ---

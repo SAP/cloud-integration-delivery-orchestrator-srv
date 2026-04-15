@@ -8,15 +8,31 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"mmt-delivery/pkg/cf"
 )
 
 const defaultDestTTL = 5 * time.Minute
 
-// DestinationResolver provides on-demand, cached access to BTP Destination Service.
-// It replaces the static destinationMap that was loaded once at startup.
+// DestinationResolver provides on-demand, cached access to the provider-side
+// BTP Destination Service (bound via VCAP_SERVICES).
+//
+// Read path  — Get / List: calls the resolution endpoint
+//   (/destination-configuration/v1/destinations/{name}) which returns merged
+//   instance+subaccount configuration including injected token information.
+//   Results are cached with a TTL so repeated lookups within one request
+//   do not fan out to the Destination Service.
+//
+// Write path — Upsert: delegates to cf.DestinationServiceClient.UpsertDestination
+//   (the management endpoint, POST/PUT /subaccountDestinations).  The same HTTP
+//   implementation is reused; no duplicate code here.
+//
+// Both paths use cf.Destination as the canonical type, which maps the flat
+// JSON wire format of the Destination Service API directly.
 type DestinationResolver struct {
-	client *HttpClient // OAuth2 client for Destination Service API
-	apiURL string      // Destination Service base URL
+	readClient  *HttpClient            // OAuth2 client for the resolution (read) endpoint
+	writeClient *cf.DestinationServiceClient // management client for POST/PUT operations
+	apiURL      string                 // Destination Service base URL
 
 	ttl time.Duration
 
@@ -28,12 +44,12 @@ type DestinationResolver struct {
 }
 
 type cachedDest struct {
-	dest      Destination
+	dest      cf.Destination
 	fetchedAt time.Time
 }
 
 type cachedList struct {
-	dests     []Destination
+	dests     []cf.Destination
 	fetchedAt time.Time
 }
 
@@ -47,30 +63,50 @@ func NewDestinationResolver() (*DestinationResolver, error) {
 	if err != nil || len(services) == 0 {
 		return nil, fmt.Errorf("failed to get service with label 'destination'")
 	}
-	service := services[0]
-	authUrl, _ := service.CredentialString("url")
-	if !strings.HasSuffix(authUrl, "/oauth/token") {
-		authUrl = fmt.Sprintf("%s/oauth/token", authUrl)
+	svc := services[0]
+	authURL, _ := svc.CredentialString("url")
+	if !strings.HasSuffix(authURL, "/oauth/token") {
+		authURL = fmt.Sprintf("%s/oauth/token", authURL)
 	}
-	apiUrl, _ := service.CredentialString("uri")
-	clientId, _ := service.CredentialString("clientid")
-	clientSecret, _ := service.CredentialString("clientsecret")
+	apiURL, _ := svc.CredentialString("uri")
+	clientID, _ := svc.CredentialString("clientid")
+	clientSecret, _ := svc.CredentialString("clientsecret")
 
-	client, err := NewClient(context.Background(), clientId, clientSecret, authUrl, apiUrl)
+	// Read client: uses the internal HttpClient (supports 401 token refresh via
+	// the existing pkg/env OAuth2 flow).
+	readClient, err := NewClient(context.Background(), clientID, clientSecret, authURL, apiURL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create destination service client: %w", err)
+		return nil, fmt.Errorf("failed to create destination read client: %w", err)
+	}
+
+	// Write client: reuses cf.DestinationServiceClient so POST/PUT logic
+	// is not duplicated here.  Same credentials, same Destination Service instance.
+	creds := map[string]any{
+		"clientid":     clientID,
+		"clientsecret": clientSecret,
+		"url":          authURL,
+		"uri":          apiURL,
+	}
+	writeClient, err := cf.NewDestinationServiceClient(context.Background(), creds)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create destination write client: %w", err)
 	}
 
 	return &DestinationResolver{
-		client: client,
-		apiURL: apiUrl,
-		ttl:    defaultDestTTL,
-		cache:  make(map[string]*cachedDest),
+		readClient:  readClient,
+		writeClient: writeClient,
+		apiURL:      apiURL,
+		ttl:         defaultDestTTL,
+		cache:       make(map[string]*cachedDest),
 	}, nil
 }
 
 // Get resolves a single destination by name with TTL caching.
-func (r *DestinationResolver) Get(ctx context.Context, name string) (*Destination, error) {
+//
+// Uses the resolution endpoint (/v1/destinations/{name}) which returns merged
+// configuration with injected token information — suitable for runtime callers
+// (TrResolver, notify) that need live credentials.
+func (r *DestinationResolver) Get(ctx context.Context, name string) (*cf.Destination, error) {
 	// Fast path: read lock
 	r.mu.RLock()
 	if entry, ok := r.cache[name]; ok && time.Since(entry.fetchedAt) < r.ttl {
@@ -94,7 +130,7 @@ func (r *DestinationResolver) Get(ctx context.Context, name string) (*Destinatio
 }
 
 // List returns all subaccount destinations with TTL caching.
-func (r *DestinationResolver) List(ctx context.Context) ([]Destination, error) {
+func (r *DestinationResolver) List(ctx context.Context) ([]cf.Destination, error) {
 	// Fast path
 	r.listMu.RLock()
 	if r.listCache != nil && time.Since(r.listCache.fetchedAt) < r.ttl {
@@ -126,6 +162,21 @@ func (r *DestinationResolver) List(ctx context.Context) ([]Destination, error) {
 	return dests, nil
 }
 
+// Upsert writes a destination to the provider-side Destination Service.
+// Uses PUT if the destination already exists (by name), POST if it does not.
+// Invalidates the in-memory cache entry for dest.Name on success.
+//
+// Delegates to cf.DestinationServiceClient.UpsertDestination — no duplicate
+// HTTP implementation here.  Called during tenant bootstrap to create the
+// per-tenant CPIDELIVERY_PIR_{id} and CPIDELIVERY_CAS_{id} destinations.
+func (r *DestinationResolver) Upsert(ctx context.Context, dest cf.Destination) error {
+	if err := r.writeClient.UpsertDestination(ctx, dest); err != nil {
+		return fmt.Errorf("destination resolver: upsert %q: %w", dest.Name, err)
+	}
+	r.Invalidate(dest.Name)
+	return nil
+}
+
 // Invalidate removes a specific destination from the cache, forcing a fresh fetch on next Get.
 func (r *DestinationResolver) Invalidate(name string) {
 	r.mu.Lock()
@@ -144,14 +195,18 @@ func (r *DestinationResolver) InvalidateAll() {
 	r.listMu.Unlock()
 }
 
-// fetchOne fetches a single destination by name from the Destination Service API.
-func (r *DestinationResolver) fetchOne(ctx context.Context, name string) (*Destination, error) {
+// fetchOne fetches a single destination by name from the resolution endpoint.
+//
+// Note: uses /v1/destinations/{name} (not /v1/subaccountDestinations/{name}).
+// The resolution endpoint merges instance- and subaccount-level configuration
+// and injects live token information, which is what runtime callers need.
+func (r *DestinationResolver) fetchOne(ctx context.Context, name string) (*cf.Destination, error) {
 	url := fmt.Sprintf("%s/destination-configuration/v1/destinations/%s", r.apiURL, name)
 	req := &HttpRequest{
 		ApiURL: url,
 		Method: http.MethodGet,
 	}
-	resp, statusCode, err := r.client.Do(ctx, req)
+	resp, statusCode, err := r.readClient.Do(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch destination '%s': %w", name, err)
 	}
@@ -165,20 +220,12 @@ func (r *DestinationResolver) fetchOne(ctx context.Context, name string) (*Desti
 	// The /destinations/{name} endpoint returns {"owner": {...}, "destinationConfiguration": {...}}
 	// Parse the destinationConfiguration field.
 	var wrapper struct {
-		DestinationConfiguration Destination `json:"destinationConfiguration"`
+		DestinationConfiguration cf.Destination `json:"destinationConfiguration"`
 	}
-	if err := json.Unmarshal(*resp, &wrapper); err != nil {
-		// Fallback: try parsing directly as Destination (for subaccountDestinations compat)
-		var dest Destination
+	if err := json.Unmarshal(*resp, &wrapper); err != nil || wrapper.DestinationConfiguration.Name == "" {
+		// Fallback: response may already be a flat Destination object.
+		var dest cf.Destination
 		if err2 := json.Unmarshal(*resp, &dest); err2 != nil {
-			return nil, fmt.Errorf("failed to unmarshal destination '%s': %w", name, err)
-		}
-		return &dest, nil
-	}
-	if wrapper.DestinationConfiguration.Name == "" {
-		// The wrapper didn't match; parse directly
-		var dest Destination
-		if err := json.Unmarshal(*resp, &dest); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal destination '%s': %w", name, err)
 		}
 		return &dest, nil
@@ -186,18 +233,18 @@ func (r *DestinationResolver) fetchOne(ctx context.Context, name string) (*Desti
 	return &wrapper.DestinationConfiguration, nil
 }
 
-// fetchAll fetches all subaccount destinations from the Destination Service API.
-func (r *DestinationResolver) fetchAll(ctx context.Context) ([]Destination, error) {
+// fetchAll fetches all subaccount destinations from the management endpoint.
+func (r *DestinationResolver) fetchAll(ctx context.Context) ([]cf.Destination, error) {
 	url := fmt.Sprintf("%s/destination-configuration/v1/subaccountDestinations", r.apiURL)
 	req := &HttpRequest{
 		ApiURL: url,
 		Method: http.MethodGet,
 	}
-	resp, _, err := r.client.Do(ctx, req)
+	resp, _, err := r.readClient.Do(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch subaccount destinations: %w", err)
 	}
-	var destinations []Destination
+	var destinations []cf.Destination
 	if err := json.Unmarshal(*resp, &destinations); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal destinations: %w", err)
 	}

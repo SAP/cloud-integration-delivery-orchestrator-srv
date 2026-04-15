@@ -101,22 +101,6 @@ type PgCredentials struct {
 	Username string `json:"username"`
 }
 
-type Destination struct {
-	Name                string `json:"Name"`
-	Type                string `json:"Type"`
-	URL                 string `json:"URL"`
-	Authentication      string `json:"Authentication"`
-	ProxyType           string `json:"ProxyType"`
-	TokenServiceURLType string `json:"tokenServiceURLType"`
-	TrustAll            string `json:"TrustAll"`
-	ClientId            string `json:"clientId"`
-	ClientSecret        string `json:"clientSecret"`
-	TokenServiceURL     string `json:"tokenServiceURL"`
-	User                string `json:"user"`
-	Password            string `json:"password"`
-	Port                string `json:"port"` // SMTP port, etc.
-}
-
 func NewLogger() *zap.SugaredLogger {
 	levelConfig := zap.NewAtomicLevel()
 	levelConfig.SetLevel(logLevel)

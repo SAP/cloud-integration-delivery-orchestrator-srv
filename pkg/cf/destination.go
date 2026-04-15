@@ -34,14 +34,26 @@ type DestinationServiceClient struct {
 }
 
 // Destination is a BTP destination configuration entry.
+//
+// Fields map directly to the flat JSON format returned and accepted by the
+// Destination Service REST API (/destination-configuration/v1/subaccountDestinations).
+// OAuth2ClientCredentials fields (ClientId, ClientSecret, TokenServiceURL,
+// TokenServiceURLType) and BasicAuthentication fields (User, Password) are
+// top-level, not nested — this matches the actual API wire format.
 type Destination struct {
-	Name                 string            `json:"Name"`
-	Description          string            `json:"Description,omitempty"`
-	Type                 string            `json:"Type"`
-	URL                  string            `json:"URL,omitempty"`
-	Authentication       string            `json:"Authentication"`
-	ProxyType            string            `json:"ProxyType,omitempty"`
-	AdditionalProperties map[string]string `json:"additionalProperties,omitempty"`
+	Name                string `json:"Name"`
+	Description         string `json:"Description,omitempty"`
+	Type                string `json:"Type"`
+	URL                 string `json:"URL,omitempty"`
+	Authentication      string `json:"Authentication"`
+	ProxyType           string `json:"ProxyType,omitempty"`
+	TokenServiceURL     string `json:"tokenServiceURL,omitempty"`
+	TokenServiceURLType string `json:"tokenServiceURLType,omitempty"`
+	ClientId            string `json:"clientId,omitempty"`
+	ClientSecret        string `json:"clientSecret,omitempty"`
+	User                string `json:"User,omitempty"`
+	Password            string `json:"Password,omitempty"`
+	Port                string `json:"Port,omitempty"`
 }
 
 // NewDestinationServiceClient constructs a DestinationServiceClient from credentials

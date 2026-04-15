@@ -65,6 +65,7 @@ type Service struct {
 	GetUserEmail func(ctx context.Context, userID string) (string, error)
 	Notifier     Notifier
 	EventBus     *EventBus
+	ProviderDest *env.DestinationResolver // provider-side Destination Service; used by bootstrap to write per-tenant CPIDELIVERY_* destinations
 
 	// drSyncLocks prevents concurrent SyncDeliveryStatus calls for the same DR.
 	// Without this guard, two simultaneous sync requests can both read "no op exists"

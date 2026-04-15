@@ -284,7 +284,7 @@ func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string,
 
 	// ── Apply missing items ───────────────────────────────────────────────────
 
-	bootstrapper, err := newBootstrapApplier(tenant, cfToken, result)
+	bootstrapper, err := newBootstrapApplier(tenant, cfToken, result, s.ProviderDest)
 	if err != nil {
 		fail(lifecycle.FailureRemoteSystemError, "", fmt.Sprintf("build applier: %s", err))
 		return
@@ -356,6 +356,18 @@ func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string,
 	}
 	credentialActions = append(credentialActions, destActs...)
 
+	// ENSURE_PROVIDER_DESTINATIONS → write per-tenant CPIDELIVERY_PIR_{id} and
+	// CPIDELIVERY_CAS_{id} into cpi-delivery's own provider-side Destination Service.
+	// These are required for all runtime operations (deploy, TR generation).
+	if s.ProviderDest != nil {
+		provActs, err := bootstrapper.ensureProviderDestinations(ctx, tenant, result)
+		if err != nil {
+			fail(lifecycle.FailureRemoteSystemError, StepCheckDestinations, err.Error())
+			return
+		}
+		credentialActions = append(credentialActions, provActs...)
+	}
+
 	// Persist credential action log (no secrets — names and action types only).
 	actsJSON, _ := json.Marshal(credentialActions)
 	s.DB.Model(&db.TenantBootstrapJob{}).Where("id = ?", jobID).
@@ -380,11 +392,12 @@ func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string,
 // bootstrapApplier performs the mutation phase of a bootstrap job.
 // It is constructed after the read-only InspectTenant phase completes.
 type bootstrapApplier struct {
-	cfClient  *cf.CFClient
-	tenant    *db.CpiTenant
-	orgGUID   string
-	spaceGUID string
-	result    *InspectionResult
+	cfClient     *cf.CFClient
+	tenant       *db.CpiTenant
+	orgGUID      string
+	spaceGUID    string
+	result       *InspectionResult
+	providerDest *env.DestinationResolver // provider-side Destination Service for CPIDELIVERY_* destinations
 }
 
 type credentialAction struct {
@@ -392,17 +405,18 @@ type credentialAction struct {
 	ActionType      string `json:"actionType"` // "created" | "updated" | "skipped"
 }
 
-func newBootstrapApplier(tenant *db.CpiTenant, cfToken string, result *InspectionResult) (*bootstrapApplier, error) {
+func newBootstrapApplier(tenant *db.CpiTenant, cfToken string, result *InspectionResult, providerDest *env.DestinationResolver) (*bootstrapApplier, error) {
 	cfcl, err := cf.NewCFClient(tenant.CfApiURL(), cfToken)
 	if err != nil {
 		return nil, fmt.Errorf("bootstrapApplier: CF client: %w", err)
 	}
 	return &bootstrapApplier{
-		cfClient:  cfcl,
-		tenant:    tenant,
-		orgGUID:   result.OrgGUID,
-		spaceGUID: tenant.CfSpace,
-		result:    result,
+		cfClient:     cfcl,
+		tenant:       tenant,
+		orgGUID:      result.OrgGUID,
+		spaceGUID:    tenant.CfSpace,
+		result:       result,
+		providerDest: providerDest,
 	}, nil
 }
 
@@ -490,7 +504,7 @@ func (b *bootstrapApplier) ensureInstanceAndKey(
 //     Deferred to Phase 3 — URL comes from CentralTmsContext after TMS node
 //     registration.
 //
-// ── Provider-side (NOT created here) ─────────────────────────────────────────
+// ── Provider-side (NOT created here — see ensureProviderDestinations) ────────
 // Two per-tenant destinations in cpi-delivery's own provider-side environment:
 //
 //   - CPIDELIVERY_CAS_{id}   (CAS application credentials)
@@ -499,9 +513,9 @@ func (b *bootstrapApplier) ensureInstanceAndKey(
 //   - CPIDELIVERY_PIR_{id}   (PIR api credentials)
 //     Used by TrResolver to call the subscriber's PIR runtime.
 //
-// These names are recorded on the tenant struct by buildRequiredDestinations,
-// but the actual Destination Service entries in the provider environment are
-// created in Phase 5 (SaaS migration), not here.
+// These names are recorded on the tenant struct by buildRequiredDestinations.
+// The actual entries are written by ensureProviderDestinations, which runs
+// immediately after this function in runBootstrap.
 func (b *bootstrapApplier) ensureDestinations(ctx context.Context, tenant *db.CpiTenant, result *InspectionResult) ([]credentialAction, error) {
 	if result.DestinationServiceInstanceGUID == "" {
 		return nil, fmt.Errorf("destination service instance GUID is empty")
@@ -571,21 +585,22 @@ func (b *bootstrapApplier) ensureDestinations(ctx context.Context, tenant *db.Cp
 //   - TransportManagementService
 //     Deferred to Phase 3 — not included in the returned slice yet.
 //
-// ── Provider-side destinations (names recorded only, NOT written here) ───────
+// ── Provider-side destinations (names recorded only, written by ensureProviderDestinations) ─
 //
 // The two provider-side destinations live in cpi-delivery's own environment
 // (provider Destination Service), not in the subscriber's space:
 //
 //   - CPIDELIVERY_CAS_{id}   ← CAS application service key (content-agent/application)
 //     Used by TrResolver at transport time to call the subscriber's CAS export API.
-//     Created in Phase 5 (SaaS migration).
 //
 //   - CPIDELIVERY_PIR_{id}   ← PIR api service key (it-rt/api)
 //     Used by TrResolver to call the subscriber's PIR runtime.
-//     Created in Phase 5 (SaaS migration).
+//     URL is the root PIR URL (NOT the /api/1.0/transportmodule/Transport path,
+//     which belongs to the subscriber-side CloudIntegration destination).
 //
 // This function records these names on the tenant struct for persistence by
-// the caller, but does not write anything to the provider environment.
+// the caller.  The Destination Service entries are written by
+// ensureProviderDestinations, called after this function in runBootstrap.
 func (b *bootstrapApplier) buildRequiredDestinations(ctx context.Context, result *InspectionResult, tenant *db.CpiTenant) ([]cf.Destination, error) {
 	var dests []cf.Destination
 
@@ -625,11 +640,74 @@ func (b *bootstrapApplier) buildRequiredDestinations(ctx context.Context, result
 	// registration completes.  Bootstrap will fill this in during REGISTER_TMS_NODE.
 
 	// Record provider-side destination names for persistence.
-	// Actual creation of these destinations is Phase 5 (SaaS migration).
+	// The actual Destination Service entries are written by ensureProviderDestinations
+	// (called after this function in runBootstrap).
 	tenant.CasEngineDestinationName = fmt.Sprintf("CPIDELIVERY_CAS_%d", tenant.ID)
 	tenant.PirApiDestinationName = fmt.Sprintf("CPIDELIVERY_PIR_%d", tenant.ID)
 
 	return dests, nil
+}
+
+// ensureProviderDestinations writes the two per-tenant destinations into
+// cpi-delivery's own provider-side Destination Service.
+//
+// These are runtime-critical: without them TrResolver cannot reach the
+// subscriber's PIR runtime or CAS engine.
+//
+//   - CPIDELIVERY_PIR_{id}  — PIR api base URL + credentials (it-rt/api)
+//     Used by TrResolver to list artifacts and call deploy endpoints.
+//     URL is the root PIR URL, NOT the Transport Module path
+//     (/api/1.0/transportmodule/Transport is the subscriber-side CloudIntegration
+//     destination URL; these two destinations serve different callers).
+//
+//   - CPIDELIVERY_CAS_{id}  — CAS application base URL + credentials (content-agent/application)
+//     Used by TrResolver to call the subscriber's CAS export API to generate TRs.
+//
+// Both names are already set on the tenant struct by buildRequiredDestinations.
+// Unlike subscriber-side destinations (which use a temporary CF service key),
+// these are written directly via env.DestinationResolver.Upsert.
+func (b *bootstrapApplier) ensureProviderDestinations(ctx context.Context, tenant *db.CpiTenant, result *InspectionResult) ([]credentialAction, error) {
+	if b.providerDest == nil {
+		return nil, fmt.Errorf("ensureProviderDestinations: ProviderDest not injected")
+	}
+
+	var actions []credentialAction
+
+	// CPIDELIVERY_PIR_{id} — PIR api root URL (base URL, not transport module path).
+	if result.PirApiInstanceGUID != "" {
+		keyGUID, ok := result.ServiceKeyGUIDs[result.PirApiInstanceGUID]
+		if ok {
+			creds, err := b.cfClient.GetServiceKeyCredentials(ctx, keyGUID)
+			if err != nil {
+				return nil, fmt.Errorf("get PIR api key credentials for provider dest: %w", err)
+			}
+			if dest, ok := buildOAuthDestination(tenant.PirApiDestinationName, nil /* base URL as-is */, tenant.ID, creds); ok {
+				if err := b.providerDest.Upsert(ctx, dest); err != nil {
+					return nil, fmt.Errorf("upsert provider dest %q: %w", dest.Name, err)
+				}
+				actions = append(actions, credentialAction{DestinationName: dest.Name, ActionType: "upserted"})
+			}
+		}
+	}
+
+	// CPIDELIVERY_CAS_{id} — CAS application root URL (content-agent/application).
+	if result.CasApplicationInstanceGUID != "" {
+		keyGUID, ok := result.ServiceKeyGUIDs[result.CasApplicationInstanceGUID]
+		if ok {
+			creds, err := b.cfClient.GetServiceKeyCredentials(ctx, keyGUID)
+			if err != nil {
+				return nil, fmt.Errorf("get CAS application key credentials for provider dest: %w", err)
+			}
+			if dest, ok := buildOAuthDestination(tenant.CasEngineDestinationName, nil /* base URL as-is */, tenant.ID, creds); ok {
+				if err := b.providerDest.Upsert(ctx, dest); err != nil {
+					return nil, fmt.Errorf("upsert provider dest %q: %w", dest.Name, err)
+				}
+				actions = append(actions, credentialAction{DestinationName: dest.Name, ActionType: "upserted"})
+			}
+		}
+	}
+
+	return actions, nil
 }
 
 // transportModuleURL appends the fixed CPI Transport Module path to a PIR api
@@ -668,18 +746,16 @@ func buildOAuthDestination(name string, urlTransform func(string) string, tenant
 	}
 
 	return cf.Destination{
-		Name:           name,
-		Description:    fmt.Sprintf("DO NOT MODIFY. Created by cpi-delivery bootstrap for tenant %d", tenantID),
-		Type:           "HTTP",
-		URL:            destURL,
-		Authentication: "OAuth2ClientCredentials",
-		ProxyType:      "Internet",
-		AdditionalProperties: map[string]string{
-			"tokenServiceURL":     tokenURL,
-			"clientId":            clientID,
-			"clientSecret":        clientSecret,
-			"tokenServiceURLType": "Dedicated",
-		},
+		Name:                name,
+		Description:         fmt.Sprintf("DO NOT MODIFY. Created by cpi-delivery bootstrap for tenant %d", tenantID),
+		Type:                "HTTP",
+		URL:                 destURL,
+		Authentication:      "OAuth2ClientCredentials",
+		ProxyType:           "Internet",
+		TokenServiceURL:     tokenURL,
+		TokenServiceURLType: "Dedicated",
+		ClientId:            clientID,
+		ClientSecret:        clientSecret,
 	}, true
 }
 
