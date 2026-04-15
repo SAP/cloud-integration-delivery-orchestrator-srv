@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"sync"
 
 	"mmt-delivery/consts"
 	"mmt-delivery/db"
@@ -64,6 +65,12 @@ type Service struct {
 	GetUserEmail func(ctx context.Context, userID string) (string, error)
 	Notifier     Notifier
 	EventBus     *EventBus
+
+	// drSyncLocks prevents concurrent SyncDeliveryStatus calls for the same DR.
+	// Without this guard, two simultaneous sync requests can both read "no op exists"
+	// and each INSERT a new ArtifactTenantOperation, producing duplicate rows that
+	// then permanently diverge in import state.
+	drSyncLocks sync.Map // key: deliveryRequestID (uint), value: struct{}
 }
 
 // --- Default Notifier implementation (wraps pkg/notify package functions) ---
