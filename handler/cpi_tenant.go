@@ -13,15 +13,6 @@ import (
 	"mmt-delivery/service"
 )
 
-// keySubaccountFields lists the CpiTenant fields whose change invalidates any
-// previous bootstrap inspection.  Modifying any of them forces LifecycleState
-// back to DRAFT and clears all prerequisite status caches.
-var keySubaccountFields = []string{
-	"CfApiEndpoint",
-	"CfOrg",
-	"CfSpace",
-}
-
 // UpsertCpiTenant creates or updates a CpiTenant.
 //
 // Create semantics (ID == 0):
@@ -139,6 +130,9 @@ func (h *Handler) UpsertCpiTenant(ctx *gin.Context) {
 
 // keyFieldChanged returns true if any bootstrap-sensitive CF identity field
 // differs between the stored tenant and the incoming update.
+// The three key fields are: CfApiEndpoint, CfOrg, CfSpace.
+// Changing any of them invalidates previous bootstrap results and forces
+// LifecycleState back to DRAFT via TransitionLifecycle(EventKeyFieldChanged).
 func keyFieldChanged(existing, input db.CpiTenant) bool {
 	return existing.CfApiEndpoint != input.CfApiEndpoint ||
 		existing.CfOrg != input.CfOrg ||
