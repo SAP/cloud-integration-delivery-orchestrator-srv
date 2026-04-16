@@ -113,8 +113,18 @@ func (h *Handler) UpsertCpiTenant(ctx *gin.Context) {
 	// Callers must not set LifecycleState directly; preserve the current value.
 	input.LifecycleState = existing.LifecycleState
 
-	// If any key subaccount field changed, invalidate the bootstrap assessment.
+	// If any key subaccount field changed, transition through the state machine.
+	// TransitionLifecycle rejects the event when bootstrap is in progress
+	// (TenantReadying has no EventKeyFieldChanged edge), returning 409.
 	if keyFieldChanged(existing, input) {
+		if err := h.svc.TransitionLifecycle(input.ID, service.EventKeyFieldChanged); err != nil {
+			if errors.Is(err, service.ErrTransitionNotAllowed) {
+				Fail(ctx, 409, "bootstrap is in progress; key fields cannot be modified")
+				return
+			}
+			Fail(ctx, 500, err.Error())
+			return
+		}
 		input.LifecycleState = lifecycle.TenantDraft
 		input.BlockingReason = ""
 		clearPrerequisiteStatuses(&input)

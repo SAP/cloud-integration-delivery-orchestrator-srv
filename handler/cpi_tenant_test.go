@@ -14,6 +14,7 @@ import (
 
 	"mmt-delivery/db"
 	"mmt-delivery/pkg/lifecycle"
+	"mmt-delivery/service"
 )
 
 // newTestHandler creates a Handler with an in-memory SQLite DB for use in handler tests.
@@ -51,7 +52,89 @@ func postJSON(t *testing.T, handlerFunc gin.HandlerFunc, body any) *httptest.Res
 	return w
 }
 
-// --- keyFieldChanged ---
+// newTestHandlerWithSvc creates a Handler with an in-memory SQLite DB and a
+// real service.Service wired to the same DB, for tests that exercise paths
+// that call h.svc (e.g. TransitionLifecycle).
+func newTestHandlerWithSvc(t *testing.T) (*Handler, *gorm.DB) {
+	t.Helper()
+	dsn := "file:" + t.Name() + "?mode=memory&cache=private"
+	database, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatalf("open test db: %v", err)
+	}
+	if err := database.AutoMigrate(&db.CpiTenant{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	svc := &service.Service{DB: database}
+	h := &Handler{db: database, svc: svc}
+	return h, database
+}
+
+// --- UpsertCpiTenant update path — key field change / state machine ---
+
+// TestUpsertCpiTenant_Update_KeyFieldChange_Readying verifies that modifying a
+// key CF identity field while bootstrap is in progress (TenantReadying) is
+// rejected with 409.
+func TestUpsertCpiTenant_Update_KeyFieldChange_Readying(t *testing.T) {
+	h, database := newTestHandlerWithSvc(t)
+
+	tenant := db.CpiTenant{
+		Name:           "test-tenant",
+		CfApiEndpoint:  "https://api.cf.eu10.hana.ondemand.com",
+		CfOrg:          "org-guid-abc",
+		CfSpace:        "space-guid-xyz",
+		LifecycleState: lifecycle.TenantReadying,
+	}
+	if err := database.Create(&tenant).Error; err != nil {
+		t.Fatalf("seed tenant: %v", err)
+	}
+
+	// Attempt to change CfOrg while bootstrap is running.
+	update := tenant
+	update.CfOrg = "org-guid-NEW"
+	w := postJSON(t, h.UpsertCpiTenant, update)
+	if w.Code != 409 {
+		t.Errorf("expected 409 when changing key field during readying, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestUpsertCpiTenant_Update_KeyFieldChange_ResetsToMraft verifies that modifying
+// a key CF identity field from a non-readying state transitions the tenant back
+// to DRAFT and clears prerequisite statuses.
+func TestUpsertCpiTenant_Update_KeyFieldChange_ResetsToMraft(t *testing.T) {
+	h, database := newTestHandlerWithSvc(t)
+
+	tenant := db.CpiTenant{
+		Name:                  "test-tenant",
+		CfApiEndpoint:         "https://api.cf.eu10.hana.ondemand.com",
+		CfOrg:                 "org-guid-abc",
+		CfSpace:               "space-guid-xyz",
+		LifecycleState:        lifecycle.TenantNotReady,
+		PirApiStatus:          lifecycle.PrereqReady,
+		CasApplicationStatus:  lifecycle.PrereqReady,
+	}
+	if err := database.Create(&tenant).Error; err != nil {
+		t.Fatalf("seed tenant: %v", err)
+	}
+
+	update := tenant
+	update.CfOrg = "org-guid-NEW"
+	w := postJSON(t, h.UpsertCpiTenant, update)
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var updated db.CpiTenant
+	database.First(&updated, tenant.ID)
+	if updated.LifecycleState != lifecycle.TenantDraft {
+		t.Errorf("lifecycle_state = %q, want %q", updated.LifecycleState, lifecycle.TenantDraft)
+	}
+	if updated.PirApiStatus != lifecycle.PrereqMissing {
+		t.Errorf("PirApiStatus = %q, want %q", updated.PirApiStatus, lifecycle.PrereqMissing)
+	}
+}
 
 func TestKeyFieldChanged(t *testing.T) {
 	base := db.CpiTenant{

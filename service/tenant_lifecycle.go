@@ -1,11 +1,17 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 
 	"mmt-delivery/db"
 	"mmt-delivery/pkg/lifecycle"
 )
+
+// ErrTransitionNotAllowed is returned by TransitionLifecycle when the
+// requested event is not a valid transition from the tenant's current state.
+// Callers can use errors.Is to distinguish this from infrastructure errors.
+var ErrTransitionNotAllowed = errors.New("transition not allowed")
 
 // LifecycleEvent represents a trigger that causes a TenantLifecycleState transition.
 type LifecycleEvent string
@@ -83,8 +89,8 @@ func (s *Service) TransitionLifecycle(tenantID uint, event LifecycleEvent) error
 
 	nextState, ok := events[event]
 	if !ok {
-		return fmt.Errorf("TransitionLifecycle: event %q is not valid from state %q (tenant %d)",
-			event, tenant.LifecycleState, tenantID)
+		return fmt.Errorf("TransitionLifecycle: event %q is not valid from state %q (tenant %d): %w",
+			event, tenant.LifecycleState, tenantID, ErrTransitionNotAllowed)
 	}
 
 	if err := s.DB.Model(&db.CpiTenant{}).Where("id = ?", tenantID).

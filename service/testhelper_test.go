@@ -246,6 +246,10 @@ func seedTenant(t *testing.T, tc *testCleanup, name string) db.CpiTenant {
 		CpiEndpoint: db.ApiEndpoint{
 			Name: name, // use tenant name as endpoint key
 		},
+		// CfApiEndpoint and CfOrg must be unique across active tenants (B1 fix).
+		// Use the tenant name as a stable, distinct placeholder.
+		CfApiEndpoint: "https://api.test/" + name,
+		CfOrg:         "org-" + name,
 	}
 	if err := testDB.Create(&tenant).Error; err != nil {
 		t.Fatalf("seedTenant(%s) failed: %v", name, err)
