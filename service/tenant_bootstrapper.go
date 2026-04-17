@@ -11,6 +11,7 @@ import (
 	"mmt-delivery/pkg/env"
 	"mmt-delivery/pkg/lifecycle"
 
+	"gorm.io/gorm"
 )
 
 // ── Public service entry points ───────────────────────────────────────────────
@@ -197,10 +198,10 @@ func buildPreview(tenant *db.CpiTenant, result *InspectionResult) *BootstrapPrev
 // ── Bootstrap goroutine ───────────────────────────────────────────────────────
 
 // runBootstrap is the async apply phase.  It receives the InspectionResult
-// already produced by the synchronous inspect phase in ApplyBootstrap or
-// RetryBootstrap — it does NOT re-run InspectTenant.
+// already produced by the synchronous inspect phase in ApplyBootstrap — it
+// does NOT re-run InspectTenant.
 //
-// runBootstrap must NOT be called directly — use ApplyBootstrap or RetryBootstrap.
+// runBootstrap must NOT be called directly — use ApplyBootstrap.
 func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string, result *InspectionResult) {
 	ctx := context.Background()
 
@@ -210,17 +211,25 @@ func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string,
 			state = lifecycle.JobWaitingUserAction
 		}
 		now := time.Now()
-		s.DB.Model(&db.TenantBootstrapJob{}).Where("id = ?", jobID).Updates(map[string]any{
-			"state":        state,
-			"failure_type": failureType,
-			"current_step": step,
-			"ended_at":     &now,
-			"error_detail": reason,
-		})
-		if err := s.TransitionLifecycle(tenant.ID, EventBootstrapFailed); err != nil {
-			env.Logger().Errorw("bootstrap: failed to transition lifecycle after job failure; tenant may be stuck in readying",
+		// Job state and lifecycle transition are atomic: if either fails the
+		// tenant stays in readying and the operator can use ResetBootstrap.
+		if err := s.DB.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Model(&db.TenantBootstrapJob{}).Where("id = ?", jobID).Updates(map[string]any{
+				"state":        state,
+				"failure_type": failureType,
+				"current_step": step,
+				"ended_at":     &now,
+				"error_detail": reason,
+			}).Error; err != nil {
+				return fmt.Errorf("update job state: %w", err)
+			}
+			return s.transitionLifecycleWithTx(tx, tenant.ID, EventBootstrapFailed)
+		}); err != nil {
+			env.Logger().Errorw("bootstrap: failed to record job failure; tenant may be stuck in readying",
 				"tenantID", tenant.ID, "jobID", jobID, "error", err)
 		}
+		// blocking_reason is display-only; persist best-effort outside the
+		// transaction so its failure cannot roll back the critical state writes above.
 		if err := s.DB.Model(&db.CpiTenant{}).Where("id = ?", tenant.ID).
 			Update("blocking_reason", reason).Error; err != nil {
 			env.Logger().Errorw("bootstrap: failed to persist blocking_reason",
@@ -230,19 +239,26 @@ func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string,
 
 	finish := func() {
 		now := time.Now()
-		s.DB.Model(&db.TenantBootstrapJob{}).Where("id = ?", jobID).Updates(map[string]any{
-			"state":    lifecycle.JobFinished,
-			"ended_at": &now,
-		})
-		if err := s.TransitionLifecycle(tenant.ID, EventBootstrapFinished); err != nil {
-			env.Logger().Errorw("bootstrap: failed to transition lifecycle after job completion; tenant may be stuck in readying",
+		if err := s.DB.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Model(&db.TenantBootstrapJob{}).Where("id = ?", jobID).Updates(map[string]any{
+				"state":    lifecycle.JobFinished,
+				"ended_at": &now,
+			}).Error; err != nil {
+				return fmt.Errorf("update job state: %w", err)
+			}
+			return s.transitionLifecycleWithTx(tx, tenant.ID, EventBootstrapFinished)
+		}); err != nil {
+			env.Logger().Errorw("bootstrap: failed to record job completion; tenant may be stuck in readying",
 				"tenantID", tenant.ID, "jobID", jobID, "error", err)
 		}
 	}
 
 	setStep := func(step string) {
-		s.DB.Model(&db.TenantBootstrapJob{}).Where("id = ?", jobID).
-			Update("current_step", step)
+		if err := s.DB.Model(&db.TenantBootstrapJob{}).Where("id = ?", jobID).
+			Update("current_step", step).Error; err != nil {
+			env.Logger().Errorw("bootstrap: failed to update job step",
+				"tenantID", tenant.ID, "jobID", jobID, "step", step, "error", err)
+		}
 	}
 
 	// ── Apply missing items ───────────────────────────────────────────────────
