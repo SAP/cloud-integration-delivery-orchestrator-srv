@@ -349,15 +349,26 @@ func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string,
 	}
 
 	// Persist credential action log (no secrets — names and action types only).
+	// Audit-only; failure is best-effort.
 	actsJSON, _ := json.Marshal(credentialActions)
-	s.DB.Model(&db.TenantBootstrapJob{}).Where("id = ?", jobID).
-		Update("credential_actions", actsJSON)
+	if err := s.DB.Model(&db.TenantBootstrapJob{}).Where("id = ?", jobID).
+		Update("credential_actions", actsJSON).Error; err != nil {
+		env.Logger().Errorw("bootstrap: failed to persist credential_actions",
+			"tenantID", tenant.ID, "jobID", jobID, "error", err)
+	}
 
 	// Persist updated destination names on tenant.
-	s.DB.Model(&db.CpiTenant{}).Where("id = ?", tenant.ID).Updates(map[string]any{
+	// Runtime-critical: TrResolver uses these names on every deploy / TR generation.
+	// A failure here must abort bootstrap — marking the tenant ready without these
+	// names would cause all runtime operations to fail silently after a restart.
+	if err := s.DB.Model(&db.CpiTenant{}).Where("id = ?", tenant.ID).Updates(map[string]any{
 		"cas_engine_destination_name": tenant.CasEngineDestinationName,
 		"pir_api_destination_name":    tenant.PirApiDestinationName,
-	})
+	}).Error; err != nil {
+		fail(lifecycle.FailureRemoteSystemError, StepCheckDestinations,
+			fmt.Sprintf("persist destination names: %s", err))
+		return
+	}
 
 	// REGISTER_TMS_NODE is handled by CentralTmsRegistrar (Phase 3).
 	// For now, mark the job finished without TMS node registration.
