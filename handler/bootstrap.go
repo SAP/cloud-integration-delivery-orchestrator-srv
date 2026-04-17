@@ -130,7 +130,7 @@ func (h *Handler) RetryBootstrap(ctx *gin.Context) {
 		return
 	}
 
-	jobID, err := h.svc.RetryBootstrap(ctx.Request.Context(), tenantID, body.CfToken)
+	jobID, err := h.svc.ApplyBootstrap(ctx.Request.Context(), tenantID, body.CfToken)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			Fail(ctx, 404, "tenant not found")

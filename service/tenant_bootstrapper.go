@@ -10,6 +10,7 @@ import (
 	"mmt-delivery/pkg/cf"
 	"mmt-delivery/pkg/env"
 	"mmt-delivery/pkg/lifecycle"
+
 )
 
 // ── Public service entry points ───────────────────────────────────────────────
@@ -59,107 +60,69 @@ func (s *Service) ApplyBootstrap(ctx context.Context, tenantID uint, cfToken str
 		return 0, err
 	}
 
-	// Guard: reject if a bootstrap job is already in progress.
-	// A job row is created below; we must confirm no other goroutine owns the
-	// tenant before writing it, otherwise a concurrent Apply call would produce
-	// an orphaned job row (state=running, ended_at=null) that never completes.
-	if tenant.LifecycleState == lifecycle.TenantReadying {
-		return 0, fmt.Errorf("apply: a bootstrap job is already running for tenant %d", tenantID)
+	// Infer job type from the current state before Phase 1 transitions it.
+	// not_ready means a previous attempt failed — this run is a retry.
+	// draft and configured are first-time applies.
+	// ready means the operator is intentionally re-applying (e.g. to refresh
+	// service key credentials or re-sync destinations) — still labeled apply,
+	// not retry, because no failure preceded it.
+	jobType := lifecycle.JobTypeApply
+	if tenant.LifecycleState == lifecycle.TenantNotReady {
+		jobType = lifecycle.JobTypeRetry
 	}
 
-	// ── Synchronous inspect phase ────────────────────────────────────────────
+	// ── Phase 1: Atomically claim readying state ──────────────────────────────
+	// TransitionLifecycle uses SELECT FOR UPDATE inside its own short transaction,
+	// so the check-and-write is atomic across all instances.  EventBootstrapStarted
+	// is not a valid edge from TenantReadying (allowedTransitions), so any concurrent
+	// caller that already claimed readying is rejected here with ErrTransitionNotAllowed
+	// — before either caller makes a single CF API call.
+	if err := s.TransitionLifecycle(tenantID, EventBootstrapStarted); err != nil {
+		return 0, fmt.Errorf("apply: %w", err)
+	}
+
+	// ── Phase 2: Synchronous inspect ─────────────────────────────────────────
+	// State is now readying.  Any failure from here must roll back to not_ready
+	// so the operator can issue another ApplyBootstrap.
 	inspector, err := newInspector(tenant, cfToken)
 	if err != nil {
+		_ = s.TransitionLifecycle(tenantID, EventBootstrapFailed)
 		return 0, fmt.Errorf("apply: build inspector: %w", err)
 	}
 	result, err := inspector.InspectTenant(ctx, tenant)
 	if err != nil {
+		_ = s.TransitionLifecycle(tenantID, EventBootstrapFailed)
 		return 0, fmt.Errorf("apply: inspect: %w", err)
 	}
 	if len(result.PermissionIssues) > 0 {
+		_ = s.TransitionLifecycle(tenantID, EventBootstrapFailed)
 		return 0, fmt.Errorf("apply: permission issues: %v", result.PermissionIssues)
 	}
 	if len(result.WaitingUserAction) > 0 {
+		_ = s.TransitionLifecycle(tenantID, EventBootstrapFailed)
 		return 0, fmt.Errorf("apply: waiting user action: %v", result.WaitingUserAction)
 	}
 
-	// ── Create job row and transition state ──────────────────────────────────
+	// ── Phase 3: Create job row and launch goroutine ──────────────────────────
+	// Lifecycle is already readying; no further transition needed here.
+	// If job creation fails, roll back so the operator can retry.
 	missingJSON, _ := json.Marshal(result.MissingItems)
 	job := &db.TenantBootstrapJob{
 		CpiTenantID:          tenantID,
-		JobType:              lifecycle.JobTypeApply,
+		JobType:              jobType,
 		State:                lifecycle.JobRunning,
 		MissingPrerequisites: missingJSON,
 		StartedAt:            time.Now(),
 	}
 	if err := s.DB.Create(job).Error; err != nil {
+		_ = s.TransitionLifecycle(tenantID, EventBootstrapFailed)
 		return 0, fmt.Errorf("apply: create job: %w", err)
 	}
 
-	if err := s.TransitionLifecycle(tenantID, EventBootstrapStarted); err != nil {
-		return 0, fmt.Errorf("apply: transition state: %w", err)
-	}
-
 	go s.runBootstrap(tenant, job.ID, cfToken, result)
 	return job.ID, nil
 }
 
-// RetryBootstrap synchronously inspects the tenant's prerequisites, then
-// creates a new "retry" TenantBootstrapJob that continues from where the last
-// apply/retry job failed.  Like ApplyBootstrap, inspection runs synchronously
-// and the apply phase runs asynchronously.
-//
-// cfToken must be provided again (short-lived tokens are not stored anywhere).
-func (s *Service) RetryBootstrap(ctx context.Context, tenantID uint, cfToken string) (uint, error) {
-	tenant, err := s.getTenantForBootstrap(tenantID)
-	if err != nil {
-		return 0, err
-	}
-
-	// Only permit retry when the tenant is not_ready (last job stopped).
-	if tenant.LifecycleState == lifecycle.TenantReadying {
-		return 0, fmt.Errorf("retry: a bootstrap job is already running for tenant %d", tenantID)
-	}
-	if tenant.LifecycleState == lifecycle.TenantReady {
-		return 0, fmt.Errorf("retry: tenant %d is already ready", tenantID)
-	}
-
-	// ── Synchronous inspect phase ────────────────────────────────────────────
-	inspector, err := newInspector(tenant, cfToken)
-	if err != nil {
-		return 0, fmt.Errorf("retry: build inspector: %w", err)
-	}
-	result, err := inspector.InspectTenant(ctx, tenant)
-	if err != nil {
-		return 0, fmt.Errorf("retry: inspect: %w", err)
-	}
-	if len(result.PermissionIssues) > 0 {
-		return 0, fmt.Errorf("retry: permission issues: %v", result.PermissionIssues)
-	}
-	if len(result.WaitingUserAction) > 0 {
-		return 0, fmt.Errorf("retry: waiting user action: %v", result.WaitingUserAction)
-	}
-
-	// ── Create job row and transition state ──────────────────────────────────
-	missingJSON, _ := json.Marshal(result.MissingItems)
-	job := &db.TenantBootstrapJob{
-		CpiTenantID:          tenantID,
-		JobType:              lifecycle.JobTypeRetry,
-		State:                lifecycle.JobRunning,
-		MissingPrerequisites: missingJSON,
-		StartedAt:            time.Now(),
-	}
-	if err := s.DB.Create(job).Error; err != nil {
-		return 0, fmt.Errorf("retry: create job: %w", err)
-	}
-
-	if err := s.TransitionLifecycle(tenantID, EventBootstrapStarted); err != nil {
-		return 0, fmt.Errorf("retry: transition state: %w", err)
-	}
-
-	go s.runBootstrap(tenant, job.ID, cfToken, result)
-	return job.ID, nil
-}
 
 // GetBootstrapStatus returns the most recent TenantBootstrapJob for the tenant.
 func (s *Service) GetBootstrapStatus(tenantID uint) (*db.TenantBootstrapJob, error) {

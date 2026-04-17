@@ -6,6 +6,9 @@ import (
 
 	"mmt-delivery/db"
 	"mmt-delivery/pkg/lifecycle"
+
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // ErrTransitionNotAllowed is returned by TransitionLifecycle when the
@@ -66,7 +69,9 @@ var allowedTransitions = map[lifecycle.TenantLifecycleState]map[LifecycleEvent]l
 	},
 	lifecycle.TenantReady: {
 		EventKeyFieldChanged: lifecycle.TenantDraft,
-		// Re-apply is allowed from ready (e.g. credential rotation).
+		// Operator intentionally re-applies bootstrap — e.g. to refresh service
+		// key credentials or re-sync destinations after an external change.
+		// The job is labeled JobTypeApply (not retry) because no failure preceded it.
 		EventBootstrapStarted: lifecycle.TenantReadying,
 	},
 }
@@ -76,9 +81,28 @@ var allowedTransitions = map[lifecycle.TenantLifecycleState]map[LifecycleEvent]l
 //
 // It is the single authoritative entry point for all LifecycleState writes in
 // the service layer.  Handlers must never write LifecycleState directly.
+//
+// TransitionLifecycle wraps the operation in its own DB transaction with a
+// SELECT FOR UPDATE on the tenant row, so the SELECT and UPDATE are atomic
+// under concurrent callers.  Callers that already hold an external transaction
+// (e.g. ApplyBootstrap) should call transitionLifecycleWithDB directly.
 func (s *Service) TransitionLifecycle(tenantID uint, event LifecycleEvent) error {
+	return s.DB.Transaction(func(tx *gorm.DB) error {
+		return s.transitionLifecycleWithTx(tx, tenantID, event)
+	})
+}
+
+// transitionLifecycleWithTx is the internal implementation of TransitionLifecycle
+// that accepts an explicit *gorm.DB handle.  Pass a transaction handle (tx) when
+// the transition must participate in a larger atomic operation — for example,
+// ApplyBootstrap wraps job creation and the lifecycle transition in a single
+// transaction so that no orphaned job rows can result from a partial failure.
+//
+// Callers that do not need a transaction should use TransitionLifecycle instead.
+func (s *Service) transitionLifecycleWithTx(tx *gorm.DB, tenantID uint, event LifecycleEvent) error {
 	var tenant db.CpiTenant
-	if err := s.DB.Select("id", "lifecycle_state").First(&tenant, tenantID).Error; err != nil {
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Select("id", "lifecycle_state").First(&tenant, tenantID).Error; err != nil {
 		return fmt.Errorf("TransitionLifecycle: fetch tenant %d: %w", tenantID, err)
 	}
 
@@ -93,7 +117,7 @@ func (s *Service) TransitionLifecycle(tenantID uint, event LifecycleEvent) error
 			event, tenant.LifecycleState, tenantID, ErrTransitionNotAllowed)
 	}
 
-	if err := s.DB.Model(&db.CpiTenant{}).Where("id = ?", tenantID).
+	if err := tx.Model(&db.CpiTenant{}).Where("id = ?", tenantID).
 		Update("lifecycle_state", nextState).Error; err != nil {
 		return fmt.Errorf("TransitionLifecycle: write state %q for tenant %d: %w", nextState, tenantID, err)
 	}
