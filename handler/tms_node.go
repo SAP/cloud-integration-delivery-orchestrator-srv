@@ -67,14 +67,10 @@ func (h *Handler) RegisterTmsNode(ctx *gin.Context) {
 		return
 	}
 
-	// Guard: prevent re-registration while waiting for Route confirmation.
-	if tenant.TmsNodeRegistrationStatus == lifecycle.PrereqRegistering {
-		Fail(ctx, 409, "TMS node is already in registering state; complete Route configuration and call confirm, or wait before re-registering")
-		return
-	}
-
 	if err := h.svc.RegisterTmsNode(ctx.Request.Context(), tenantID, body.Mode, body.NodeName); err != nil {
 		switch {
+		case errors.Is(err, service.ErrAlreadyRegistering):
+			Fail(ctx, 409, err.Error())
 		case errors.Is(err, service.ErrAutoModeNotSupported):
 			Fail(ctx, 501, err.Error())
 		default:
