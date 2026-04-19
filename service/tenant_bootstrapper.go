@@ -370,9 +370,10 @@ func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string,
 		return
 	}
 
-	// REGISTER_TMS_NODE is handled by CentralTmsRegistrar (Phase 3).
-	// For now, mark the job finished without TMS node registration.
-	// TODO(phase-3): delegate to s.RegisterTmsNode(ctx, tenant.ID)
+	// REGISTER_TMS_NODE is handled by the independent TMS Node registration
+	// lifecycle (Phase 3 — service/tms_node_registrar.go).  Bootstrap finishes
+	// here; the operator triggers TMS registration separately via
+	// POST /tms-node/register after bootstrap completes.
 	setStep(StepRegisterTmsNode)
 
 	finish()

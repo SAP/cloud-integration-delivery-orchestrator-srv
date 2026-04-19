@@ -65,7 +65,11 @@ func (s *Service) BatchImportTenantOps(drID uint, opIDs []uint, targetTenantID u
 
 	// trigger async import in goroutine to avoid blocking
 	go func(drID uint, targetNodeID uint, targetTenantName string, trs []uint, ops []db.ArtifactTenantOperation, user string) {
-		actionID, err := s.TMS.ImportTransportRequest(context.Background(), targetNodeID, trs)
+		tmsClient, err := s.TmsSvc(context.Background())
+		var actionID uint
+		if err == nil {
+			actionID, err = tmsClient.ImportTransportRequest(context.Background(), targetNodeID, trs)
+		}
 		if err != nil {
 			// revert ops state to ImportFailed on import error
 			for i := range ops {

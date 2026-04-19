@@ -12,7 +12,6 @@ import (
 	"mmt-delivery/pkg/cf"
 	"mmt-delivery/pkg/cpi"
 	"mmt-delivery/pkg/env"
-	"mmt-delivery/pkg/tms"
 	"mmt-delivery/pkg/xsuaa"
 	"mmt-delivery/service"
 
@@ -46,17 +45,14 @@ func main() {
 	}
 
 	// --- Create long-lived clients ---
-	tmsClient, err := tms.NewClient(ctx)
-	if err != nil {
-		panic("failed to create TMS client: " + err.Error())
-	}
-
 	xsuaaClient, err := xsuaa.NewClient(ctx)
 	if err != nil {
 		panic("failed to create XSUAA client: " + err.Error())
 	}
 
 	cpiManager := cpi.NewManager(resolver)
+
+	tmsSvc := service.NewTmsFactory(database, resolver)
 
 	var eventBus *service.EventBus
 	if enableSSE {
@@ -67,7 +63,7 @@ func main() {
 	svc := &service.Service{
 		DB:     database,
 		Logger: env.Logger(),
-		TMS:    tmsClient,
+		TmsSvc: tmsSvc,
 		CPI: func(ctx context.Context, tenant string) (service.IntegrationService, error) {
 			return cpiManager.Get(ctx, tenant)
 		},
@@ -82,7 +78,6 @@ func main() {
 		svc,
 		database,
 		env.Logger(),
-		tmsClient,
 		cpiManager,
 		xsuaaClient,
 		resolver,

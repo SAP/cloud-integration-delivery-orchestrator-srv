@@ -3,7 +3,6 @@ package handler
 import (
 	"mmt-delivery/pkg/cf"
 	"mmt-delivery/pkg/cpi"
-	"mmt-delivery/pkg/tms"
 	"mmt-delivery/pkg/xsuaa"
 	"mmt-delivery/service"
 
@@ -18,7 +17,6 @@ type Handler struct {
 	svc      *service.Service
 	db       *gorm.DB
 	logger   *zap.SugaredLogger
-	tms      *tms.TmsClient
 	cpi      *cpi.Manager
 	xsuaa    *xsuaa.UaaClient
 	destSvc  *cf.DestinationServiceClient
@@ -56,7 +54,6 @@ func NewHandler(
 	svc *service.Service,
 	db *gorm.DB,
 	logger *zap.SugaredLogger,
-	tmsClient *tms.TmsClient,
 	cpiManager *cpi.Manager,
 	xsuaaClient *xsuaa.UaaClient,
 	destSvc *cf.DestinationServiceClient,
@@ -66,7 +63,6 @@ func NewHandler(
 		svc:      svc,
 		db:       db,
 		logger:   logger,
-		tms:      tmsClient,
 		cpi:      cpiManager,
 		xsuaa:    xsuaaClient,
 		destSvc:  destSvc,
@@ -118,6 +114,12 @@ func (h *Handler) SetupRoutes(v1 *gin.RouterGroup, v2 *gin.RouterGroup, requireS
 		tenantManage.GET("/cpiTenant/:id/bootstrap/status", h.GetBootstrapStatus)
 		tenantManage.POST("/cpiTenant/:id/bootstrap/retry", h.RetryBootstrap)
 		tenantManage.POST("/cpiTenant/:id/bootstrap/reset", h.ResetBootstrap)
+
+		// RFC 013 Phase 3: TMS Node registration (sync, independent of bootstrap)
+		tenantManage.POST("/cpiTenant/:id/tms-node/register", h.RegisterTmsNode)
+		tenantManage.GET("/cpiTenant/:id/tms-node/status", h.GetTmsNodeStatus)
+		tenantManage.GET("/cpiTenant/:id/tms-node/routes", h.GetTmsRoutes)
+		tenantManage.POST("/cpiTenant/:id/tms-node/confirm", h.ConfirmTmsRoutes)
 
 		// RFC 013: central TMS context (admin-level, single record per v1 deployment)
 		tenantManage.GET("/centralTmsContext", h.GetCentralTmsContext)

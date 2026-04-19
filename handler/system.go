@@ -81,8 +81,10 @@ func (h *Handler) CheckConnectivity(ctx *gin.Context) {
 	}
 
 	// 2. TMS
-	_, err = h.tms.GetNodes(checkCtx)
+	tmsClient, err := h.svc.TmsSvc(checkCtx)
 	if err != nil {
+		results = append(results, ConnectivityStatus{Name: "TMS", Type: "tms", Status: "error", Message: err.Error()})
+	} else if _, err = tmsClient.GetNodes(checkCtx); err != nil {
 		results = append(results, ConnectivityStatus{Name: "TMS", Type: "tms", Status: "error", Message: err.Error()})
 	} else {
 		results = append(results, ConnectivityStatus{Name: "TMS", Type: "tms", Status: "ok"})

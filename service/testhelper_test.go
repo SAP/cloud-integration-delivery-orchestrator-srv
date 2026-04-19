@@ -81,11 +81,16 @@ func newTestService(factory IntegrationFactory, opts ...testServiceOpts) *Servic
 		DB:     testDB,
 		Logger: l.Sugar(),
 		CPI:    factory,
+		TmsSvc: func(ctx context.Context) (TransportService, error) {
+			return nil, fmt.Errorf("TMS not configured in test")
+		},
 	}
 	if len(opts) > 0 {
 		o := opts[0]
 		if o.tms != nil {
-			svc.TMS = o.tms
+			svc.TmsSvc = func(ctx context.Context) (TransportService, error) {
+				return o.tms, nil
+			}
 		}
 		if o.notifier != nil {
 			svc.Notifier = o.notifier
@@ -363,6 +368,9 @@ func (m *mockTMSClient) ErrLogsInTransportLog(ctx context.Context, trNumber stri
 	return nil, nil
 }
 func (m *mockTMSClient) WarnLogsInTransportLog(ctx context.Context, trNumber string, nodeID uint) ([]string, error) {
+	return nil, nil
+}
+func (m *mockTMSClient) GetNodeTransportRequests(ctx context.Context, nodeID uint) ([]tms.NodeTransportRequest, error) {
 	return nil, nil
 }
 

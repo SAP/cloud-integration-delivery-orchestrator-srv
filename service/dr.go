@@ -87,11 +87,15 @@ func (s *Service) queryOpsInDrWithAcc(drID uint) (ops []db.ArtifactTenantOperati
 // generate source tenant, included routes and nodes from included tenants
 func (s *Service) SourceAndRoute(ctx context.Context, includedTenants []db.CpiTenant) (sorceTenant *db.CpiTenant, includedRoutes []db.TransportRoute, includedNodes []db.TransportNode, err error) {
 	var transportRoutes []db.TransportRoute
-	if transportRoutes, err = s.TMS.GetRoutes(ctx); err != nil {
+	tmsClient, err := s.TmsSvc(ctx)
+	if err != nil {
+		return
+	}
+	if transportRoutes, err = tmsClient.GetRoutes(ctx); err != nil {
 		return
 	}
 	var transportNodes []db.TransportNode
-	if transportNodes, err = s.TMS.GetNodes(ctx); err != nil {
+	if transportNodes, err = tmsClient.GetNodes(ctx); err != nil {
 		return
 	}
 	nodeAll := make(map[uint]db.TransportNode) // all nodes map

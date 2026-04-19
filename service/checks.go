@@ -90,7 +90,11 @@ func (s *Service) TrExist(op *db.ArtifactTenantOperation, sourceTenant *db.CpiTe
 	if trNumber == "" {
 		return false, fmt.Errorf("artifact %s has empty transport request number", op.ArtifactTechID)
 	}
-	trV1, err := s.TMS.GetTransportRequest(context.Background(), trNumber) // v1 to check state
+	tmsClient, err := s.TmsSvc(context.Background())
+	if err != nil {
+		return false, fmt.Errorf("error resolving TMS client: %w", err)
+	}
+	trV1, err := tmsClient.GetTransportRequest(context.Background(), trNumber) // v1 to check state
 	if err != nil {
 		return false, fmt.Errorf("error when getting transport request %s, the tr number may not exist, error message: %s", trNumber, err)
 	}

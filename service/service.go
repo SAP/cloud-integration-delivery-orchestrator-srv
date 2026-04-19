@@ -26,6 +26,7 @@ type TransportService interface {
 	TrNodeStatuses(ctx context.Context, trNumber string) (map[uint]tms.TrNodeStatus, error)
 	ErrLogsInTransportLog(ctx context.Context, trNumber string, nodeID uint) ([]string, error)
 	WarnLogsInTransportLog(ctx context.Context, trNumber string, nodeID uint) ([]string, error)
+	GetNodeTransportRequests(ctx context.Context, nodeID uint) ([]tms.NodeTransportRequest, error)
 }
 
 // IntegrationService defines the CPI operations needed by the service layer.
@@ -60,7 +61,7 @@ type Notifier interface {
 type Service struct {
 	DB           *gorm.DB
 	Logger       *zap.SugaredLogger
-	TMS          TransportService
+	TmsSvc       TmsClientFunc
 	CPI          IntegrationFactory
 	GetUserEmail func(ctx context.Context, userID string) (string, error)
 	Notifier     Notifier

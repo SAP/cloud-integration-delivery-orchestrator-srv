@@ -15,7 +15,6 @@ modules:
     requires:
       - name: mmt-devops-pgsql
       - name: mmt_devops_destination
-      - name: mmt-tms
       - name: mmt_devops_connectivity
       - name: uaa-api
 
@@ -30,11 +29,6 @@ resources:
     parameters:
       service: destination
       service-plan: lite
-  - name: mmt-tms
-    type: org.cloudfoundry.managed-service
-    parameters:
-      service: transport
-      service-plan: standard
   - name: mmt_devops_connectivity
     type: org.cloudfoundry.managed-service
     parameters:

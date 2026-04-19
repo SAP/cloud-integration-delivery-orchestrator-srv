@@ -176,9 +176,10 @@ const (
 type PrerequisiteStatus string
 
 const (
-	PrereqMissing PrerequisiteStatus = "missing" // resource does not exist yet
-	PrereqReady   PrerequisiteStatus = "ready"   // resource exists and is correctly configured
-	PrereqFailed  PrerequisiteStatus = "failed"  // resource exists but is in an error state
+	PrereqMissing     PrerequisiteStatus = "missing"     // resource does not exist yet
+	PrereqReady       PrerequisiteStatus = "ready"       // resource exists and is correctly configured
+	PrereqFailed      PrerequisiteStatus = "failed"      // resource exists but is in an error state
+	PrereqRegistering PrerequisiteStatus = "registering" // TMS Node: technically confirmed, awaiting operator Route configuration
 )
 
 // DeriveImport maps TMS transport node state to our ImportState.

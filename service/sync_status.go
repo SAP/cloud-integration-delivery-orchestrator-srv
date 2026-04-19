@@ -233,14 +233,23 @@ func (s *Service) syncImportState(deliveryRequestID uint, user string) []db.Cond
 
 	trNodeStatus := make(map[string]map[uint]tms.TrNodeStatus)          // tr number status in all nodes. trNumber - map[nodeID]status
 	tenantToOps := make(map[uint]map[string]db.ArtifactTenantOperation) // arTenantOp record in each node. cpi tenant ID - map[trNumber]ArtifactTenantOperation
-	//
+
+	tmsClient, err := s.TmsSvc(context.Background())
+	if err != nil {
+		return []db.Condition{{
+			DeliveryRequestID: deliveryRequestID,
+			State:             lifecycle.CondError,
+			Message:           fmt.Sprintf("error resolving TMS client: %s", err),
+		}}
+	}
+
 	for _, op := range artifactOps {
 		trNumber := op.TransportRequestNumber
 		if _, ok := trNodeStatus[trNumber]; ok { // already fetched
 			continue
 		}
 		// UpdateArtifactNodeStatus will call GetTransportRequest internally
-		ns, err := s.TMS.TrNodeStatuses(context.Background(), trNumber)
+		ns, err := tmsClient.TrNodeStatuses(context.Background(), trNumber)
 		if err != nil {
 			return []db.Condition{
 				{
@@ -386,7 +395,7 @@ func (s *Service) syncImportState(deliveryRequestID uint, user string) []db.Cond
 
 				// TMS WARNING: import counts as complete but persist severity-W log lines as CondWarn
 				if strings.EqualFold(nState.Status, "WARNING") {
-					warnMsgs, werr := s.TMS.WarnLogsInTransportLog(context.Background(), trNumber, nID)
+					warnMsgs, werr := tmsClient.WarnLogsInTransportLog(context.Background(), trNumber, nID)
 					var warnBody string
 					if werr != nil {
 						warnBody = fmt.Sprintf("could not load TMS warning messages for transport request %s in node %d: %s", trNumber, nID, werr.Error())
@@ -405,7 +414,7 @@ func (s *Service) syncImportState(deliveryRequestID uint, user string) []db.Cond
 			}
 			// get error logs if import failed
 			if state == lifecycle.ImportFailed {
-				logs, err := s.TMS.ErrLogsInTransportLog(context.Background(), trNumber, nID)
+				logs, err := tmsClient.ErrLogsInTransportLog(context.Background(), trNumber, nID)
 				var message string
 				if err != nil {
 					message = fmt.Sprintf("error when getting error logs for transport request %s in node %d: %s", trNumber, nID, err.Error())

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 )
 
 type HttpClient struct {
@@ -18,7 +19,8 @@ type HttpClient struct {
 	ClientId     string
 	ClientSecret string
 	AuthUrl      string
-	mu           sync.Mutex // protects AccessToken
+	tokenExp     time.Time    // proactive expiry; set by fetchToken from expires_in
+	mu           sync.Mutex   // protects AccessToken and tokenExp
 }
 type OauthResp struct {
 	AccessToken string `json:"access_token"`
@@ -81,13 +83,24 @@ func (c *HttpClient) fetchToken(ctx context.Context) error {
 
 	c.mu.Lock()
 	c.AccessToken = oauthResp.AccessToken
+	c.tokenExp = time.Now().Add(time.Duration(oauthResp.ExpiresIn-30) * time.Second)
 	c.mu.Unlock()
 	return nil
 }
 
 // Do executes an HTTP request with the given context and returns the response body, status code, and error.
-// On 401, it refreshes the token once and retries.
+// Before each request it proactively refreshes the token if it is expired or within 30 s of expiry.
+// On 401 (e.g. clock skew), it refreshes the token once and retries.
 func (c *HttpClient) Do(ctx context.Context, request *HttpRequest) (*[]byte, int, error) {
+	c.mu.Lock()
+	expired := time.Now().After(c.tokenExp)
+	c.mu.Unlock()
+	if expired {
+		if err := c.fetchToken(ctx); err != nil {
+			return nil, 0, fmt.Errorf("proactive token refresh: %w", err)
+		}
+	}
+
 	respBody, statusCode, err := c.doRequest(ctx, request)
 	if err != nil {
 		return nil, 0, err

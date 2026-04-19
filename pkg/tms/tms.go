@@ -27,10 +27,15 @@ type TmsClient struct {
 	*env.HttpClient
 }
 
-func NewClient(ctx context.Context) (*TmsClient, error) {
-	v := env.TmsCredential()
-	client, err := env.NewClient(ctx, v.Clientid, v.Clientsecret, v.AuthUrl, v.ApiUrl)
-	return &TmsClient{client}, err
+// NewTmsClient constructs a TmsClient from explicit OAuth credentials resolved
+// at runtime from the provider Destination Service (CentralTmsContext.TmsApiDestinationName).
+// This is the preferred constructor; use it for all new call sites.
+func NewTmsClient(ctx context.Context, apiEndpoint, tokenURL, clientID, clientSecret string) (*TmsClient, error) {
+	client, err := env.NewClient(ctx, clientID, clientSecret, tokenURL, apiEndpoint)
+	if err != nil {
+		return nil, err
+	}
+	return &TmsClient{client}, nil
 }
 
 func (t *TmsClient) GetNodes(ctx context.Context) ([]db.TransportNode, error) {
