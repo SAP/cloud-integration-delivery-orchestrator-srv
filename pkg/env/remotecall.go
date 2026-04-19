@@ -47,9 +47,6 @@ func NewClient(ctx context.Context, clientID string, clientSecret string, authUr
 		ClientSecret: clientSecret,
 		AuthUrl:      authUrl,
 	}
-	if err := client.fetchToken(ctx); err != nil {
-		return nil, err
-	}
 	return client, nil
 }
 
@@ -93,9 +90,9 @@ func (c *HttpClient) fetchToken(ctx context.Context) error {
 // On 401 (e.g. clock skew), it refreshes the token once and retries.
 func (c *HttpClient) Do(ctx context.Context, request *HttpRequest) (*[]byte, int, error) {
 	c.mu.Lock()
-	expired := time.Now().After(c.tokenExp)
+	needsToken := c.AccessToken == "" || time.Now().After(c.tokenExp)
 	c.mu.Unlock()
-	if expired {
+	if needsToken {
 		if err := c.fetchToken(ctx); err != nil {
 			return nil, 0, fmt.Errorf("proactive token refresh: %w", err)
 		}
