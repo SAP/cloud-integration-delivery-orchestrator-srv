@@ -150,6 +150,8 @@ func clearPrerequisiteStatuses(t *db.CpiTenant) {
 	t.ContentAssemblyDestStatus = lifecycle.PrereqMissing
 	t.TransportManagementDestStatus = lifecycle.PrereqMissing
 	t.TmsNodeRegistrationStatus = lifecycle.PrereqMissing
+	t.TmsSourceNodeName = ""
+	t.CentralTmsContextID = nil
 }
 
 // SaveCfIdentity persists the CF identity fields (CfApiEndpoint, CfOrg, CfSpace)

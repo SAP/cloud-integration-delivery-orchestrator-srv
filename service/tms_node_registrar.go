@@ -215,7 +215,7 @@ func (s *Service) writeTmsRegistering(ctx context.Context, tenantID uint, nodeNa
 	if nodeName != "" {
 		updates["tms_source_node_name"] = nodeName
 	}
-	if err := s.DB.Model(&db.CpiTenant{}).Where("id = ?", tenantID).Updates(updates).Error; err != nil {
+	if err := s.DB.WithContext(ctx).Model(&db.CpiTenant{}).Where("id = ?", tenantID).Updates(updates).Error; err != nil {
 		return fmt.Errorf("writeTmsRegistering: %w", err)
 	}
 	return nil
