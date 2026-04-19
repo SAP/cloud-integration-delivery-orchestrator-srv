@@ -146,7 +146,12 @@ func (s *Service) ConfirmTmsRoutes(ctx context.Context, tenantID uint) (*Confirm
 		return nil, err
 	}
 
-	routes, err := s.GetTmsRoutes(ctx, tenantID)
+	tmsCtx, err := loadTmsContext(s.DB)
+	if err != nil {
+		return nil, fmt.Errorf("ConfirmTmsRoutes: get central TMS context: %w", err)
+	}
+
+	routes, err := s.fetchRoutesForNode(ctx, tmsCtx, tenant.TmsSourceNodeName)
 	if err != nil {
 		return nil, fmt.Errorf("ConfirmTmsRoutes: fetch routes: %w", err)
 	}
@@ -156,14 +161,9 @@ func (s *Service) ConfirmTmsRoutes(ctx context.Context, tenantID uint) (*Confirm
 	}
 
 	// Routes confirmed — write ready and bind to the CentralTmsContext.
-	tmsCtx, err := loadTmsContext(s.DB)
-	if err != nil {
-		return nil, fmt.Errorf("ConfirmTmsRoutes: get central TMS context: %w", err)
-	}
-	ctxID := tmsCtx.ID
 	if err := s.DB.Model(&db.CpiTenant{}).Where("id = ?", tenant.ID).Updates(map[string]any{
 		"tms_node_registration_status": lifecycle.PrereqReady,
-		"central_tms_context_id":       ctxID,
+		"central_tms_context_id":       tmsCtx.ID,
 	}).Error; err != nil {
 		return nil, fmt.Errorf("ConfirmTmsRoutes: write ready: %w", err)
 	}
@@ -190,17 +190,24 @@ func (s *Service) GetTmsRoutes(ctx context.Context, tenantID uint) ([]tms.V1Tran
 		return nil, fmt.Errorf("GetTmsRoutes: get central TMS context: %w", err)
 	}
 
+	return s.fetchRoutesForNode(ctx, tmsCtx, tenant.TmsSourceNodeName)
+}
+
+// fetchRoutesForNode builds a TMS client and returns the Route list for nodeName.
+// Shared by GetTmsRoutes and ConfirmTmsRoutes so that ConfirmTmsRoutes can reuse
+// the tmsCtx it already holds without an extra DB round-trip.
+func (s *Service) fetchRoutesForNode(ctx context.Context, tmsCtx *db.CentralTmsContext, nodeName string) ([]tms.V1TransportRoute, error) {
 	nodeClient, err := buildTmsClient(ctx, tmsCtx, s.ProviderDest)
 	if err != nil {
-		return nil, fmt.Errorf("GetTmsRoutes: build TMS node client: %w", err)
+		return nil, fmt.Errorf("fetchRoutesForNode: build TMS client: %w", err)
 	}
 
-	node, err := nodeClient.GetNodeByName(ctx, tenant.TmsSourceNodeName)
+	node, err := nodeClient.GetNodeByName(ctx, nodeName)
 	if err != nil {
-		return nil, fmt.Errorf("GetTmsRoutes: look up node %q: %w", tenant.TmsSourceNodeName, err)
+		return nil, fmt.Errorf("fetchRoutesForNode: look up node %q: %w", nodeName, err)
 	}
 	if node == nil {
-		return nil, fmt.Errorf("GetTmsRoutes: node %q not found in TMS", tenant.TmsSourceNodeName)
+		return nil, fmt.Errorf("fetchRoutesForNode: node %q not found in TMS", nodeName)
 	}
 
 	return nodeClient.ListRoutesBySourceNode(ctx, node.ID)
