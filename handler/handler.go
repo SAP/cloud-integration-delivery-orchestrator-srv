@@ -211,14 +211,6 @@ func (h *Handler) SetupRoutes(v1 *gin.RouterGroup, v2 *gin.RouterGroup, requireS
 		vcAdhoc.POST("/versionCompare/adhoc", h.AdhocVersionCompare)
 	}
 
-	// --- Cookie Service Proxy (Integration.Read scope — same as CPI artifact access) ---
-	cookieProxy := v1.Group("")
-	cookieProxy.Use(requireScope("Integration.Read"))
-	{
-		cookieProxy.GET("/cookie-service/*path", h.ProxyCookieService)
-		cookieProxy.POST("/cookie-service/*path", h.ProxyCookieService)
-	}
-
 	// --- System Configuration (CpiTenant.Manage scope — admin-level) ---
 	system := v1.Group("/system")
 	system.Use(requireScope("CpiTenant.Manage"))
