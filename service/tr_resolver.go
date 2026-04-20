@@ -132,13 +132,7 @@ func (s *Service) GenerateTransportRequest(ctx context.Context, tenantID, delive
 		}
 	}
 
-	// ── 6. Build DR description (shared across all export requests) ───────────
-	description := fmt.Sprintf("Delivery Request #%d", dr.ID)
-	if dr.Name != "" {
-		description = fmt.Sprintf("Delivery Request #%d — %s", dr.ID, dr.Name)
-	}
-
-	// ── 7. Per-op: one export → one TR (concurrent) ──────────────────────────
+	// ── 6. Per-op: one export → one TR (concurrent) ─────────────────────────
 	// Each artifact's CAS export is an independent async operation — run them
 	// concurrently so total wait ≈ max(individual waits) instead of their sum.
 	type opResult struct {
@@ -150,7 +144,7 @@ func (s *Service) GenerateTransportRequest(ctx context.Context, tenantID, delive
 
 	for _, op := range ops {
 		go func() {
-			tr, err := s.exportOneTR(ctx, casClient, &tenant, description, op, index)
+			tr, err := s.exportOneTR(ctx, casClient, &tenant, &dr, op, index)
 			resultCh <- opResult{opID: op.ID, tr: tr, err: err}
 		}()
 	}
@@ -188,7 +182,7 @@ func (s *Service) exportOneTR(
 	ctx context.Context,
 	casClient CasService,
 	tenant *db.CpiTenant,
-	description string,
+	dr *db.DeliveryRequest,
 	op db.ArtifactTenantOperation,
 	index map[string]casIndexEntry,
 ) (*TransportRequest, error) {
@@ -228,6 +222,8 @@ func (s *Service) exportOneTR(
 			DeployedAfter: []any{},
 		},
 	}
+
+	description := fmt.Sprintf("DR#%d | %s %s | Requested by: %s", dr.ID, op.Artifact.Name, op.ArtifactVersion, dr.CreatedBy)
 
 	exportReq := cas.ExportRequest{
 		Requestor:            "CPIDelivery",

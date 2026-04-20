@@ -456,19 +456,9 @@ func (h *Handler) GenerateTR(ctx *gin.Context) {
 		succeededResp[opID] = trResult{TransportRequestID: tr.ID, TransportRequestURL: tr.URL}
 	}
 
-	if len(failed) > 0 {
-		failedResp := make(map[uint]string, len(failed))
-		for opID, err := range failed {
-			failedResp[opID] = err.Error()
-		}
-		// Partial or full per-op failure: return 207 with both maps so callers
-		// can inspect each op independently. succeeded may be empty.
-		ctx.JSON(207, gin.H{
-			"succeeded": succeededResp,
-			"failed":    failedResp,
-		})
-		return
+	failedResp := make(map[uint]string, len(failed))
+	for opID, err := range failed {
+		failedResp[opID] = err.Error()
 	}
-
-	OK(ctx, gin.H{"results": succeededResp})
+	OK(ctx, gin.H{"succeeded": succeededResp, "failed": failedResp})
 }
