@@ -2,6 +2,7 @@ package handler
 
 import (
 	"fmt"
+	"net/http"
 
 	"mmt-delivery/service"
 
@@ -108,4 +109,20 @@ func (h *Handler) GetRuntimeArtifacts(ctx *gin.Context) {
 		return
 	}
 	OK(ctx, artifacts)
+}
+
+// GetCasContentResources returns all packages and artifacts for a tenant from CAS.
+// Replaces the two-step CPI flow (GET /tanant/packages + GET /tenant/packages/artifacts).
+// Requires tenant.CasEngineDestinationName to be configured.
+func (h *Handler) GetCasContentResources(ctx *gin.Context) {
+	tenantID, ok := parseTenantID(ctx)
+	if !ok {
+		return
+	}
+	packages, err := h.svc.ListCasPackages(ctx.Request.Context(), tenantID)
+	if err != nil {
+		Fail(ctx, http.StatusInternalServerError, fmt.Sprintf("failed to list CAS packages: %s", err))
+		return
+	}
+	OK(ctx, packages)
 }

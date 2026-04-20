@@ -403,3 +403,72 @@ func (h *Handler) HandleCancelDr(c *gin.Context) {
 
 	OKMsg(c, nil, "Delivery request canceled successfully")
 }
+
+// GenerateTR creates a TMS Transport Request for the given tenant via CAS.
+//
+// POST /api/v1/cpiTenant/:id/generateTR
+//
+// Request body:
+//
+//	{
+//	  "deliveryRequestID": 42,
+//	  "artifactOperationIDs": [1, 2, 3]
+//	}
+//
+// Preconditions (hard-blocked, 400):
+//   - tenant.LifecycleState == ready
+//   - tenant.TmsNodeRegistrationStatus == ready
+//
+// DB loading, CAS catalog resolution, ContentResource grouping, and TR write-back
+// are all handled by the service layer.
+func (h *Handler) GenerateTR(ctx *gin.Context) {
+	tenantID, ok := parseTenantID(ctx)
+	if !ok {
+		return
+	}
+
+	var body struct {
+		DeliveryRequestID    uint   `json:"deliveryRequestID" binding:"required"`
+		ArtifactOperationIDs []uint `json:"artifactOperationIDs" binding:"required"`
+	}
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		Fail(ctx, 400, "deliveryRequestID and artifactOperationIDs are required")
+		return
+	}
+	if len(body.ArtifactOperationIDs) == 0 {
+		Fail(ctx, 400, "artifactOperationIDs must not be empty")
+		return
+	}
+
+	succeeded, failed, fatalErr := h.svc.GenerateTransportRequest(ctx.Request.Context(), tenantID, body.DeliveryRequestID, body.ArtifactOperationIDs)
+	if fatalErr != nil {
+		Fail(ctx, 500, fatalErr.Error())
+		return
+	}
+
+	// Build response payload from succeeded results.
+	type trResult struct {
+		TransportRequestID  string `json:"transportRequestID"`
+		TransportRequestURL string `json:"transportRequestURL"`
+	}
+	succeededResp := make(map[uint]trResult, len(succeeded))
+	for opID, tr := range succeeded {
+		succeededResp[opID] = trResult{TransportRequestID: tr.ID, TransportRequestURL: tr.URL}
+	}
+
+	if len(failed) > 0 {
+		failedResp := make(map[uint]string, len(failed))
+		for opID, err := range failed {
+			failedResp[opID] = err.Error()
+		}
+		// Partial or full per-op failure: return 207 with both maps so callers
+		// can inspect each op independently. succeeded may be empty.
+		ctx.JSON(207, gin.H{
+			"succeeded": succeededResp,
+			"failed":    failedResp,
+		})
+		return
+	}
+
+	OK(ctx, gin.H{"results": succeededResp})
+}

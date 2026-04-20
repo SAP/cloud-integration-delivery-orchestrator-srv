@@ -9,6 +9,7 @@ import (
 
 	"mmt-delivery/db"
 	"mmt-delivery/handler"
+	"mmt-delivery/pkg/cas"
 	"mmt-delivery/pkg/cf"
 	"mmt-delivery/pkg/cpi"
 	"mmt-delivery/pkg/env"
@@ -51,6 +52,7 @@ func main() {
 	}
 
 	cpiManager := cpi.NewManager(resolver)
+	casManager := cas.NewManager(database, resolver)
 
 	tmsSvc := service.NewTmsFactory(database, resolver)
 
@@ -64,6 +66,9 @@ func main() {
 		DB:     database,
 		Logger: env.Logger(),
 		TmsSvc: tmsSvc,
+		CAS: func(ctx context.Context, tenantID uint) (service.CasService, error) {
+			return casManager.Get(ctx, tenantID)
+		},
 		CPI: func(ctx context.Context, tenant string) (service.IntegrationService, error) {
 			return cpiManager.Get(ctx, tenant)
 		},

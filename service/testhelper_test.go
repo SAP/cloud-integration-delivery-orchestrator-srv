@@ -10,6 +10,7 @@ import (
 
 	"mmt-delivery/consts"
 	"mmt-delivery/db"
+	"mmt-delivery/pkg/cas"
 	"mmt-delivery/pkg/cpi"
 	"mmt-delivery/pkg/tms"
 
@@ -67,6 +68,7 @@ func TestMain(m *testing.M) {
 // testServiceOpts holds optional dependencies for building a test Service.
 type testServiceOpts struct {
 	tms          TransportService
+	cas          CasService
 	notifier     Notifier
 	getUserEmail func(ctx context.Context, userID string) (string, error)
 }
@@ -84,12 +86,20 @@ func newTestService(factory IntegrationFactory, opts ...testServiceOpts) *Servic
 		TmsSvc: func(ctx context.Context) (TransportService, error) {
 			return nil, fmt.Errorf("TMS not configured in test")
 		},
+		CAS: func(ctx context.Context, tenantID uint) (CasService, error) {
+			return nil, fmt.Errorf("CAS not configured in test")
+		},
 	}
 	if len(opts) > 0 {
 		o := opts[0]
 		if o.tms != nil {
 			svc.TmsSvc = func(ctx context.Context) (TransportService, error) {
 				return o.tms, nil
+			}
+		}
+		if o.cas != nil {
+			svc.CAS = func(ctx context.Context, tenantID uint) (CasService, error) {
+				return o.cas, nil
 			}
 		}
 		if o.notifier != nil {
@@ -387,6 +397,33 @@ func (m *mockNotifier) SendDeliveryNotification(to []string, drID uint, status s
 }
 func (m *mockNotifier) AddDeliveryComment(issueKey string, drID uint, message string, status string) error {
 	return nil
+}
+
+// --- Mock CAS Client ---
+
+// mockCasClient implements CasService for testing.
+type mockCasClient struct {
+	catalog     []cas.CatalogContentResource
+	catalogErr  error
+	exportResp  *cas.ExportResponse
+	exportErr   error
+	pollStatus  *cas.OperationStatus
+	pollErr     error
+	opConfig    *cas.OperationConfig
+	opConfigErr error
+}
+
+func (m *mockCasClient) ListContentResources(_ context.Context) ([]cas.CatalogContentResource, error) {
+	return m.catalog, m.catalogErr
+}
+func (m *mockCasClient) TriggerExport(_ context.Context, _ cas.ExportRequest) (*cas.ExportResponse, error) {
+	return m.exportResp, m.exportErr
+}
+func (m *mockCasClient) PollOperation(_ context.Context, _ string) (*cas.OperationStatus, error) {
+	return m.pollStatus, m.pollErr
+}
+func (m *mockCasClient) GetOperationConfig(_ context.Context, _ string) (*cas.OperationConfig, error) {
+	return m.opConfig, m.opConfigErr
 }
 
 // --- Additional Seed Helpers ---

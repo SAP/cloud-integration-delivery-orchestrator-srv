@@ -89,6 +89,7 @@ func (h *Handler) SetupRoutes(v1 *gin.RouterGroup, v2 *gin.RouterGroup, requireS
 		integrationRead.GET("/tms/routes", h.GetRoutesHandler)
 		integrationRead.GET("/destinations", h.GetDestinationsHandler)
 		integrationRead.GET("/events", h.SSEHandler)
+		integrationRead.GET("/cpiTenant/:id/cas/contentResources", h.GetCasContentResources)
 	}
 
 	// --- CpiTenant.Read ---
@@ -124,6 +125,9 @@ func (h *Handler) SetupRoutes(v1 *gin.RouterGroup, v2 *gin.RouterGroup, requireS
 		// RFC 013: central TMS context (admin-level, single record per v1 deployment)
 		tenantManage.GET("/centralTmsContext", h.GetCentralTmsContext)
 		tenantManage.PUT("/centralTmsContext", h.UpsertCentralTmsContext)
+
+		// RFC 013 Phase 4: CAS-based TR generation
+		tenantManage.POST("/cpiTenant/:id/generateTR", h.GenerateTR)
 	}
 
 	// --- DeliveryRule.Read ---

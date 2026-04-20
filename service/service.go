@@ -6,6 +6,7 @@ import (
 
 	"mmt-delivery/consts"
 	"mmt-delivery/db"
+	"mmt-delivery/pkg/cas"
 	"mmt-delivery/pkg/cf"
 	"mmt-delivery/pkg/cpi"
 	"mmt-delivery/pkg/notify"
@@ -47,6 +48,18 @@ type IntegrationService interface {
 // IntegrationFactory creates or retrieves a cached CPI client for a given tenant.
 type IntegrationFactory func(ctx context.Context, tenant string) (IntegrationService, error)
 
+// CasService defines the CAS operations needed by the service layer.
+type CasService interface {
+	ListContentResources(ctx context.Context) ([]cas.CatalogContentResource, error)
+	TriggerExport(ctx context.Context, req cas.ExportRequest) (*cas.ExportResponse, error)
+	PollOperation(ctx context.Context, processID string) (*cas.OperationStatus, error)
+	GetOperationConfig(ctx context.Context, processID string) (*cas.OperationConfig, error)
+}
+
+// CasFactory resolves and returns a ready-to-use CasService for a given tenant.
+// Production value built by NewCasFactory; test value is a literal returning a mock.
+type CasFactory func(ctx context.Context, tenantID uint) (CasService, error)
+
 // Notifier abstracts notification operations (email, JIRA).
 type Notifier interface {
 	SendApprovalRequest(to []string, drID uint, requestor string, description string) error
@@ -63,6 +76,7 @@ type Service struct {
 	Logger       *zap.SugaredLogger
 	TmsSvc       TmsClientFunc
 	CPI          IntegrationFactory
+	CAS          CasFactory
 	GetUserEmail func(ctx context.Context, userID string) (string, error)
 	Notifier     Notifier
 	EventBus     *EventBus
