@@ -257,10 +257,8 @@ func (m *mockCPIClientWithDesignTime) GetDesignTimeScriptCollection(ctx context.
 func seedTenant(t *testing.T, tc *testCleanup, name string) db.CpiTenant {
 	t.Helper()
 	tenant := db.CpiTenant{
-		Name: name,
-		CpiEndpoint: db.ApiEndpoint{
-			Name: name, // use tenant name as endpoint key
-		},
+		Name:                 name,
+		PirApiDestinationName: name, // use tenant name as destination key for mock dispatch
 		// CfApiEndpoint and CfOrg must be unique across active tenants (B1 fix).
 		// Use the tenant name as a stable, distinct placeholder.
 		CfApiEndpoint: "https://api.test/" + name,

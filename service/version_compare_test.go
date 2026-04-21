@@ -747,7 +747,7 @@ func TestCollectVersionSnapshot_Success(t *testing.T) {
 
 	// Build mock per tenant
 	clients := map[string]*mockCPIClient{
-		source.CpiEndpoint.Name: {
+		source.PirApiDestinationName: {
 			packages: []cpi.CPIPackage{{ID: "pkg1"}},
 			iflows: map[string][]cpi.IflowItem{
 				"pkg1": {
@@ -764,7 +764,7 @@ func TestCollectVersionSnapshot_Success(t *testing.T) {
 				{ID: "sc1", Version: "2.0.0", Status: consts.Artifact_Rt_Started},
 			},
 		},
-		target.CpiEndpoint.Name: {
+		target.PirApiDestinationName: {
 			iflows: map[string][]cpi.IflowItem{
 				"pkg1": {
 					{ArtifactCommonItem: cpi.ArtifactCommonItem{ID: "iflow1", Name: "IFlow 1", Version: "0.9.0", PackageID: "pkg1"}},
@@ -935,14 +935,14 @@ func TestCollectVersionSnapshot_PartialTenantFailure(t *testing.T) {
 	})
 
 	clients := map[string]*mockCPIClient{
-		source.CpiEndpoint.Name: {
+		source.PirApiDestinationName: {
 			packages: []cpi.CPIPackage{{ID: "pkg1"}},
 			iflows: map[string][]cpi.IflowItem{
 				"pkg1": {{ArtifactCommonItem: cpi.ArtifactCommonItem{ID: "iflow1", Name: "IFlow", Version: "1.0", PackageID: "pkg1"}}},
 			},
 			runtimeArts: []cpi.RuntimeArtifact{{ID: "iflow1", Version: "1.0", Status: consts.Artifact_Rt_Started}},
 		},
-		target.CpiEndpoint.Name: {
+		target.PirApiDestinationName: {
 			// Runtime succeeds but iflow fetch will fail
 			iflowsErr:   map[string]error{"pkg1": fmt.Errorf("timeout")},
 			runtimeArts: []cpi.RuntimeArtifact{},
@@ -2128,7 +2128,7 @@ func TestCreateDR_VersionDowngradeSkip(t *testing.T) {
 	factoryWithDowngrade := func(ctx context.Context, tenant string) (IntegrationService, error) {
 		// If this is the target tenant, GetDesignTimeIflow returns version 1.0.5 (for dg-iflow)
 		// and 1.0.8 (for ok-iflow)
-		if tenant == target.CpiEndpoint.Name {
+		if tenant == target.PirApiDestinationName {
 			return &mockCPIClientWithDesignTime{
 				iflowVersions: map[string]string{
 					"dg-iflow": "1.0.5", // higher than source 1.0.1 → downgrade
