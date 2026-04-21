@@ -40,6 +40,7 @@ func (s *Service) PreviewBootstrap(ctx context.Context, tenantID uint, cfToken s
 	if err != nil {
 		return nil, fmt.Errorf("preview: inspect: %w", err)
 	}
+	s.checkCentralTmsContext(result)
 
 	return buildPreview(tenant, result), nil
 }
@@ -107,6 +108,7 @@ func (s *Service) ApplyBootstrap(ctx context.Context, tenantID uint, cfToken str
 		_ = s.TransitionLifecycle(tenantID, EventBootstrapFailed)
 		return 0, fmt.Errorf("apply: inspect: %w", err)
 	}
+	s.checkCentralTmsContext(result)
 	if len(result.PermissionIssues) > 0 {
 		_ = s.TransitionLifecycle(tenantID, EventBootstrapFailed)
 		return 0, fmt.Errorf("apply: permission issues: %v", result.PermissionIssues)
@@ -367,7 +369,13 @@ func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string,
 
 	// CHECK_DESTINATIONS → write subscriber-side destinations into the subscriber's Destination Service instance
 	setStep(StepCheckDestinations)
-	destActs, err := bootstrapper.ensureSubscriberDestinations(ctx, tenant, result)
+	tmsCtx, err := loadTmsContext(s.DB)
+	if err != nil {
+		fail(lifecycle.FailureWaitingUserAction, StepCheckCentralTmsContext,
+			"CENTRAL_TMS_NOT_CONFIGURED: "+err.Error())
+		return
+	}
+	destActs, err := bootstrapper.ensureSubscriberDestinations(ctx, tenant, result, tmsCtx)
 	if err != nil {
 		fail(lifecycle.FailureRemoteSystemError, StepCheckDestinations, err.Error())
 		return
@@ -380,6 +388,9 @@ func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string,
 	}
 	if result.CasStandardInstanceGUID != "" {
 		markReady("content_assembly_dest_status")
+	}
+	if tmsCtx != nil && s.ProviderDest != nil {
+		markReady("transport_management_dest_status")
 	}
 
 	// Write provider-side CPIDELIVERY_PIR_{id} and CPIDELIVERY_CAS_{id} into
@@ -539,19 +550,12 @@ func (b *bootstrapApplier) ensureInstanceAndKey(
 // Destinations written into the subscriber's Destination Service:
 //
 //   - CloudIntegration       (PIR api credentials)
-//     URL: <pirRoot>/api/1.0/transportmodule/Transport
-//     Read by CAS to invoke the CPI Transport Module API.
-//
 //   - ContentAssemblyService (CAS standard credentials)
-//     Read by CAS to invoke the content-agent-assembly worker.
-//
-//   - TransportManagementService
-//     Deferred to Phase 3 — URL comes from CentralTmsContext after TMS node
-//     registration.
+//   - TransportManagementService (TMS credentials copied from provider-side TmsApiDestinationName)
 //
 // Provider-side destinations (CPIDELIVERY_PIR_{id}, CPIDELIVERY_CAS_{id}) are
 // NOT written here — see ensureProviderDestinations.
-func (b *bootstrapApplier) ensureSubscriberDestinations(ctx context.Context, tenant *db.CpiTenant, result *InspectionResult) ([]credentialAction, error) {
+func (b *bootstrapApplier) ensureSubscriberDestinations(ctx context.Context, tenant *db.CpiTenant, result *InspectionResult, tmsCtx *db.CentralTmsContext) ([]credentialAction, error) {
 	if result.DestinationServiceInstanceGUID == "" {
 		return nil, fmt.Errorf("destination service instance GUID is empty")
 	}
@@ -579,7 +583,7 @@ func (b *bootstrapApplier) ensureSubscriberDestinations(ctx context.Context, ten
 	var actions []credentialAction
 
 	// Build subscriber-side destination payloads from service key credentials.
-	destinations, err := b.buildSubscriberDestinations(ctx, result, tenant)
+	destinations, err := b.buildSubscriberDestinations(ctx, result, tenant, tmsCtx)
 	if err != nil {
 		return nil, err
 	}
@@ -606,18 +610,10 @@ func (b *bootstrapApplier) ensureSubscriberDestinations(ctx context.Context, ten
 // buildSubscriberDestinations constructs the cf.Destination payloads to be
 // written into the subscriber's own Destination Service.
 //
-// Returned destinations (written by ensureSubscriberDestinations):
-//
 //   - CloudIntegration       ← PIR api service key credentials
-//     URL: <pirRoot>/api/1.0/transportmodule/Transport
-//     Read by CAS to invoke the CPI Transport Module API.
-//
 //   - ContentAssemblyService ← CAS standard service key credentials
-//     Read by CAS to invoke the content-agent-assembly worker.
-//
-//   - TransportManagementService
-//     Deferred to Phase 3 — not included in the returned slice yet.
-func (b *bootstrapApplier) buildSubscriberDestinations(ctx context.Context, result *InspectionResult, tenant *db.CpiTenant) ([]cf.Destination, error) {
+//   - TransportManagementService ← TMS OAuth credentials copied from provider-side TmsApiDestinationName
+func (b *bootstrapApplier) buildSubscriberDestinations(ctx context.Context, result *InspectionResult, tenant *db.CpiTenant, tmsCtx *db.CentralTmsContext) ([]cf.Destination, error) {
 	var dests []cf.Destination
 
 	// CloudIntegration — PIR api service key credentials.
@@ -655,9 +651,22 @@ func (b *bootstrapApplier) buildSubscriberDestinations(ctx context.Context, resu
 		}
 	}
 
-	// TransportManagementService — deferred to Phase 3.
-	// URL is derived from CentralTmsContext.TmsApiEndpoint after TMS node
-	// registration completes.  Bootstrap will fill this in during REGISTER_TMS_NODE.
+	// TransportManagementService — TMS OAuth credentials copied from the provider-side
+	// TmsApiDestinationName destination.  The URL is the fixed TMS backend endpoint.
+	// Both destinations share the same TMS subscription credentials (RFC 013 §10).
+	if tmsCtx != nil && tmsCtx.TmsApiDestinationName != "" && b.providerDest != nil {
+		tmsDest, err := b.providerDest.GetDestination(ctx, tmsCtx.TmsApiDestinationName)
+		if err != nil {
+			return nil, fmt.Errorf("get TMS API destination %q from provider: %w", tmsCtx.TmsApiDestinationName, err)
+		}
+		if tmsDest == nil {
+			return nil, fmt.Errorf("TMS API destination %q not found in provider Destination Service", tmsCtx.TmsApiDestinationName)
+		}
+		dest := *tmsDest
+		dest.Name = "TransportManagementService"
+		dest.Description = fmt.Sprintf("DO NOT MODIFY. Created by cpi-delivery bootstrap for tenant %d", tenant.ID)
+		dests = append(dests, dest)
+	}
 
 	return dests, nil
 }
@@ -814,6 +823,11 @@ func buildOAuthDestination(name string, urlTransform func(string) string, tenant
 		)
 	}
 
+	// Service key UAA credentials often supply only the base host without the
+	// /oauth/token path (e.g. content-agent uaa.url).  Normalise before writing
+	// so that the BTP Destination Service entry is always a valid token endpoint.
+	tokenURL = cf.NormaliseTokenURL(tokenURL)
+
 	destURL := rawURL
 	if urlTransform != nil {
 		destURL = urlTransform(rawURL)
@@ -834,6 +848,17 @@ func buildOAuthDestination(name string, urlTransform func(string) string, tenant
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+// checkCentralTmsContext checks whether the CentralTmsContext is configured in the
+// DB (TmsApiDestinationName non-empty).  If not, it appends "CENTRAL_TMS_NOT_CONFIGURED"
+// to result.WaitingUserAction, which causes ApplyBootstrap and PreviewBootstrap to
+// surface a clear blocking signal to the operator before any CF API calls are made.
+func (s *Service) checkCentralTmsContext(result *InspectionResult) {
+	tmsCtx, err := loadTmsContext(s.DB)
+	if err != nil || tmsCtx.TmsApiDestinationName == "" {
+		result.WaitingUserAction = append(result.WaitingUserAction, "CENTRAL_TMS_NOT_CONFIGURED")
+	}
+}
 
 func (s *Service) getTenantForBootstrap(tenantID uint) (*db.CpiTenant, error) {
 	var tenant db.CpiTenant

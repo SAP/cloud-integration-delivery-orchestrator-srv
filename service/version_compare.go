@@ -129,7 +129,7 @@ func (s *Service) collectVersionSnapshot(rule db.DeliveryRule) {
 	}
 
 	// Get CPI client for source tenant
-	sourceClient, err := s.CPI(ctx, rule.SourceTenant.CpiEndpoint.Name)
+	sourceClient, err := s.CPI(ctx, rule.SourceTenant.PirApiDestinationName)
 	if err != nil {
 		completeWithError(fmt.Sprintf("failed to get source tenant CPI client: %s", err))
 		return
@@ -206,10 +206,10 @@ func (s *Service) fetchRuntimeIndex(ctx context.Context, tenants []db.CpiTenant)
 	for _, tenant := range tenants {
 		tenant := tenant // capture loop variable
 		rtGroup.Go(func() error {
-			client, err := s.CPI(rtCtx, tenant.CpiEndpoint.Name)
+			client, err := s.CPI(rtCtx, tenant.PirApiDestinationName)
 			if err != nil {
 				s.Logger.Warnf("version-compare: failed to get CPI client for tenant %s (ID=%d): %s",
-					tenant.CpiEndpoint.Name, tenant.ID, err)
+					tenant.PirApiDestinationName, tenant.ID, err)
 				// Store empty map, don't fail entire operation
 				rtMu.Lock()
 				runtimeIndex[tenant.ID] = make(map[string]cpi.RuntimeArtifact)
@@ -219,7 +219,7 @@ func (s *Service) fetchRuntimeIndex(ctx context.Context, tenants []db.CpiTenant)
 			artifacts, err := client.GetRuntimeArtifacts(rtCtx)
 			if err != nil {
 				s.Logger.Warnf("version-compare: failed to get runtime artifacts for tenant %s (ID=%d): %s",
-					tenant.CpiEndpoint.Name, tenant.ID, err)
+					tenant.PirApiDestinationName, tenant.ID, err)
 				rtMu.Lock()
 				runtimeIndex[tenant.ID] = make(map[string]cpi.RuntimeArtifact)
 				rtMu.Unlock()
@@ -289,7 +289,7 @@ func (s *Service) collectPackageSnapshot(
 	for i, tenant := range tenants {
 		i, tenant := i, tenant
 		g.Go(func() error {
-			client, err := s.CPI(gctx, tenant.CpiEndpoint.Name)
+			client, err := s.CPI(gctx, tenant.PirApiDestinationName)
 			if err != nil {
 				results[i] = tenantArtifacts{tenantID: tenant.ID, err: err}
 				return nil // error tolerance: don't fail entire group
@@ -587,7 +587,7 @@ func (s *Service) AdhocVersionCompare(ctx context.Context, tenantIDs []uint) (*V
 	sourceTenantID := tenants[0].ID
 
 	// 3. Get source CPI client and fetch packages
-	sourceClient, err := s.CPI(ctx, tenants[0].CpiEndpoint.Name)
+	sourceClient, err := s.CPI(ctx, tenants[0].PirApiDestinationName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get source CPI client: %w", err)
 	}

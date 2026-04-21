@@ -98,7 +98,7 @@ func NewDestinationServiceClient(ctx context.Context, credentials map[string]any
 	if clientID == "" || clientSecret == "" || tokenURL == "" || apiURL == "" {
 		return nil, fmt.Errorf("cf/dest: incomplete Destination Service credentials (missing clientid/clientsecret/url/uri)")
 	}
-	tokenURL = normaliseTokenURL(tokenURL)
+	tokenURL = NormaliseTokenURL(tokenURL)
 
 	c := &DestinationServiceClient{
 		httpClient:   &http.Client{Timeout: 30 * time.Second},
@@ -137,7 +137,7 @@ func NewDestinationServiceClientFromVCAP(appEnv *cfenv.App) (*DestinationService
 	if clientID == "" || clientSecret == "" || authURL == "" || apiURL == "" {
 		return nil, fmt.Errorf("cf/dest: incomplete 'destination' service credentials in VCAP_SERVICES")
 	}
-	authURL = normaliseTokenURL(authURL)
+	authURL = NormaliseTokenURL(authURL)
 
 	c := &DestinationServiceClient{
 		httpClient:   &http.Client{Timeout: 30 * time.Second},
@@ -154,8 +154,11 @@ func NewDestinationServiceClientFromVCAP(appEnv *cfenv.App) (*DestinationService
 	return c, nil
 }
 
-// normaliseTokenURL ensures the token URL ends with /oauth/token.
-func normaliseTokenURL(u string) string {
+// NormaliseTokenURL ensures an OAuth token URL ends with /oauth/token.
+// SAP BTP service key credentials often provide only the UAA base host
+// (e.g. "https://tenant.authentication.eu10.hana.ondemand.com"); this
+// function appends the path so the result is a valid token endpoint.
+func NormaliseTokenURL(u string) string {
 	if strings.HasSuffix(u, "/oauth/token") {
 		return u
 	}

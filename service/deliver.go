@@ -155,7 +155,7 @@ func (s *Service) BatchDeployTenantOps(drID uint, opIDs []uint, targetTenantID u
 
 		for i := range ops {
 			op := &ops[i]
-			cpiCli, err := s.CPI(context.Background(), op.Tenant.CpiEndpoint.Name)
+			cpiCli, err := s.CPI(context.Background(), op.Tenant.PirApiDestinationName)
 			if err != nil {
 				errOps[op.ID] = fmt.Errorf("failed to create cpi client for tenant %s: %s", op.Tenant.Name, err)
 				// mark as failed and continue

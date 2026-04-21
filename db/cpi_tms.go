@@ -100,9 +100,8 @@ type ApiEndpoint struct {
 //
 // # Backward Compatibility
 //
-// The original fields (Name, TransportNodeID/Name/Description, CpiEndpoint, Group) are
-// preserved unchanged so that existing API consumers and delivery workflows continue to
-// function during the phased migration.  New code should prefer the subaccount fields.
+// The original fields (Name, TransportNodeID/Name/Description, Group) are
+// preserved for existing API consumers and delivery workflows.
 type CpiTenant struct {
 	gorm.Model
 
@@ -120,10 +119,6 @@ type CpiTenant struct {
 	TransportNodeID          uint
 	TransportNodeName        string
 	TransportNodeDescription string
-
-	// CpiEndpoint is the original endpoint record stored as JSON.
-	// Superseded by IntegrationSuiteEndpoint but retained for API compatibility.
-	CpiEndpoint ApiEndpoint `gorm:"serializer:json"`
 
 	// Group is an informal tag for grouping tenants (e.g. "prod", "ctest", "ep").
 	Group string

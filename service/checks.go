@@ -51,7 +51,7 @@ func checkVersionPattern(op *db.ArtifactTenantOperation, rule *db.DeliveryRule) 
 }
 
 func (s *Service) checkVersionDowngradeInTenant(op *db.ArtifactTenantOperation, targetTenant *db.CpiTenant) error {
-	cli, err := s.CPI(context.Background(), targetTenant.CpiEndpoint.Name)
+	cli, err := s.CPI(context.Background(), targetTenant.PirApiDestinationName)
 	if err != nil {
 		return err
 	}
@@ -79,7 +79,7 @@ func (s *Service) checkVersionDowngradeInTenant(op *db.ArtifactTenantOperation, 
 	}
 	if semver.Compare(sourceVersion, targetVersion) < 0 {
 		return fmt.Errorf("artifact %s: delivering version %s to tenant %s would downgrade existing version %s, please confirm",
-			op.ArtifactTechID, sourceVersion, targetTenant.CpiEndpoint.Name, targetVersion)
+			op.ArtifactTechID, sourceVersion, targetTenant.Name, targetVersion)
 	}
 	return nil
 }

@@ -20,12 +20,12 @@ func NewManager(resolver *cf.DestinationServiceClient) *Manager {
 	return &Manager{clients: make(map[string]*CpiClient), resolver: resolver}
 }
 
-// Get returns a cached CPI client for the given tenant, creating one if needed.
+// Get returns a cached CPI client for the given BTP destination name, creating one if needed.
 // Thread-safe via double-checked locking.
-func (m *Manager) Get(ctx context.Context, tenant string) (*CpiClient, error) {
+func (m *Manager) Get(ctx context.Context, destinationName string) (*CpiClient, error) {
 	// Fast path: read lock
 	m.mu.RLock()
-	if cli, ok := m.clients[tenant]; ok {
+	if cli, ok := m.clients[destinationName]; ok {
 		m.mu.RUnlock()
 		return cli, nil
 	}
@@ -34,13 +34,13 @@ func (m *Manager) Get(ctx context.Context, tenant string) (*CpiClient, error) {
 	// Slow path: write lock, double-check
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if cli, ok := m.clients[tenant]; ok {
+	if cli, ok := m.clients[destinationName]; ok {
 		return cli, nil
 	}
-	cli, err := NewClient(ctx, tenant, m.resolver)
+	cli, err := NewClient(ctx, destinationName, m.resolver)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create CPI client for tenant %s: %w", tenant, err)
+		return nil, fmt.Errorf("failed to create CPI client for destination %s: %w", destinationName, err)
 	}
-	m.clients[tenant] = cli
+	m.clients[destinationName] = cli
 	return cli, nil
 }

@@ -1,48 +1,86 @@
 package handler
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 
+	"mmt-delivery/db"
 	"mmt-delivery/service"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
+
+// resolveCpiDestination looks up a tenant by ID from the DB and returns its PirApiDestinationName.
+// Writes an appropriate error response and returns ("", false) on any failure.
+func (h *Handler) resolveCpiDestination(ctx *gin.Context) (string, bool) {
+	idStr := ctx.Query("tenant")
+	if idStr == "" {
+		Fail(ctx, 400, "missing required query param: tenant (tenant ID)")
+		return "", false
+	}
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		Fail(ctx, 400, fmt.Sprintf("invalid tenant id %q: %s", idStr, err))
+		return "", false
+	}
+	var tenant db.CpiTenant
+	if err := h.db.First(&tenant, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			Fail(ctx, 404, fmt.Sprintf("tenant %d not found", id))
+		} else {
+			Fail(ctx, 500, err.Error())
+		}
+		return "", false
+	}
+	if tenant.PirApiDestinationName == "" {
+		Fail(ctx, 400, fmt.Sprintf("tenant %d has no CPI destination configured (bootstrap required)", id))
+		return "", false
+	}
+	return tenant.PirApiDestinationName, true
+}
 
 // get all packages within a cpi tenant
 func (h *Handler) GetPackagesHandler(ctx *gin.Context) {
-	cpi_tenant := ctx.Query("tenant")
-	cpiClient, error := h.cpi.Get(ctx, cpi_tenant)
-	if error != nil {
-		h.logger.Errorf("error while retrieving packages: %s", error)
-		Fail(ctx, 500, error.Error())
+	destName, ok := h.resolveCpiDestination(ctx)
+	if !ok {
 		return
 	}
-	packages, error := cpiClient.GetPackages(ctx)
-	if error != nil {
-		h.logger.Errorf("error while retrieving packages: %s", error)
-		Fail(ctx, 500, error.Error())
+	cpiClient, err := h.cpi.Get(ctx, destName)
+	if err != nil {
+		h.logger.Errorf("error while retrieving packages: %s", err)
+		Fail(ctx, 500, err.Error())
+		return
+	}
+	packages, err := cpiClient.GetPackages(ctx)
+	if err != nil {
+		h.logger.Errorf("error while retrieving packages: %s", err)
+		Fail(ctx, 500, err.Error())
 		return
 	}
 	OK(ctx, packages)
-
 }
 
 // get all iflows under a package
 func (h *Handler) GetPackageIflowsHandler(ctx *gin.Context) {
-	cpi_tenant := ctx.Query("tenant")
+	destName, ok := h.resolveCpiDestination(ctx)
+	if !ok {
+		return
+	}
 	packageID := ctx.Query("package")
 
-	cpiClient, err := h.cpi.Get(ctx, cpi_tenant)
+	cpiClient, err := h.cpi.Get(ctx, destName)
 	if err != nil {
 		h.logger.Errorf("error creating CPI client: %s", err)
 		Fail(ctx, 500, err.Error())
 		return
 	}
-	iflows, error := cpiClient.GetPackageIflows(ctx, packageID)
-	if error != nil {
+	iflows, err := cpiClient.GetPackageIflows(ctx, packageID)
+	if err != nil {
 		h.logger.Error("Error while retrieving iflows within a package")
-		Fail(ctx, 500, fmt.Sprintf("internal server error: %s", error))
+		Fail(ctx, 500, fmt.Sprintf("internal server error: %s", err))
 		return
 	}
 	OK(ctx, iflows)
@@ -51,9 +89,12 @@ func (h *Handler) GetPackageIflowsHandler(ctx *gin.Context) {
 // include type: script collection, iflow artifacts
 // Delegates to service.FetchPackageArtifacts for unified artifact retrieval.
 func (h *Handler) GetPackageArtifactsHandler(ctx *gin.Context) {
-	cpi_tenant := ctx.Query("tenant")
+	destName, ok := h.resolveCpiDestination(ctx)
+	if !ok {
+		return
+	}
 	packageID := ctx.Query("package")
-	client, err := h.cpi.Get(ctx, cpi_tenant)
+	client, err := h.cpi.Get(ctx, destName)
 	if err != nil {
 		Fail(ctx, 500, fmt.Sprintf("failed to create cpi client: %s", err))
 		return
@@ -93,12 +134,11 @@ func (h *Handler) GetDestinationsHandler(ctx *gin.Context) {
 
 // Get all deployed(runtime) artifacts by cpi tenant
 func (h *Handler) GetRuntimeArtifacts(ctx *gin.Context) {
-	cpi_tenant := ctx.Query("tenant")
-	if cpi_tenant == "" {
-		Fail(ctx, 400, "bad request: missing tenant")
+	destName, ok := h.resolveCpiDestination(ctx)
+	if !ok {
 		return
 	}
-	client, err := h.cpi.Get(ctx, cpi_tenant)
+	client, err := h.cpi.Get(ctx, destName)
 	if err != nil {
 		Fail(ctx, 500, fmt.Sprintf("failed to create cpi client: %s", err))
 		return

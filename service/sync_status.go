@@ -121,7 +121,7 @@ func (s *Service) syncDeployState(deliveryRequestID uint, user string) []db.Cond
 		if op.DeployState != lifecycle.DeployInProgress {
 			continue
 		}
-		cpiCli, err := s.CPI(context.Background(), op.Tenant.CpiEndpoint.Name)
+		cpiCli, err := s.CPI(context.Background(), op.Tenant.PirApiDestinationName)
 		if err != nil {
 			conditions = append(conditions, db.Condition{
 				DeliveryRequestID:         deliveryRequestID,
@@ -182,7 +182,7 @@ func (s *Service) syncDeployState(deliveryRequestID uint, user string) []db.Cond
 				DeliveryRequestID:         deliveryRequestID,
 				ArtifactTenantOperationID: op.ID,
 				State:                     lifecycle.CondError,
-				Message:                   fmt.Sprintf("artifact %s (version %s) deploy failed in tenant %s. please check in CPI tenant %s", op.ArtifactTechID, op.ArtifactVersion, op.Tenant.Name, op.Tenant.CpiEndpoint.Name),
+				Message:                   fmt.Sprintf("artifact %s (version %s) deploy failed in tenant %s. please check in CPI tenant %s", op.ArtifactTechID, op.ArtifactVersion, op.Tenant.Name, op.Tenant.PirApiDestinationName),
 			})
 		}
 		// if deployed, save to condition

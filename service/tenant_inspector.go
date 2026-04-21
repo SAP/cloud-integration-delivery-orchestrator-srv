@@ -12,6 +12,7 @@ import (
 // ── Bootstrap step names (matches TenantBootstrapJob.CurrentStep values) ─────
 
 const (
+	StepCheckCentralTmsContext  = "CHECK_CENTRAL_TMS_CONTEXT"
 	StepCheckSpaceContext       = "CHECK_SPACE_CONTEXT"
 	StepCheckDestinationService = "CHECK_DESTINATION_SERVICE"
 	StepCheckPirApi             = "CHECK_PIR_API"

@@ -88,13 +88,23 @@ func (h *Handler) CheckConnectivity(ctx *gin.Context) {
 		results = append(results, ConnectivityStatus{Name: "TMS", Type: "tms", Status: "error", Message: err.Error()})
 	} else {
 		results = append(results, ConnectivityStatus{Name: "TMS", Type: "tms", Status: "ok"})
+		// Update LastValidatedAt on successful TMS connectivity check.
+		now := time.Now()
+		h.db.Model(&db.CentralTmsContext{}).Where("1 = 1").Update("last_validated_at", now)
 	}
 
 	// 3. CPI Tenants — resolve destination then verify OAuth2 token can be obtained
 	var tenants []db.CpiTenant
 	h.db.Find(&tenants)
 	for _, t := range tenants {
-		destName := t.CpiEndpoint.Name
+		destName := t.PirApiDestinationName
+		if destName == "" {
+			results = append(results, ConnectivityStatus{
+				Name: t.Name, Type: "cpi_tenant", Status: "error",
+				Message: "no CPI destination configured (PirApiDestinationName is empty — bootstrap required)",
+			})
+			continue
+		}
 		dest, err := h.destSvc.GetDestination(checkCtx, destName)
 		if err != nil {
 			results = append(results, ConnectivityStatus{

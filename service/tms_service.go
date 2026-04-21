@@ -68,10 +68,5 @@ func buildTmsClient(ctx context.Context, tmsCtx *db.CentralTmsContext, providerD
 		return nil, fmt.Errorf("TMS API destination %q is missing OAuth credentials (clientId/clientSecret/tokenServiceURL)", tmsCtx.TmsApiDestinationName)
 	}
 
-	apiEndpoint := tmsCtx.TmsApiEndpoint
-	if apiEndpoint == "" {
-		apiEndpoint = dest.URL
-	}
-
-	return tms.NewTmsClient(ctx, apiEndpoint, dest.TokenServiceURL, dest.ClientId, dest.ClientSecret)
+	return tms.NewTmsClient(ctx, dest.URL, dest.TokenServiceURL, dest.ClientId, dest.ClientSecret)
 }

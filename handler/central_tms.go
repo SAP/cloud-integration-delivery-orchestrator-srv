@@ -9,8 +9,18 @@ import (
 	"mmt-delivery/db"
 )
 
+// centralTmsContextResponse is the API response for GET /api/v1/centralTmsContext.
+// TmsApiEndpoint is derived at read-time from the provider Destination Service and
+// is never persisted in the database.
+type centralTmsContextResponse struct {
+	db.CentralTmsContext
+	TmsApiEndpoint string `json:"TmsApiEndpoint,omitempty"`
+}
+
 // GetCentralTmsContext returns the current CentralTmsContext configuration.
 // In v1 there is exactly one row; returns 404 if none exists yet.
+// The response includes TmsApiEndpoint, dynamically resolved from the provider
+// Destination Service using TmsApiDestinationName.
 func (h *Handler) GetCentralTmsContext(ctx *gin.Context) {
 	var tmsCtx db.CentralTmsContext
 	if err := h.db.First(&tmsCtx).Error; err != nil {
@@ -21,7 +31,14 @@ func (h *Handler) GetCentralTmsContext(ctx *gin.Context) {
 		}
 		return
 	}
-	OK(ctx, tmsCtx)
+
+	resp := centralTmsContextResponse{CentralTmsContext: tmsCtx}
+	if tmsCtx.TmsApiDestinationName != "" {
+		if dest, err := h.destSvc.GetDestination(ctx.Request.Context(), tmsCtx.TmsApiDestinationName); err == nil && dest != nil {
+			resp.TmsApiEndpoint = dest.URL
+		}
+	}
+	OK(ctx, resp)
 }
 
 // UpsertCentralTmsContext creates or fully replaces the CentralTmsContext.
