@@ -100,7 +100,7 @@ type ApiEndpoint struct {
 //
 // # Backward Compatibility
 //
-// The original fields (Name, TransportNodeID/Name/Description, Group) are
+// The original fields (Name, TmsSourceNodeID, Group) are
 // preserved for existing API consumers and delivery workflows.
 type CpiTenant struct {
 	gorm.Model
@@ -112,13 +112,6 @@ type CpiTenant struct {
 	Name      string `gorm:"uniqueIndex,where:deleted_at IS NULL"`
 	CreatedBy string
 	UpdatedBy string
-
-	// TransportNodeID/Name/Description are the original TMS node bindings.
-	// Superseded by TmsSourceNodeName (central registration) but retained so that
-	// existing DeliveryRule associations continue to resolve correctly.
-	TransportNodeID          uint
-	TransportNodeName        string
-	TransportNodeDescription string
 
 	// Group is an informal tag for grouping tenants (e.g. "prod", "ctest", "ep").
 	Group string
@@ -214,6 +207,11 @@ type CpiTenant struct {
 	// Set by CentralTmsRegistrar after successful node create-or-reuse.
 	// Used as the "sourceNode" field in every CAS export request body.
 	TmsSourceNodeName string
+
+	// TmsSourceNodeID is the numeric ID of this tenant's TMS source node,
+	// cached from the TMS API after RegisterTmsNode completes.
+	// Required for all TMS API calls that use /v2/nodes/{id}/... path parameters.
+	TmsSourceNodeID uint
 
 	// TmsNodeRegistrationStatus tracks whether the TMS source node is registered.
 	TmsNodeRegistrationStatus lifecycle.PrerequisiteStatus `gorm:"default:'missing'"`

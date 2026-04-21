@@ -1732,13 +1732,13 @@ func setupCreateTestData(t *testing.T) (ruleID uint, snapshotID uint, snapshotCo
 	tc = newTestCleanup(t)
 
 	source := seedTenant(t, tc, "cre-src-"+t.Name())
-	source.TransportNodeID = 500
-	source.TransportNodeName = "cre-src-node"
+	source.TmsSourceNodeID = 500
+	source.TmsSourceNodeName = "cre-src-node"
 	testDB.Save(&source)
 
 	target := seedTenant(t, tc, "cre-tgt-"+t.Name())
-	target.TransportNodeID = 600
-	target.TransportNodeName = "cre-tgt-node"
+	target.TmsSourceNodeID = 600
+	target.TmsSourceNodeName = "cre-tgt-node"
 	testDB.Save(&target)
 
 	rule := seedRule(t, tc, "cre-rule-"+t.Name(), source, []db.CpiTenant{source, target}, true)
@@ -2073,13 +2073,13 @@ func TestCreateDR_VersionDowngradeSkip(t *testing.T) {
 	tc := newTestCleanup(t)
 
 	source := seedTenant(t, tc, "dg-src-"+t.Name())
-	source.TransportNodeID = 700
-	source.TransportNodeName = "dg-src-node"
+	source.TmsSourceNodeID = 700
+	source.TmsSourceNodeName = "dg-src-node"
 	testDB.Save(&source)
 
 	target := seedTenant(t, tc, "dg-tgt-"+t.Name())
-	target.TransportNodeID = 800
-	target.TransportNodeName = "dg-tgt-node"
+	target.TmsSourceNodeID = 800
+	target.TmsSourceNodeName = "dg-tgt-node"
 	testDB.Save(&target)
 
 	rule := seedRule(t, tc, "dg-rule-"+t.Name(), source, []db.CpiTenant{source, target}, true)

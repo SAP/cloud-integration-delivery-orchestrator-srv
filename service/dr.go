@@ -40,10 +40,10 @@ func (s *Service) LoadArtifact(op db.ArtifactTenantOperation) (atf db.Artifact, 
 	return
 }
 
-// queryTenantByNodeID queries a CPI tenant by its TMS transport node ID
+// queryTenantByNodeID queries a CPI tenant by its TMS source node ID
 func (s *Service) queryTenantByNodeID(nodeID uint) (*db.CpiTenant, error) {
 	var tenant db.CpiTenant
-	if err := s.DB.Where(&db.CpiTenant{TransportNodeID: nodeID}).First(&tenant).Error; err != nil {
+	if err := s.DB.Where(&db.CpiTenant{TmsSourceNodeID: nodeID}).First(&tenant).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, fmt.Errorf("no cpi tenant found for tms node %d", nodeID)
 		}
@@ -109,8 +109,8 @@ func (s *Service) SourceAndRoute(ctx context.Context, includedTenants []db.CpiTe
 	nodeIDs := make(map[uint]bool) // nodeid - tenant
 	for i := range includedTenants {
 		t := &includedTenants[i]
-		nodeIDs[t.TransportNodeID] = true
-		includedNodes = append(includedNodes, nodeAll[t.TransportNodeID])
+		nodeIDs[t.TmsSourceNodeID] = true
+		includedNodes = append(includedNodes, nodeAll[t.TmsSourceNodeID])
 	}
 	targetNodeIDs := make(map[uint]bool) // to determine source node
 	for _, r := range transportRoutes {
@@ -121,7 +121,7 @@ func (s *Service) SourceAndRoute(ctx context.Context, includedTenants []db.CpiTe
 	}
 	for i := range includedTenants {
 		t := &includedTenants[i]
-		if !targetNodeIDs[t.TransportNodeID] {
+		if !targetNodeIDs[t.TmsSourceNodeID] {
 			sorceTenant = t
 			break
 		}

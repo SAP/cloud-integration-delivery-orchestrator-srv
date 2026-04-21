@@ -29,8 +29,7 @@ import (
 //
 // Request body:
 //
-//	{ "mode": "auto" }
-//	{ "mode": "manual", "nodeName": "MyNode" }
+//	{ "nodeId": 42, "nodeName": "DEV_NODE" }
 //
 // Preconditions checked here:
 //   - LifecycleState = ready (bootstrap must be complete)
@@ -43,11 +42,11 @@ func (h *Handler) RegisterTmsNode(ctx *gin.Context) {
 	}
 
 	var body struct {
-		Mode     string `json:"mode" binding:"required"`
-		NodeName string `json:"nodeName"`
+		NodeId   uint   `json:"nodeId"   binding:"required"`
+		NodeName string `json:"nodeName" binding:"required"`
 	}
 	if err := ctx.ShouldBindJSON(&body); err != nil {
-		Fail(ctx, 400, "mode is required")
+		Fail(ctx, 400, "nodeId and nodeName are required")
 		return
 	}
 
@@ -67,12 +66,10 @@ func (h *Handler) RegisterTmsNode(ctx *gin.Context) {
 		return
 	}
 
-	if err := h.svc.RegisterTmsNode(ctx.Request.Context(), tenantID, body.Mode, body.NodeName); err != nil {
+	if err := h.svc.RegisterTmsNode(ctx.Request.Context(), tenantID, body.NodeId, body.NodeName); err != nil {
 		switch {
 		case errors.Is(err, service.ErrAlreadyRegistering):
 			Fail(ctx, 409, err.Error())
-		case errors.Is(err, service.ErrAutoModeNotSupported):
-			Fail(ctx, 501, err.Error())
 		default:
 			Fail(ctx, 500, err.Error())
 		}

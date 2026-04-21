@@ -23,7 +23,7 @@ func (s *Service) BatchImportTenantOps(drID uint, opIDs []uint, targetTenantID u
 	if targetTenant, err = s.queryTenant(targetTenantID); err != nil {
 		return false, err
 	}
-	targetNodeID := targetTenant.TransportNodeID
+	targetNodeID := targetTenant.TmsSourceNodeID
 
 	trs := make([]uint, 0)
 	errOps := make(map[uint]error)
@@ -31,8 +31,8 @@ func (s *Service) BatchImportTenantOps(drID uint, opIDs []uint, targetTenantID u
 	for i := range ops {
 		op := &ops[i]
 		// only queued(INITIAL), Failed(enable re-import) state can be triggered for import
-		if (op.ImportState != lifecycle.ImportQueued && op.ImportState != lifecycle.ImportFailed) || op.Tenant.TransportNodeID != targetNodeID {
-			errOps[op.ID] = fmt.Errorf("cannot import artifact operation #%d(at TMS node %d) for target TMS node %d. Import State: %s", op.ID, op.Tenant.TransportNodeID, targetNodeID, op.ImportState)
+		if (op.ImportState != lifecycle.ImportQueued && op.ImportState != lifecycle.ImportFailed) || op.Tenant.TmsSourceNodeID != targetNodeID {
+			errOps[op.ID] = fmt.Errorf("cannot import artifact operation #%d(at TMS node %d) for target TMS node %d. Import State: %s", op.ID, op.Tenant.TmsSourceNodeID, targetNodeID, op.ImportState)
 			continue
 		}
 		trNumber, err := ToUint(op.TransportRequestNumber)

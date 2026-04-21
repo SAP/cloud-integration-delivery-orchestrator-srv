@@ -45,14 +45,6 @@ var ErrRoutesNotConfigured = fmt.Errorf("routes not configured: no routes found 
 // SELECT FOR UPDATE guard, preventing a double-registration race.
 var ErrAlreadyRegistering = fmt.Errorf("TMS node is already in registering state; complete Route configuration and call confirm, or wait before re-registering")
 
-// ErrAutoModeNotSupported is returned when mode=auto is requested.
-// Auto mode requires write access to the TMS subaccount's Destination Service,
-// which is not available in the current deployment topology (cpi-delivery's
-// ProviderDest and the TMS subaccount Destination Service are separate instances
-// in a multi-subaccount BTP setup).  The feature may be re-introduced in a
-// future SaaS phase with cross-subaccount Destination Service access.
-var ErrAutoModeNotSupported = fmt.Errorf("auto mode not supported: registerAuto requires write access to the TMS subaccount Destination Service, which is unavailable in the current topology; use mode=manual")
-
 // ── ConfirmTmsRoutesResult ────────────────────────────────────────────────────
 
 // ConfirmTmsRoutesResult holds the routes returned by a successful confirm call.
@@ -64,18 +56,17 @@ type ConfirmTmsRoutesResult struct {
 
 // RegisterTmsNode executes TMS Node registration for the given tenant.
 //
-// Only mode="manual" is supported.  mode="auto" is not implemented in the
-// current deployment topology (see ErrAutoModeNotSupported).
-// nodeName is required for manual mode.
+// nodeId is the numeric TMS node ID selected by the operator from the node list.
+// nodeName is the node's name, stored as TmsSourceNodeName for CAS export requests.
 //
 // Atomically claims TmsNodeRegistrationStatus = registering via SELECT FOR UPDATE
 // before executing any TMS API calls, preventing double-registration races.
 // Returns ErrAlreadyRegistering if another request already claimed the slot.
 //
-// On success TmsNodeRegistrationStatus is written to registering and TmsSourceNodeName
-// is set (or updated if different from the stored value).
+// On success TmsNodeRegistrationStatus is written to registering and both
+// TmsSourceNodeName and TmsSourceNodeID are persisted.
 // On failure TmsNodeRegistrationStatus is written to failed.
-func (s *Service) RegisterTmsNode(ctx context.Context, tenantID uint, mode, nodeName string) error {
+func (s *Service) RegisterTmsNode(ctx context.Context, tenantID uint, nodeId uint, nodeName string) error {
 	tmsCtx, err := loadTmsContext(s.DB)
 	if err != nil {
 		return fmt.Errorf("RegisterTmsNode: get central TMS context: %w", err)
@@ -86,7 +77,8 @@ func (s *Service) RegisterTmsNode(ctx context.Context, tenantID uint, mode, node
 		return fmt.Errorf("RegisterTmsNode: build TMS node client: %w", err)
 	}
 
-	// Atomically claim registering status to prevent TOCTOU double-registration.
+	// Atomically claim registering status and persist both nodeId and nodeName,
+	// which are fully known from the request at this point.
 	// The transaction holds a row-level lock until it commits, so a concurrent
 	// request that also passed the handler guard will block here and then see
 	// PrereqRegistering, returning ErrAlreadyRegistering.
@@ -100,41 +92,27 @@ func (s *Service) RegisterTmsNode(ctx context.Context, tenantID uint, mode, node
 		if t.TmsNodeRegistrationStatus == lifecycle.PrereqRegistering {
 			return ErrAlreadyRegistering
 		}
-		updates := map[string]any{
+		return tx.Model(&db.CpiTenant{}).Where("id = ?", tenantID).Updates(map[string]any{
 			"tms_node_registration_status": lifecycle.PrereqRegistering,
-		}
-		if nodeName != "" {
-			updates["tms_source_node_name"] = nodeName
-		}
-		return tx.Model(&db.CpiTenant{}).Where("id = ?", tenantID).Updates(updates).Error
+			"tms_source_node_name":         nodeName,
+			"tms_source_node_id":           nodeId,
+		}).Error
 	}); err != nil {
 		return err
 	}
 
-	// registering claimed — now perform mode-specific TMS API validation.
+	// registering claimed — validate the node via TMS API.
 	// Any failure here writes PrereqFailed (best-effort) and returns the error.
-	switch mode {
-	case "manual":
-		return s.validateManual(ctx, tenantID, nodeClient, nodeName)
-	case "auto":
-		// Roll back to failed: we claimed registering but cannot proceed.
-		_ = s.DB.Model(&db.CpiTenant{}).Where("id = ?", tenantID).
-			Update("tms_node_registration_status", lifecycle.PrereqFailed).Error
-		return ErrAutoModeNotSupported
-	default:
-		_ = s.DB.Model(&db.CpiTenant{}).Where("id = ?", tenantID).
-			Update("tms_node_registration_status", lifecycle.PrereqFailed).Error
-		return fmt.Errorf("RegisterTmsNode: unknown mode %q; expected 'manual'", mode)
-	}
+	return s.validateNode(ctx, tenantID, nodeClient, nodeId, nodeName)
 }
 
-// validateManual checks the structure of an operator-created TMS node.
+// validateNode checks the structure of an operator-selected TMS node by ID.
 // The registering status has already been atomically claimed by the caller
 // (RegisterTmsNode transaction); this function only validates the node via
 // the TMS API and writes failed on any error.
 //
 // Flow:
-//  1. GetNodeByName → node must exist
+//  1. GetNode(nodeId) → node must exist
 //  2. Node must have at least one target with a non-empty DestinationName (structural check)
 //
 // Note: the target destination's existence and credentials are NOT validated via
@@ -143,30 +121,30 @@ func (s *Service) RegisterTmsNode(ctx context.Context, tenantID uint, mode, node
 // in the TMS subaccount Destination Service — two separate instances in a
 // multi-subaccount BTP deployment.  Destination validity is the operator's
 // responsibility (B2 resolution).
-func (s *Service) validateManual(ctx context.Context, tenantID uint, nodeClient *tms.TmsClient, nodeName string) error {
-	if nodeName == "" {
+func (s *Service) validateNode(ctx context.Context, tenantID uint, nodeClient *tms.TmsClient, nodeId uint, nodeName string) error {
+	if nodeId == 0 {
 		return s.writeTmsStatus(tenantID, lifecycle.PrereqFailed,
-			fmt.Errorf("manual mode requires a non-empty nodeName"))
+			fmt.Errorf("nodeId is required"))
 	}
 
-	node, err := nodeClient.GetNodeByName(ctx, nodeName)
+	node, err := nodeClient.GetNode(ctx, nodeId)
 	if err != nil {
 		return s.writeTmsStatus(tenantID, lifecycle.PrereqFailed,
-			fmt.Errorf("config_mismatch: TMS API error looking up node %q: %w", nodeName, err))
+			fmt.Errorf("config_mismatch: TMS API error looking up node %d (%q): %w", nodeId, nodeName, err))
 	}
-	if node == nil {
+	if node.ID == 0 {
 		return s.writeTmsStatus(tenantID, lifecycle.PrereqFailed,
-			fmt.Errorf("config_mismatch: TMS node %q does not exist", nodeName))
+			fmt.Errorf("config_mismatch: TMS node %d (%q) does not exist", nodeId, nodeName))
 	}
 
 	// Structural check: node must have at least one target with a destination name.
 	if len(node.Targets) == 0 {
 		return s.writeTmsStatus(tenantID, lifecycle.PrereqFailed,
-			fmt.Errorf("config_mismatch: TMS node %q has no targets", nodeName))
+			fmt.Errorf("config_mismatch: TMS node %d (%q) has no targets", nodeId, nodeName))
 	}
 	if node.Targets[0].DestinationName == "" {
 		return s.writeTmsStatus(tenantID, lifecycle.PrereqFailed,
-			fmt.Errorf("config_mismatch: TMS node %q target[0] has no destinationName", nodeName))
+			fmt.Errorf("config_mismatch: TMS node %d (%q) target[0] has no destinationName", nodeId, nodeName))
 	}
 
 	return nil

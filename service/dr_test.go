@@ -33,13 +33,13 @@ func setupDRTest(t *testing.T) drTestSetup {
 	suffix := t.Name()
 
 	source := seedTenant(t, tc, "dr-src-"+suffix)
-	source.TransportNodeID = 100
-	source.TransportNodeName = "source-node-" + suffix
+	source.TmsSourceNodeID = 100
+	source.TmsSourceNodeName = "source-node-" + suffix
 	testDB.Save(&source)
 
 	target := seedTenant(t, tc, "dr-tgt-"+suffix)
-	target.TransportNodeID = 200
-	target.TransportNodeName = "target-node-" + suffix
+	target.TmsSourceNodeID = 200
+	target.TmsSourceNodeName = "target-node-" + suffix
 	testDB.Save(&target)
 
 	rule := seedRule(t, tc, "dr-rule-"+suffix, source, []db.CpiTenant{source, target}, true)
@@ -115,7 +115,7 @@ func TestInsertTenantOps_WithTR(t *testing.T) {
 
 	tmsMock := &mockTMSClient{
 		transportRequests: map[string]*tms.TransportRequestV1{
-			"TR-001": validTR("TR-001", s.source.TransportNodeName, s.artifact.TechID, s.artifact.Version, s.artifact.Type),
+			"TR-001": validTR("TR-001", s.source.TmsSourceNodeName, s.artifact.TechID, s.artifact.Version, s.artifact.Type),
 		},
 	}
 
@@ -207,7 +207,7 @@ func TestUpdateTenantOps_EmptyToNonEmpty(t *testing.T) {
 	// Now update to a valid TR — should validate
 	tmsMock := &mockTMSClient{
 		transportRequests: map[string]*tms.TransportRequestV1{
-			"TR-002": validTR("TR-002", s.source.TransportNodeName, s.artifact.TechID, s.artifact.Version, s.artifact.Type),
+			"TR-002": validTR("TR-002", s.source.TmsSourceNodeName, s.artifact.TechID, s.artifact.Version, s.artifact.Type),
 		},
 	}
 	svc2 := newTestService(factory, testServiceOpts{tms: tmsMock})
@@ -299,13 +299,13 @@ func setupApproveTest(t *testing.T, trNumber string) approveTestSetup {
 	suffix := t.Name()
 
 	source := seedTenant(t, tc, "appr-src-"+suffix)
-	source.TransportNodeID = 300
-	source.TransportNodeName = "appr-src-node-" + suffix
+	source.TmsSourceNodeID = 300
+	source.TmsSourceNodeName = "appr-src-node-" + suffix
 	testDB.Save(&source)
 
 	target := seedTenant(t, tc, "appr-tgt-"+suffix)
-	target.TransportNodeID = 400
-	target.TransportNodeName = "appr-tgt-node-" + suffix
+	target.TmsSourceNodeID = 400
+	target.TmsSourceNodeName = "appr-tgt-node-" + suffix
 	testDB.Save(&target)
 
 	rule := seedRule(t, tc, "appr-rule-"+suffix, source, []db.CpiTenant{source, target}, true)
@@ -379,7 +379,7 @@ func TestRequestApproval_WithValidTR(t *testing.T) {
 
 	tmsMock := &mockTMSClient{
 		transportRequests: map[string]*tms.TransportRequestV1{
-			"TR-APPROVE-001": validTR("TR-APPROVE-001", s.source.TransportNodeName, s.ops[0].ArtifactTechID, s.ops[0].ArtifactVersion, consts.Artifact_Type_Iflow),
+			"TR-APPROVE-001": validTR("TR-APPROVE-001", s.source.TmsSourceNodeName, s.ops[0].ArtifactTechID, s.ops[0].ArtifactVersion, consts.Artifact_Type_Iflow),
 		},
 	}
 
@@ -598,14 +598,14 @@ func TestApprove_AllTRPresent(t *testing.T) {
 
 	tmsMock := &mockTMSClient{
 		transportRequests: map[string]*tms.TransportRequestV1{
-			"TR-APPROVE-002": validTR("TR-APPROVE-002", s.source.TransportNodeName, s.ops[0].ArtifactTechID, s.ops[0].ArtifactVersion, consts.Artifact_Type_Iflow),
+			"TR-APPROVE-002": validTR("TR-APPROVE-002", s.source.TmsSourceNodeName, s.ops[0].ArtifactTechID, s.ops[0].ArtifactVersion, consts.Artifact_Type_Iflow),
 		},
 		// SyncDeliveryStatus calls TrNodeStatuses — provide a valid response
 		nodeStatuses: map[string]map[uint]tms.TrNodeStatus{
 			"TR-APPROVE-002": {
-				s.target.TransportNodeID: {
+				s.target.TmsSourceNodeID: {
 					TransportRequestNumber: "TR-APPROVE-002",
-					TransportNodeID:        s.target.TransportNodeID,
+					TransportNodeID:        s.target.TmsSourceNodeID,
 					Status:                 "INITIAL",
 				},
 			},

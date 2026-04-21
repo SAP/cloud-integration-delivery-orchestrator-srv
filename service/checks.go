@@ -101,8 +101,8 @@ func (s *Service) TrExist(op *db.ArtifactTenantOperation, sourceTenant *db.CpiTe
 	if trV1 == nil || trV1.ID == 0 || trV1.State != "RELEASED" { // only released tr can be imported
 		return false, fmt.Errorf("artifact %s has invalid transport request number %s", op.ArtifactTechID, trNumber)
 	}
-	if trV1.Origin != sourceTenant.TransportNodeName { // check if match source tenant. can only be checked by origin node name, not id.
-		return false, fmt.Errorf("artifact %s has transport request number %s not from source tenant node %s", op.ArtifactTechID, trNumber, sourceTenant.TransportNodeName)
+	if trV1.Origin != sourceTenant.TmsSourceNodeName { // check if match source tenant. can only be checked by origin node name, not id.
+		return false, fmt.Errorf("artifact %s has transport request number %s not from source tenant node %s", op.ArtifactTechID, trNumber, sourceTenant.TmsSourceNodeName)
 	}
 	// check Content Field, should match techID, Version, Type
 	index := -1
