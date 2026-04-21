@@ -66,6 +66,10 @@ type cachedDest struct {
 // OAuth2ClientCredentials fields (ClientId, ClientSecret, TokenServiceURL,
 // TokenServiceURLType) and BasicAuthentication fields (User, Password) are
 // top-level, not nested — this matches the actual API wire format.
+//
+// AdditionalProperties holds service-specific flat key/value pairs that are
+// serialised alongside the standard fields.  Use this for fields like
+// "sourceSystemId.CPI" that are not part of the standard destination schema.
 type Destination struct {
 	Name                string `json:"Name"`
 	Description         string `json:"Description,omitempty"`
@@ -80,6 +84,32 @@ type Destination struct {
 	User                string `json:"User,omitempty"`
 	Password            string `json:"Password,omitempty"`
 	Port                string `json:"Port,omitempty"`
+
+	// AdditionalProperties are merged into the JSON payload at the top level.
+	// Keys must not collide with the named fields above.
+	AdditionalProperties map[string]string `json:"-"`
+}
+
+// MarshalJSON serialises Destination as a flat JSON object, merging
+// AdditionalProperties into the standard fields.
+func (d Destination) MarshalJSON() ([]byte, error) {
+	type plain Destination // avoid infinite recursion
+	b, err := json.Marshal(plain(d))
+	if err != nil {
+		return nil, err
+	}
+	if len(d.AdditionalProperties) == 0 {
+		return b, nil
+	}
+	// Merge additional properties into the flat JSON object.
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		return nil, err
+	}
+	for k, v := range d.AdditionalProperties {
+		m[k] = v
+	}
+	return json.Marshal(m)
 }
 
 // NewDestinationServiceClient constructs a DestinationServiceClient from credentials

@@ -282,7 +282,7 @@ func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string,
 
 	// ── Apply missing items ───────────────────────────────────────────────────
 
-	bootstrapper, err := newBootstrapApplier(tenant, cfToken, result, s.ProviderDest)
+	bootstrapper, err := newBootstrapApplier(s.DB, tenant, cfToken, result, s.ProviderDest)
 	if err != nil {
 		fail(lifecycle.FailureRemoteSystemError, "", fmt.Sprintf("build applier: %s", err))
 		return
@@ -381,6 +381,14 @@ func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string,
 	if result.CasStandardInstanceGUID != "" {
 		markReady("content_assembly_dest_status")
 	}
+	// TransportManagementService is written when CentralTmsContext is configured.
+	// Check whether ensureSubscriberDestinations actually produced the destination.
+	for _, act := range destActs {
+		if act.DestinationName == "TransportManagementService" {
+			markReady("transport_management_dest_status")
+			break
+		}
+	}
 
 	// Write provider-side CPIDELIVERY_PIR_{id} and CPIDELIVERY_CAS_{id} into
 	// cpi-delivery's own Destination Service.  Skipped when ProviderDest is not
@@ -432,6 +440,7 @@ func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string,
 // It is constructed after the read-only InspectTenant phase completes.
 type bootstrapApplier struct {
 	cfClient     *cf.CFClient
+	db           *gorm.DB
 	tenant       *db.CpiTenant
 	orgGUID      string
 	spaceGUID    string
@@ -444,13 +453,14 @@ type credentialAction struct {
 	ActionType      string `json:"actionType"` // "created" | "updated" | "skipped"
 }
 
-func newBootstrapApplier(tenant *db.CpiTenant, cfToken string, result *InspectionResult, providerDest *cf.DestinationServiceClient) (*bootstrapApplier, error) {
+func newBootstrapApplier(database *gorm.DB, tenant *db.CpiTenant, cfToken string, result *InspectionResult, providerDest *cf.DestinationServiceClient) (*bootstrapApplier, error) {
 	cfcl, err := cf.NewCFClient(tenant.CfApiURL(), cfToken)
 	if err != nil {
 		return nil, fmt.Errorf("bootstrapApplier: CF client: %w", err)
 	}
 	return &bootstrapApplier{
 		cfClient:     cfcl,
+		db:           database,
 		tenant:       tenant,
 		orgGUID:      result.OrgGUID,
 		spaceGUID:    tenant.CfSpace,
@@ -655,9 +665,37 @@ func (b *bootstrapApplier) buildSubscriberDestinations(ctx context.Context, resu
 		}
 	}
 
-	// TransportManagementService — deferred to Phase 3.
-	// URL is derived from CentralTmsContext.TmsApiEndpoint after TMS node
-	// registration completes.  Bootstrap will fill this in during REGISTER_TMS_NODE.
+	// TransportManagementService — TMS OAuth credentials mirrored from the provider's
+	// TmsApiDestinationName destination.  Requires CentralTmsContext to be configured.
+	// If TmsSourceNodeName is already known (re-apply after Phase 3), sourceSystemId.CPI
+	// is included so CAS can route exports to the correct TMS source node.
+	tmsCtx, err := loadTmsContext(b.db)
+	if err == nil && tmsCtx.TmsApiDestinationName != "" && b.providerDest != nil {
+		tmsDest, err := b.providerDest.GetDestination(ctx, tmsCtx.TmsApiDestinationName)
+		if err != nil {
+			return nil, fmt.Errorf("get TMS provider destination %q: %w", tmsCtx.TmsApiDestinationName, err)
+		}
+		if tmsDest != nil {
+			d := cf.Destination{
+				Name:                "TransportManagementService",
+				Description:         fmt.Sprintf("DO NOT MODIFY. Created by cpi-delivery bootstrap for tenant %d", tenant.ID),
+				Type:                "HTTP",
+				URL:                 tmsDest.URL,
+				Authentication:      "OAuth2ClientCredentials",
+				ProxyType:           "Internet",
+				TokenServiceURL:     tmsDest.TokenServiceURL,
+				TokenServiceURLType: "Dedicated",
+				ClientId:            tmsDest.ClientId,
+				ClientSecret:        tmsDest.ClientSecret,
+			}
+			if tenant.TmsSourceNodeName != "" {
+				d.AdditionalProperties = map[string]string{
+					"sourceSystemId.CPI": tenant.TmsSourceNodeName,
+				}
+			}
+			dests = append(dests, d)
+		}
+	}
 
 	return dests, nil
 }

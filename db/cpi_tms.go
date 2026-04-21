@@ -195,24 +195,10 @@ type CpiTenant struct {
 
 	// ── Central TMS Registration ──────────────────────────────────────────────────────
 
-	// SourceSystemID is the value written into the `sourceSystemId` Additional Property
-	// of the TransportManagementService destination during bootstrap.
-	//
-	// SAP Help reference:
-	//   https://help.sap.com/docs/content-agent-service/user-guide/create-transportmanagementservice-destination
-	//
-	// The destination supports per-content-type overrides:
-	//   sourceSystemId.CPI          → used when exporting CPI artifacts
-	//   sourceSystemId.APIManagement → used when exporting API Management artifacts
-	//   sourceSystemId.sap.build    → used when exporting Build Apps artifacts
-	//   sourceSystemId              → default fallback for any content type
-	//
-	// The value is described as "the ID of the source node of the transport route,
-	// for example, DEV_NODE" — which appears to be the TMS node name, not a numeric ID.
-	//
-	// TODO (Phase 3 implementation): Clarify whether this is identical to
-	// TmsSourceNodeName or a distinct value.  If identical, this field can be removed
-	// and bootstrap should write TmsSourceNodeName into sourceSystemId.CPI directly.
+	// SourceSystemID is retained for schema compatibility but unused at runtime.
+	// Bootstrap writes sourceSystemId.CPI via Destination.AdditionalProperties
+	// using TmsSourceNodeName directly (confirmed identical per SAP Help:
+	// "the ID of the source node of the transport route, e.g. DEV_NODE").
 	SourceSystemID string
 
 	// TmsSourceNodeName is the name of this tenant's source node in the central TMS landscape.
