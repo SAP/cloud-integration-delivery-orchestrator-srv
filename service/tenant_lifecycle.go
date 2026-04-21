@@ -60,8 +60,12 @@ var allowedTransitions = map[lifecycle.TenantLifecycleState]map[LifecycleEvent]l
 		EventBootstrapStarted: lifecycle.TenantReadying,
 	},
 	lifecycle.TenantNotReady: {
-		EventBootstrapStarted: lifecycle.TenantReadying,
-		EventKeyFieldChanged:  lifecycle.TenantDraft,
+		EventBootstrapStarted:    lifecycle.TenantReadying,
+		EventKeyFieldChanged:     lifecycle.TenantDraft,
+		// Operator saves CF identity on a tenant that previously failed bootstrap
+		// (e.g. correcting the CfSpace GUID after a CF_SPACE_NOT_FOUND failure).
+		// Transitions to configured so the wizard can re-run apply.
+		EventCfIdentityConfigured: lifecycle.TenantConfigured,
 	},
 	lifecycle.TenantReadying: {
 		EventBootstrapFinished: lifecycle.TenantReady,
@@ -73,6 +77,9 @@ var allowedTransitions = map[lifecycle.TenantLifecycleState]map[LifecycleEvent]l
 		// key credentials or re-sync destinations after an external change.
 		// The job is labeled JobTypeApply (not retry) because no failure preceded it.
 		EventBootstrapStarted: lifecycle.TenantReadying,
+		// Operator re-saves CF identity on a ready tenant (e.g. updating CfSpace
+		// after a space migration).  Transitions to configured so they can re-run apply.
+		EventCfIdentityConfigured: lifecycle.TenantConfigured,
 	},
 }
 

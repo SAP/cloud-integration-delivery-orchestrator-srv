@@ -184,12 +184,22 @@ func (c *DestinationServiceClient) refreshToken(ctx context.Context) error {
 	}
 	defer resp.Body.Close()
 
+	var buf bytes.Buffer
+	_, _ = buf.ReadFrom(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("cf/dest: token endpoint returned HTTP %d: %s", resp.StatusCode, buf.String())
+	}
+
 	var tok struct {
 		AccessToken string `json:"access_token"`
 		ExpiresIn   int    `json:"expires_in"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&tok); err != nil {
+	if err := json.Unmarshal(buf.Bytes(), &tok); err != nil {
 		return fmt.Errorf("cf/dest: decode token response: %w", err)
+	}
+	if tok.AccessToken == "" {
+		return fmt.Errorf("cf/dest: token endpoint returned empty access_token")
 	}
 	c.token = tok.AccessToken
 	c.tokenExp = time.Now().Add(time.Duration(tok.ExpiresIn-30) * time.Second)

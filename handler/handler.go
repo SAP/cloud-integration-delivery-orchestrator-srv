@@ -109,6 +109,11 @@ func (h *Handler) SetupRoutes(v1 *gin.RouterGroup, v2 *gin.RouterGroup, requireS
 		tenantManage.PUT("/cpiTenant/:id/cfIdentity", h.SaveCfIdentity)
 		tenantManage.DELETE("/cpiTenant/:id", h.DeleteCpiTenant)
 
+		// RFC 013 §09: CF org/space discovery (proxies CF API, token never persisted)
+		tenantManage.POST("/cf/token", h.ExchangeCfPasscode)
+		tenantManage.POST("/cf/orgs", h.ListCfOrgs)
+		tenantManage.POST("/cf/spaces", h.ListCfSpaces)
+
 		// RFC 013: bootstrap lifecycle endpoints
 		tenantManage.POST("/cpiTenant/:id/bootstrap/preview", h.PreviewBootstrap)
 		tenantManage.POST("/cpiTenant/:id/bootstrap/apply", h.ApplyBootstrap)

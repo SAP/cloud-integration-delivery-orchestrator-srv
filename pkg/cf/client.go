@@ -17,6 +17,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/cloudfoundry/go-cfclient/v3/client"
@@ -50,6 +53,70 @@ func NewCFClient(apiURL, bearerToken string) (*CFClient, error) {
 		return nil, fmt.Errorf("cf: create client: %w", err)
 	}
 	return &CFClient{inner: inner}, nil
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Passcode → Bearer token exchange
+// ──────────────────────────────────────────────────────────────────────────────
+
+// ExchangeCfPasscode exchanges a one-time CF passcode (obtained from
+// https://login.cf.<region>.hana.ondemand.com/passcode) for a short-lived
+// Bearer token using the CF OAuth password grant with the public "cf" client.
+//
+// The token is returned as a raw string (without "Bearer " prefix) and is
+// never persisted by this function.
+func ExchangeCfPasscode(ctx context.Context, cfApiEndpoint, passcode string) (string, error) {
+	loginBase := strings.Replace(cfApiEndpoint, "https://api.", "https://login.", 1)
+	loginBase = strings.TrimRight(loginBase, "/")
+	tokenURL := loginBase + "/oauth/token"
+
+	form := url.Values{
+		"grant_type":    {"password"},
+		"passcode":      {passcode},
+		"response_type": {"token"},
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(form.Encode()))
+	if err != nil {
+		return "", fmt.Errorf("cf: build token exchange request: %w", err)
+	}
+	// CF public OAuth client — client_id="cf", client_secret="" (empty)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("cf:")))
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("cf: token exchange request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		var cfErr struct {
+			ErrorDescription string `json:"error_description"`
+			Error            string `json:"error"`
+		}
+		_ = json.Unmarshal(body, &cfErr)
+		msg := cfErr.ErrorDescription
+		if msg == "" {
+			msg = cfErr.Error
+		}
+		if msg == "" {
+			msg = fmt.Sprintf("HTTP %d", resp.StatusCode)
+		}
+		return "", fmt.Errorf("cf: passcode exchange failed: %s", msg)
+	}
+
+	var result struct {
+		AccessToken string `json:"access_token"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", fmt.Errorf("cf: decode token exchange response: %w", err)
+	}
+	if result.AccessToken == "" {
+		return "", fmt.Errorf("cf: token exchange returned empty access_token")
+	}
+	return result.AccessToken, nil
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -173,9 +240,21 @@ func (c *CFClient) GetServiceInstanceByName(ctx context.Context, spaceGUID, inst
 // CreateManagedServiceInstance creates a new managed service instance and polls
 // until the async CF job completes.  Returns the created instance GUID.
 //
+// parameters is an optional map of service-broker–specific parameters passed
+// as the "parameters" field in the CF API request body (equivalent to `cf
+// create-service … -c '{…}'`).  Pass nil when no parameters are required.
+//
 // API: POST /v3/service_instances  →  jobGUID  →  GET /v3/jobs/{guid} (poll)
-func (c *CFClient) CreateManagedServiceInstance(ctx context.Context, spaceGUID, planGUID, instanceName string) (string, error) {
+func (c *CFClient) CreateManagedServiceInstance(ctx context.Context, spaceGUID, planGUID, instanceName string, parameters map[string]any) (string, error) {
 	req := resource.NewServiceInstanceCreateManaged(instanceName, spaceGUID, planGUID)
+	if len(parameters) > 0 {
+		raw, err := json.Marshal(parameters)
+		if err != nil {
+			return "", fmt.Errorf("cf: marshal service instance parameters: %w", err)
+		}
+		rm := json.RawMessage(raw)
+		req.Parameters = &rm
+	}
 
 	jobGUID, err := c.inner.ServiceInstances.CreateManaged(ctx, req)
 	if err != nil {
@@ -294,6 +373,31 @@ func (c *CFClient) HasSpaceDeveloperRole(ctx context.Context, spaceGUID, userID 
 // ──────────────────────────────────────────────────────────────────────────────
 // Space helpers
 // ──────────────────────────────────────────────────────────────────────────────
+
+// ListOrgs returns all CF organizations accessible to the token holder.
+//
+// API: GET /v3/organizations
+func (c *CFClient) ListOrgs(ctx context.Context) ([]*resource.Organization, error) {
+	orgs, err := c.inner.Organizations.ListAll(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("cf: list orgs: %w", err)
+	}
+	return orgs, nil
+}
+
+// ListSpaces returns all CF spaces within the given organization that the token
+// holder can access.
+//
+// API: GET /v3/spaces?organization_guids=<orgGUID>
+func (c *CFClient) ListSpaces(ctx context.Context, orgGUID string) ([]*resource.Space, error) {
+	opts := client.NewSpaceListOptions()
+	opts.OrganizationGUIDs = client.Filter{Values: []string{orgGUID}}
+	spaces, err := c.inner.Spaces.ListAll(ctx, opts)
+	if err != nil {
+		return nil, fmt.Errorf("cf: list spaces (org=%s): %w", orgGUID, err)
+	}
+	return spaces, nil
+}
 
 // GetSpace returns the CF space resource for the given space GUID.
 //

@@ -81,6 +81,18 @@ func (s *Service) ApplyBootstrap(ctx context.Context, tenantID uint, cfToken str
 	if err := s.TransitionLifecycle(tenantID, EventBootstrapStarted); err != nil {
 		return 0, fmt.Errorf("apply: %w", err)
 	}
+	// Reset all prerequisite statuses and clear stale error from any previous run.
+	if err := s.DB.Model(&db.CpiTenant{}).Where("id = ?", tenantID).Updates(map[string]any{
+		"blocking_reason":                    "",
+		"pir_api_status":                     lifecycle.PrereqMissing,
+		"cas_application_status":             lifecycle.PrereqMissing,
+		"cas_standard_status":                lifecycle.PrereqMissing,
+		"cloud_integration_dest_status":      lifecycle.PrereqMissing,
+		"content_assembly_dest_status":       lifecycle.PrereqMissing,
+		"transport_management_dest_status":   lifecycle.PrereqMissing,
+	}).Error; err != nil {
+		env.Logger().Warnw("apply: failed to reset prereq statuses", "tenantID", tenantID, "error", err)
+	}
 
 	// ── Phase 2: Synchronous inspect ─────────────────────────────────────────
 	// State is now readying.  Any failure from here must roll back to not_ready
@@ -123,7 +135,6 @@ func (s *Service) ApplyBootstrap(ctx context.Context, tenantID uint, cfToken str
 	go s.runBootstrap(tenant, job.ID, cfToken, result)
 	return job.ID, nil
 }
-
 
 // GetBootstrapStatus returns the most recent TenantBootstrapJob for the tenant.
 func (s *Service) GetBootstrapStatus(tenantID uint) (*db.TenantBootstrapJob, error) {
@@ -261,6 +272,14 @@ func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string,
 		}
 	}
 
+	markReady := func(field string) {
+		if err := s.DB.Model(&db.CpiTenant{}).Where("id = ?", tenant.ID).
+			Update(field, lifecycle.PrereqReady).Error; err != nil {
+			env.Logger().Errorw("bootstrap: failed to update prereq status",
+				"tenantID", tenant.ID, "field", field, "error", err)
+		}
+	}
+
 	// ── Apply missing items ───────────────────────────────────────────────────
 
 	bootstrapper, err := newBootstrapApplier(tenant, cfToken, result, s.ProviderDest)
@@ -275,12 +294,20 @@ func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string,
 	setStep(StepCheckPirApi)
 	acts, err := bootstrapper.ensureInstanceAndKey(ctx, offeringPIR, planPirApi,
 		instanceNamePirApi, keyNamePirApi,
-		missingCodePirApi, &result.PirApiInstanceGUID, result)
+		missingCodePirApi, &result.PirApiInstanceGUID, result,
+		map[string]any{
+			"grant-types":   []string{"client_credentials", "password"},
+			"redirect-uris": []string{},
+			"roles":         []string{"AuthGroup_IntegrationDeveloper", "WorkspacePackagesTransport"},
+		})
 	if err != nil {
 		fail(lifecycle.FailureRemoteSystemError, StepCheckPirApi, err.Error())
 		return
 	}
 	credentialActions = append(credentialActions, acts...)
+	if result.PirApiInstanceGUID != "" {
+		markReady("pir_api_status")
+	}
 
 	// CHECK_CAS_APPLICATION → create instance + service key if missing.
 	// Note: the CAS application service key is NOT used to build a subscriber-side
@@ -289,23 +316,35 @@ func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string,
 	setStep(StepCheckCasApplication)
 	acts, err = bootstrapper.ensureInstanceAndKey(ctx, offeringCAS, planCasApplication,
 		instanceNameCasApplication, keyNameCasApplication,
-		missingCodeCasApplication, &result.CasApplicationInstanceGUID, result)
+		missingCodeCasApplication, &result.CasApplicationInstanceGUID, result,
+		map[string]any{
+			"roles": []string{"Security Operator", "Admin", "Read", "Import", "Export"},
+		})
 	if err != nil {
 		fail(lifecycle.FailureRemoteSystemError, StepCheckCasApplication, err.Error())
 		return
 	}
 	credentialActions = append(credentialActions, acts...)
+	if result.CasApplicationInstanceGUID != "" {
+		markReady("cas_application_status")
+	}
 
 	// CHECK_CAS_STANDARD → create instance + service key if missing
 	setStep(StepCheckCasStandard)
 	acts, err = bootstrapper.ensureInstanceAndKey(ctx, offeringCAS, planCasStandard,
 		instanceNameCasStandard, keyNameCasStandard,
-		missingCodeCasStandard, &result.CasStandardInstanceGUID, result)
+		missingCodeCasStandard, &result.CasStandardInstanceGUID, result,
+		map[string]any{
+			"roles": []string{"Assemble"},
+		})
 	if err != nil {
 		fail(lifecycle.FailureRemoteSystemError, StepCheckCasStandard, err.Error())
 		return
 	}
 	credentialActions = append(credentialActions, acts...)
+	if result.CasStandardInstanceGUID != "" {
+		markReady("cas_standard_status")
+	}
 
 	// CHECK_DESTINATION_SERVICE → create instance if missing.
 	// Grouped with CHECK_DESTINATIONS: the instance is the vehicle for writing
@@ -318,7 +357,7 @@ func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string,
 	setStep(StepCheckDestinationService)
 	if result.DestinationServiceInstanceGUID == "" {
 		guid, err := bootstrapper.ensureServiceInstance(ctx, offeringDestination, planDestinationLite,
-			instanceNameDestinationLite)
+			instanceNameDestinationLite, nil)
 		if err != nil {
 			fail(lifecycle.FailureRemoteSystemError, StepCheckDestinationService, err.Error())
 			return
@@ -334,6 +373,14 @@ func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string,
 		return
 	}
 	credentialActions = append(credentialActions, destActs...)
+	// CloudIntegration and ContentAssemblyService are both written by ensureSubscriberDestinations.
+	// Mark them ready only if the underlying service instance (and thus key) was present.
+	if result.PirApiInstanceGUID != "" {
+		markReady("cloud_integration_dest_status")
+	}
+	if result.CasStandardInstanceGUID != "" {
+		markReady("content_assembly_dest_status")
+	}
 
 	// Write provider-side CPIDELIVERY_PIR_{id} and CPIDELIVERY_CAS_{id} into
 	// cpi-delivery's own Destination Service.  Skipped when ProviderDest is not
@@ -357,7 +404,7 @@ func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string,
 			"tenantID", tenant.ID, "jobID", jobID, "error", err)
 	}
 
-	// Persist updated destination names on tenant.
+	// Persist provider-side destination names on tenant.
 	// Runtime-critical: TrResolver uses these names on every deploy / TR generation.
 	// A failure here must abort bootstrap — marking the tenant ready without these
 	// names would cause all runtime operations to fail silently after a restart.
@@ -418,7 +465,10 @@ func newBootstrapApplier(tenant *db.CpiTenant, cfToken string, result *Inspectio
 // Lookup is by instanceName (not by plan) so that cpi-delivery's dedicated
 // instance is found unambiguously, even if other instances of the same plan
 // exist in the subscriber's space.
-func (b *bootstrapApplier) ensureServiceInstance(ctx context.Context, offering, plan, instanceName string) (string, error) {
+//
+// parameters is forwarded verbatim to the CF service broker (equivalent to
+// `cf create-service … -c '{…}'`).  Pass nil when no parameters are required.
+func (b *bootstrapApplier) ensureServiceInstance(ctx context.Context, offering, plan, instanceName string, parameters map[string]any) (string, error) {
 	// Look up the cpi-delivery–owned instance by its fixed name.
 	existing, err := b.cfClient.GetServiceInstanceByName(ctx, b.spaceGUID, instanceName)
 	if err != nil {
@@ -433,7 +483,7 @@ func (b *bootstrapApplier) ensureServiceInstance(ctx context.Context, offering, 
 		return "", fmt.Errorf("get plan GUID (offering=%s, plan=%s): %w", offering, plan, err)
 	}
 
-	guid, err := b.cfClient.CreateManagedServiceInstance(ctx, b.spaceGUID, planGUID, instanceName)
+	guid, err := b.cfClient.CreateManagedServiceInstance(ctx, b.spaceGUID, planGUID, instanceName, parameters)
 	if err != nil {
 		return "", fmt.Errorf("create instance %q: %w", instanceName, err)
 	}
@@ -443,6 +493,9 @@ func (b *bootstrapApplier) ensureServiceInstance(ctx context.Context, offering, 
 // ensureInstanceAndKey creates a service instance (if missing) and a service
 // key (if missing) for the given offering/plan.  Updates result.ServiceKeyGUIDs.
 // Returns the credential actions taken.
+//
+// parameters is forwarded to the CF service broker on instance creation.
+// Pass nil when no broker parameters are required.
 func (b *bootstrapApplier) ensureInstanceAndKey(
 	ctx context.Context,
 	offering, plan string,
@@ -450,10 +503,11 @@ func (b *bootstrapApplier) ensureInstanceAndKey(
 	missingCode string,
 	instanceGUIDPtr *string,
 	result *InspectionResult,
+	parameters map[string]any,
 ) ([]credentialAction, error) {
 	// Ensure instance exists.
 	if *instanceGUIDPtr == "" {
-		guid, err := b.ensureServiceInstance(ctx, offering, plan, instanceName)
+		guid, err := b.ensureServiceInstance(ctx, offering, plan, instanceName, parameters)
 		if err != nil {
 			return nil, err
 		}
@@ -575,9 +629,11 @@ func (b *bootstrapApplier) buildSubscriberDestinations(ctx context.Context, resu
 			if err != nil {
 				return nil, fmt.Errorf("get PIR api key credentials: %w", err)
 			}
-			if d, ok := buildOAuthDestination("CloudIntegration", transportModuleURL, tenant.ID, creds); ok {
-				dests = append(dests, d)
+			d, err := buildOAuthDestination("CloudIntegration", transportModuleURL, tenant.ID, creds)
+			if err != nil {
+				return nil, err
 			}
+			dests = append(dests, d)
 		}
 	}
 
@@ -591,9 +647,11 @@ func (b *bootstrapApplier) buildSubscriberDestinations(ctx context.Context, resu
 			if err != nil {
 				return nil, fmt.Errorf("get CAS standard key credentials: %w", err)
 			}
-			if d, ok := buildOAuthDestination("ContentAssemblyService", nil, tenant.ID, creds); ok {
-				dests = append(dests, d)
+			d, err := buildOAuthDestination("ContentAssemblyService", nil, tenant.ID, creds)
+			if err != nil {
+				return nil, err
 			}
+			dests = append(dests, d)
 		}
 	}
 
@@ -642,12 +700,14 @@ func (b *bootstrapApplier) ensureProviderDestinations(ctx context.Context, tenan
 			if err != nil {
 				return nil, fmt.Errorf("get PIR api key credentials for provider dest: %w", err)
 			}
-			if dest, ok := buildOAuthDestination(tenant.PirApiDestinationName, nil /* base URL as-is */, tenant.ID, creds); ok {
-				if err := b.providerDest.UpsertDestination(ctx, dest); err != nil {
-					return nil, fmt.Errorf("upsert provider dest %q: %w", dest.Name, err)
-				}
-				actions = append(actions, credentialAction{DestinationName: dest.Name, ActionType: "upserted"})
+			dest, err := buildOAuthDestination(tenant.PirApiDestinationName, nil /* base URL as-is */, tenant.ID, creds)
+			if err != nil {
+				return nil, err
 			}
+			if err := b.providerDest.UpsertDestination(ctx, dest); err != nil {
+				return nil, fmt.Errorf("upsert provider dest %q: %w", dest.Name, err)
+			}
+			actions = append(actions, credentialAction{DestinationName: dest.Name, ActionType: "upserted"})
 		}
 	}
 
@@ -659,12 +719,14 @@ func (b *bootstrapApplier) ensureProviderDestinations(ctx context.Context, tenan
 			if err != nil {
 				return nil, fmt.Errorf("get CAS application key credentials for provider dest: %w", err)
 			}
-			if dest, ok := buildOAuthDestination(tenant.CasEngineDestinationName, nil /* base URL as-is */, tenant.ID, creds); ok {
-				if err := b.providerDest.UpsertDestination(ctx, dest); err != nil {
-					return nil, fmt.Errorf("upsert provider dest %q: %w", dest.Name, err)
-				}
-				actions = append(actions, credentialAction{DestinationName: dest.Name, ActionType: "upserted"})
+			dest, err := buildOAuthDestination(tenant.CasEngineDestinationName, nil /* base URL as-is */, tenant.ID, creds)
+			if err != nil {
+				return nil, err
 			}
+			if err := b.providerDest.UpsertDestination(ctx, dest); err != nil {
+				return nil, fmt.Errorf("upsert provider dest %q: %w", dest.Name, err)
+			}
+			actions = append(actions, credentialAction{DestinationName: dest.Name, ActionType: "upserted"})
 		}
 	}
 
@@ -685,20 +747,71 @@ func transportModuleURL(rootURL string) string {
 // buildOAuthDestination constructs a cf.Destination for OAuth2ClientCredentials
 // authentication from a service key credentials map.
 //
-// urlTransform is an optional function applied to the "url" field from the
-// credentials before it is written to the destination.  Pass nil to use the
-// credential URL as-is.  For example, CloudIntegration requires appending
-// the Transport Module path: transportModuleURL.
+// SAP BTP service key credential structures vary by service:
+//   - it-rt/api nests everything under "oauth":
+//     {"oauth": {"url": "<service>", "tokenurl": "<token>", "clientid": "...", "clientsecret": "..."}}
+//   - content-agent uses top-level "url" + "uaa" nested OAuth fields:
+//     {"url": "<service>", "uaa": {"clientid": "...", "clientsecret": "...", "url": "<token-base>"}}
 //
-// Returns false if any required credential field (url, tokenurl, clientid,
-// clientsecret) is absent.
-func buildOAuthDestination(name string, urlTransform func(string) string, tenantID uint, creds map[string]any) (cf.Destination, bool) {
+// Resolution order: flat top-level → "uaa" nested → "oauth" nested.
+//
+// urlTransform is an optional function applied to the resolved service URL before it
+// is written to the destination.  Pass nil to use the credential URL as-is.
+//
+// Returns an error if required credential fields cannot be resolved.
+func buildOAuthDestination(name string, urlTransform func(string) string, tenantID uint, creds map[string]any) (cf.Destination, error) {
+	// Service base URL: top-level "url" (preferred) or "uri".
 	rawURL, _ := creds["url"].(string)
+	if rawURL == "" {
+		rawURL, _ = creds["uri"].(string)
+	}
+
+	// OAuth fields: try flat top-level first, then fall back to nested "uaa".
 	tokenURL, _ := creds["tokenurl"].(string)
 	clientID, _ := creds["clientid"].(string)
 	clientSecret, _ := creds["clientsecret"].(string)
+
+	if tokenURL == "" || clientID == "" || clientSecret == "" {
+		if uaa, ok := creds["uaa"].(map[string]any); ok {
+			if tokenURL == "" {
+				tokenURL, _ = uaa["tokenurl"].(string)
+				if tokenURL == "" {
+					// content-agent puts the UAA base URL in uaa.url (no tokenurl field).
+					tokenURL, _ = uaa["url"].(string)
+				}
+			}
+			if clientID == "" {
+				clientID, _ = uaa["clientid"].(string)
+			}
+			if clientSecret == "" {
+				clientSecret, _ = uaa["clientsecret"].(string)
+			}
+		}
+	}
+
+	// it-rt/api nests url + tokenurl + clientid + clientsecret under "oauth".
 	if rawURL == "" || tokenURL == "" || clientID == "" || clientSecret == "" {
-		return cf.Destination{}, false
+		if oauth, ok := creds["oauth"].(map[string]any); ok {
+			if rawURL == "" {
+				rawURL, _ = oauth["url"].(string)
+			}
+			if tokenURL == "" {
+				tokenURL, _ = oauth["tokenurl"].(string)
+			}
+			if clientID == "" {
+				clientID, _ = oauth["clientid"].(string)
+			}
+			if clientSecret == "" {
+				clientSecret, _ = oauth["clientsecret"].(string)
+			}
+		}
+	}
+
+	if rawURL == "" || tokenURL == "" || clientID == "" || clientSecret == "" {
+		return cf.Destination{}, fmt.Errorf(
+			"build destination %q: incomplete service key credentials (url=%v tokenurl=%v clientid=%v clientsecret=%v)",
+			name, rawURL != "", tokenURL != "", clientID != "", clientSecret != "",
+		)
 	}
 
 	destURL := rawURL
@@ -717,7 +830,7 @@ func buildOAuthDestination(name string, urlTransform func(string) string, tenant
 		TokenServiceURLType: "Dedicated",
 		ClientId:            clientID,
 		ClientSecret:        clientSecret,
-	}, true
+	}, nil
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
