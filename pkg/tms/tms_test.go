@@ -30,6 +30,7 @@ func createTestClient(apiURL string) *TmsClient {
 			HttpClient:  &http.Client{},
 			AccessToken: "test-token",
 			ApiURL:      apiURL,
+			TokenExp:    time.Now().Add(24 * time.Hour),
 		},
 	}
 }

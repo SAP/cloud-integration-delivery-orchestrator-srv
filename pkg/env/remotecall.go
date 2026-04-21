@@ -19,8 +19,8 @@ type HttpClient struct {
 	ClientId     string
 	ClientSecret string
 	AuthUrl      string
-	tokenExp     time.Time    // proactive expiry; set by fetchToken from expires_in
-	mu           sync.Mutex   // protects AccessToken and tokenExp
+	TokenExp time.Time    // proactive expiry; set by fetchToken from expires_in
+	mu       sync.Mutex  // protects AccessToken and TokenExp
 }
 type OauthResp struct {
 	AccessToken string `json:"access_token"`
@@ -80,7 +80,7 @@ func (c *HttpClient) fetchToken(ctx context.Context) error {
 
 	c.mu.Lock()
 	c.AccessToken = oauthResp.AccessToken
-	c.tokenExp = time.Now().Add(time.Duration(oauthResp.ExpiresIn-30) * time.Second)
+	c.TokenExp = time.Now().Add(time.Duration(oauthResp.ExpiresIn-30) * time.Second)
 	c.mu.Unlock()
 	return nil
 }
@@ -90,7 +90,7 @@ func (c *HttpClient) fetchToken(ctx context.Context) error {
 // On 401 (e.g. clock skew), it refreshes the token once and retries.
 func (c *HttpClient) Do(ctx context.Context, request *HttpRequest) (*[]byte, int, error) {
 	c.mu.Lock()
-	needsToken := c.AccessToken == "" || time.Now().After(c.tokenExp)
+	needsToken := c.AccessToken == "" || time.Now().After(c.TokenExp)
 	c.mu.Unlock()
 	if needsToken {
 		if err := c.fetchToken(ctx); err != nil {
