@@ -620,17 +620,18 @@ func (b *bootstrapApplier) buildSubscriberDestinations(ctx context.Context, resu
 	// URL pattern: <pirRoot>/api/1.0/transportmodule/Transport  (SAP Transport Module)
 	if result.PirApiInstanceGUID != "" {
 		keyGUID, ok := result.ServiceKeyGUIDs[result.PirApiInstanceGUID]
-		if ok {
-			creds, err := b.cfClient.GetServiceKeyCredentials(ctx, keyGUID)
-			if err != nil {
-				return nil, fmt.Errorf("get PIR api key credentials: %w", err)
-			}
-			d, err := buildOAuthDestination("CloudIntegration", transportModuleURL, tenant.ID, creds)
-			if err != nil {
-				return nil, err
-			}
-			dests = append(dests, d)
+		if !ok {
+			return nil, fmt.Errorf("no service key GUID for PIR api instance %q", result.PirApiInstanceGUID)
 		}
+		creds, err := b.cfClient.GetServiceKeyCredentials(ctx, keyGUID)
+		if err != nil {
+			return nil, fmt.Errorf("get PIR api key credentials: %w", err)
+		}
+		d, err := buildOAuthDestination("CloudIntegration", transportModuleURL, tenant.ID, creds)
+		if err != nil {
+			return nil, err
+		}
+		dests = append(dests, d)
 	}
 
 	// ContentAssemblyService — CAS standard service key credentials.
@@ -638,17 +639,18 @@ func (b *bootstrapApplier) buildSubscriberDestinations(ctx context.Context, resu
 	// CAS reads it to reach the content-agent-assembly worker.
 	if result.CasStandardInstanceGUID != "" {
 		keyGUID, ok := result.ServiceKeyGUIDs[result.CasStandardInstanceGUID]
-		if ok {
-			creds, err := b.cfClient.GetServiceKeyCredentials(ctx, keyGUID)
-			if err != nil {
-				return nil, fmt.Errorf("get CAS standard key credentials: %w", err)
-			}
-			d, err := buildOAuthDestination("ContentAssemblyService", nil, tenant.ID, creds)
-			if err != nil {
-				return nil, err
-			}
-			dests = append(dests, d)
+		if !ok {
+			return nil, fmt.Errorf("no service key GUID for CAS standard instance %q", result.CasStandardInstanceGUID)
 		}
+		creds, err := b.cfClient.GetServiceKeyCredentials(ctx, keyGUID)
+		if err != nil {
+			return nil, fmt.Errorf("get CAS standard key credentials: %w", err)
+		}
+		d, err := buildOAuthDestination("ContentAssemblyService", nil, tenant.ID, creds)
+		if err != nil {
+			return nil, err
+		}
+		dests = append(dests, d)
 	}
 
 	// TransportManagementService — TMS OAuth credentials copied from the provider-side

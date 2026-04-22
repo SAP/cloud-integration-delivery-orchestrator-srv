@@ -41,9 +41,9 @@ func NewCasClient(_ context.Context, apiEndpoint, tokenURL, clientID, clientSecr
 	return &CasClient{client}, nil
 }
 
-// ── Catalog types (GET /api/v1/contentResources response) ─────────────────────
+// ── Catalog types (GET /v1/contentResources response) ────────────────────────
 
-// CatalogContentResource is one entry from GET /api/v1/contentResources.
+// CatalogContentResource is one entry from GET /v1/contentResources.
 // The service layer uses this to resolve artifact GUIDs and package metadata
 // before building an ExportRequest.  Only "package" subType entries are relevant
 // for TR generation; "Destination" entries are ignored.
@@ -55,7 +55,7 @@ type CatalogContentResource struct {
 	SubType      string             `json:"subType"`     // "package" | "Destination"
 	Version      string             `json:"version"`     // package version
 	Components   []CatalogComponent `json:"components"`
-	Dependencies []interface{}      `json:"dependencies"`
+	Dependencies []any              `json:"dependencies"`
 }
 
 // CatalogComponent is one artifact entry within a CatalogContentResource.
@@ -71,7 +71,7 @@ type CatalogComponent struct {
 
 // ── Export request/response types ─────────────────────────────────────────────
 
-// ExportRequest is the body for POST /api/v1/contentResources/export.
+// ExportRequest is the body for POST /v1/contentResources/export.
 // No top-level "id" field: that field is a CAS UI browser-session artifact
 // (requestor=CASUI).  Server-to-server calls with requestor=CPIDelivery omit it.
 type ExportRequest struct {
@@ -98,13 +98,13 @@ type ContentResource struct {
 	Name                 string                     `json:"name"`
 	Version              string                     `json:"version"`     // package version from catalog
 	Components           []ContentResourceComponent `json:"components"`
-	Dependencies         []interface{}              `json:"dependencies"`          // fixed []
+	Dependencies         []any                      `json:"dependencies"`          // fixed []
 	MtaDescriptorSpecific MtaDescriptorSpecific     `json:"mtaDescriptorSpecific"` // fixed {"deployed-after":[]}
 }
 
 // MtaDescriptorSpecific is the fixed MTA metadata appended to each ContentResource.
 type MtaDescriptorSpecific struct {
-	DeployedAfter []interface{} `json:"deployed-after"` // fixed []
+	DeployedAfter []any `json:"deployed-after"` // fixed []
 }
 
 // ContentResourceComponent is one artifact entry within a ContentResource.
@@ -118,11 +118,11 @@ type ContentResourceComponent struct {
 	Enabled              bool        `json:"enabled"`              // fixed true
 	Mandatory            bool        `json:"mandatory"`            // fixed false
 	DefaultSelect        bool        `json:"defaultSelect"`        // fixed false
-	AdditionalProperties interface{} `json:"additionalProperties"` // fixed null
+	AdditionalProperties any        `json:"additionalProperties"` // fixed null
 	Exportable           bool        `json:"exportable"`           // from catalog
 }
 
-// ExportResponse is returned by POST /api/v1/contentResources/export.
+// ExportResponse is returned by POST /v1/contentResources/export.
 type ExportResponse struct {
 	ActivityID  string `json:"activityId"`
 	ProcessID   string `json:"processId"` // used for subsequent polling
@@ -132,7 +132,7 @@ type ExportResponse struct {
 	Progress    int    `json:"progress"` // 0 on creation
 }
 
-// OperationStatus is returned by GET /api/v1/operations/{processId}?messages=true.
+// OperationStatus is returned by GET /v1/operations/{processId}?messages=true.
 // Poll until State = "FINISHED"; abort immediately on State = "FAILED".
 type OperationStatus struct {
 	ActivityID  string             `json:"activityId"`
@@ -153,7 +153,7 @@ type OperationMessage struct {
 	Timestamp string `json:"timestamp"`
 }
 
-// OperationConfig is returned by GET /api/v1/operations/{processId}/config?logs=true.
+// OperationConfig is returned by GET /v1/operations/{processId}/config?logs=true.
 // Call only after State = "FINISHED"; read TransportRequestID as the primary TR ID.
 type OperationConfig struct {
 	ActivityID          string `json:"activityID"`
@@ -168,7 +168,7 @@ type OperationConfig struct {
 	} `json:"trStatus"`
 }
 
-// Activity is one entry from GET /api/v1/activities.
+// Activity is one entry from GET /v1/activities.
 // Auxiliary audit path; not the primary TR ID source.
 type Activity struct {
 	ActivityID    string `json:"activityId"`
@@ -192,7 +192,7 @@ func (c *CasClient) ListContentResources(ctx context.Context) ([]CatalogContentR
 	childCtx, cancel := context.WithTimeout(ctx, consts.LongRequestTimeout)
 	defer cancel()
 
-	fullURL := fmt.Sprintf("%s/api/v1/contentResources", c.ApiURL)
+	fullURL := fmt.Sprintf("%s/v1/contentResources", c.ApiURL)
 	req := &env.HttpRequest{ApiURL: fullURL, Method: http.MethodGet}
 
 	body, statusCode, err := c.Do(childCtx, req)
@@ -212,7 +212,7 @@ func (c *CasClient) ListContentResources(ctx context.Context) ([]CatalogContentR
 	return resp.ContentResources, nil
 }
 
-// TriggerExport calls POST /api/v1/contentResources/export and returns the
+// TriggerExport calls POST /v1/contentResources/export and returns the
 // ExportResponse containing the processId for subsequent polling.
 func (c *CasClient) TriggerExport(ctx context.Context, req ExportRequest) (*ExportResponse, error) {
 	childCtx, cancel := context.WithTimeout(ctx, consts.ImportTimeout)
@@ -223,7 +223,7 @@ func (c *CasClient) TriggerExport(ctx context.Context, req ExportRequest) (*Expo
 		return nil, fmt.Errorf("TriggerExport: marshal request: %w", err)
 	}
 
-	fullURL := fmt.Sprintf("%s/api/v1/contentResources/export", c.ApiURL)
+	fullURL := fmt.Sprintf("%s/v1/contentResources/export", c.ApiURL)
 	httpReq := &env.HttpRequest{
 		ApiURL:      fullURL,
 		Method:      http.MethodPost,
@@ -249,13 +249,13 @@ func (c *CasClient) TriggerExport(ctx context.Context, req ExportRequest) (*Expo
 	return &resp, nil
 }
 
-// PollOperation calls GET /api/v1/operations/{processId}?messages=true and
+// PollOperation calls GET /v1/operations/{processId}?messages=true and
 // returns the current OperationStatus.  The caller loops until FINISHED or FAILED.
 func (c *CasClient) PollOperation(ctx context.Context, processID string) (*OperationStatus, error) {
 	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
 	defer cancel()
 
-	fullURL := fmt.Sprintf("%s/api/v1/operations/%s?messages=true", c.ApiURL, processID)
+	fullURL := fmt.Sprintf("%s/v1/operations/%s?messages=true", c.ApiURL, processID)
 	req := &env.HttpRequest{ApiURL: fullURL, Method: http.MethodGet}
 
 	body, statusCode, err := c.Do(childCtx, req)
@@ -273,14 +273,14 @@ func (c *CasClient) PollOperation(ctx context.Context, processID string) (*Opera
 	return &status, nil
 }
 
-// GetOperationConfig calls GET /api/v1/operations/{processId}/config?logs=true.
+// GetOperationConfig calls GET /v1/operations/{processId}/config?logs=true.
 // Must only be called after PollOperation returns State = "FINISHED".
 // TransportRequestID in the response is the authoritative TR ID.
 func (c *CasClient) GetOperationConfig(ctx context.Context, processID string) (*OperationConfig, error) {
 	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
 	defer cancel()
 
-	fullURL := fmt.Sprintf("%s/api/v1/operations/%s/config?logs=true", c.ApiURL, processID)
+	fullURL := fmt.Sprintf("%s/v1/operations/%s/config?logs=true", c.ApiURL, processID)
 	req := &env.HttpRequest{ApiURL: fullURL, Method: http.MethodGet}
 
 	body, statusCode, err := c.Do(childCtx, req)
@@ -298,14 +298,14 @@ func (c *CasClient) GetOperationConfig(ctx context.Context, processID string) (*
 	return &cfg, nil
 }
 
-// GetActivities calls GET /api/v1/activities with requestor filter.
+// GetActivities calls GET /v1/activities with requestor filter.
 // Auxiliary audit path; not the primary TR ID source.
 // top limits the result count (0 = server default).
 func (c *CasClient) GetActivities(ctx context.Context, requestor string, top int) ([]Activity, error) {
 	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
 	defer cancel()
 
-	fullURL := fmt.Sprintf("%s/api/v1/activities?filters=requestor eq '%s'", c.ApiURL, requestor)
+	fullURL := fmt.Sprintf("%s/v1/activities?filters=requestor eq '%s'", c.ApiURL, requestor)
 	if top > 0 {
 		fullURL = fmt.Sprintf("%s&top=%d", fullURL, top)
 	}
