@@ -58,6 +58,7 @@ type ArtifactTenantOperation struct {
 	Tenant   CpiTenant `gorm:"foreignKey:TenantID"`
 
 	TransportRequestNumber string // associated transport request number
+	TrError                string // non-empty when RequestState = TR_FAILED; cleared on successful retry
 
 	// All 3 Phases
 	RequestState lifecycle.RequestState

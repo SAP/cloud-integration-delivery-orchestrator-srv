@@ -10,6 +10,7 @@ import (
 
 	"mmt-delivery/consts"
 	"mmt-delivery/db"
+	"mmt-delivery/pkg/cas"
 	"mmt-delivery/pkg/cpi"
 	"mmt-delivery/pkg/lifecycle"
 
@@ -128,23 +129,27 @@ func (s *Service) collectVersionSnapshot(rule db.DeliveryRule) {
 			})
 	}
 
-	// Get CPI client for source tenant
-	sourceClient, err := s.CPI(ctx, rule.SourceTenant.PirApiDestinationName)
+	// Get CAS client for source tenant and fetch package catalog
+	sourceCAS, err := s.CAS(ctx, rule.SourceTenantID)
 	if err != nil {
-		completeWithError(fmt.Sprintf("failed to get source tenant CPI client: %s", err))
+		completeWithError(fmt.Sprintf("failed to get source tenant CAS client: %s", err))
 		return
 	}
-
-	// Get packages from source tenant
-	packages, err := sourceClient.GetPackages(ctx)
+	catalog, err := sourceCAS.ListCloudIntegrationResources(ctx, nil)
 	if err != nil {
-		completeWithError(fmt.Sprintf("failed to get packages from source tenant: %s", err))
+		completeWithError(fmt.Sprintf("failed to list content resources from source tenant: %s", err))
 		return
+	}
+	var packages []cas.CatalogContentResource
+	for _, r := range catalog {
+		if r.SubType == "package" {
+			packages = append(packages, r)
+		}
 	}
 
 	// Apply global included packages whitelist filter
 	if includeSet := s.loadIncludedPackageFilter(); includeSet != nil {
-		var filtered []cpi.CPIPackage
+		var filtered []cas.CatalogContentResource
 		for _, pkg := range packages {
 			if includeSet[pkg.ID] {
 				filtered = append(filtered, pkg)
@@ -241,7 +246,7 @@ func (s *Service) fetchRuntimeIndex(ctx context.Context, tenants []db.CpiTenant)
 
 // collectAllPackageSnapshots fetches design-time artifacts per package across all tenants in parallel.
 // Individual package failures are logged as warnings and skipped.
-func (s *Service) collectAllPackageSnapshots(ctx context.Context, packages []cpi.CPIPackage, tenants []db.CpiTenant, runtimeIndex map[uint]map[string]cpi.RuntimeArtifact) []db.PackageSnapshot {
+func (s *Service) collectAllPackageSnapshots(ctx context.Context, packages []cas.CatalogContentResource, tenants []db.CpiTenant, runtimeIndex map[uint]map[string]cpi.RuntimeArtifact) []db.PackageSnapshot {
 	var pkgSnapshots []db.PackageSnapshot
 	var pkgMu sync.Mutex
 	pkgGroup, pkgCtx := errgroup.WithContext(ctx)
@@ -289,13 +294,18 @@ func (s *Service) collectPackageSnapshot(
 	for i, tenant := range tenants {
 		i, tenant := i, tenant
 		g.Go(func() error {
-			client, err := s.CPI(gctx, tenant.PirApiDestinationName)
+			casClient, err := s.CAS(gctx, tenant.ID)
 			if err != nil {
 				results[i] = tenantArtifacts{tenantID: tenant.ID, err: err}
 				return nil // error tolerance: don't fail entire group
 			}
-			arts, err := FetchPackageArtifacts(gctx, client, packageID)
-			results[i] = tenantArtifacts{tenantID: tenant.ID, artifacts: arts, err: err}
+			tenantCatalog, err := casClient.ListCloudIntegrationResources(gctx, []string{packageID})
+			if err != nil {
+				results[i] = tenantArtifacts{tenantID: tenant.ID, err: err}
+				return nil
+			}
+			arts := casArtifactsFromCatalog(tenantCatalog, packageID)
+			results[i] = tenantArtifacts{tenantID: tenant.ID, artifacts: arts}
 			return nil
 		})
 	}
@@ -586,14 +596,20 @@ func (s *Service) AdhocVersionCompare(ctx context.Context, tenantIDs []uint) (*V
 	tenants = ordered
 	sourceTenantID := tenants[0].ID
 
-	// 3. Get source CPI client and fetch packages
-	sourceClient, err := s.CPI(ctx, tenants[0].PirApiDestinationName)
+	// 3. Get source CAS client and fetch package catalog
+	sourceCAS, err := s.CAS(ctx, tenants[0].ID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get source CPI client: %w", err)
+		return nil, fmt.Errorf("failed to get source CAS client: %w", err)
 	}
-	packages, err := sourceClient.GetPackages(ctx)
+	catalog, err := sourceCAS.ListCloudIntegrationResources(ctx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get packages: %w", err)
+		return nil, fmt.Errorf("failed to list content resources: %w", err)
+	}
+	var packages []cas.CatalogContentResource
+	for _, r := range catalog {
+		if r.SubType == "package" {
+			packages = append(packages, r)
+		}
 	}
 	// No included packages filter for adhoc (compare all)
 
@@ -1245,6 +1261,26 @@ func computeMismatchCounts(data db.SnapshotData) (matched, mismatched, total int
 		}
 	}
 	return
+}
+
+// casArtifactsFromCatalog extracts artifacts for a specific package from a CAS catalog response.
+func casArtifactsFromCatalog(catalog []cas.CatalogContentResource, packageID string) []db.Artifact {
+	for _, res := range catalog {
+		if res.SubType == "package" && res.ID == packageID {
+			arts := make([]db.Artifact, 0, len(res.Components))
+			for _, comp := range res.Components {
+				arts = append(arts, db.Artifact{
+					TechID:    comp.Name,
+					Name:      comp.Name,
+					Version:   comp.Version,
+					Type:      consts.ArtifactType(comp.Type),
+					PackageID: packageID,
+				})
+			}
+			return arts
+		}
+	}
+	return nil
 }
 
 // ParsePackageIDs splits a comma-separated string into a slice of package IDs.

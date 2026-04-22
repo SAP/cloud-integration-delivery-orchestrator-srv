@@ -16,6 +16,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"mmt-delivery/consts"
 	"mmt-delivery/pkg/env"
@@ -48,12 +50,12 @@ func NewCasClient(_ context.Context, apiEndpoint, tokenURL, clientID, clientSecr
 // before building an ExportRequest.  Only "package" subType entries are relevant
 // for TR generation; "Destination" entries are ignored.
 type CatalogContentResource struct {
-	ID           string             `json:"id"`          // package tech ID (e.g. "AlexTest")
-	ResourceID   string             `json:"resourceID"`  // package GUID (e.g. "d8e90a3b...")
-	Type         string             `json:"type"`        // "Cloud Integration"
-	Name         string             `json:"name"`        // package display name
-	SubType      string             `json:"subType"`     // "package" | "Destination"
-	Version      string             `json:"version"`     // package version
+	ID           string             `json:"id"`         // package tech ID (e.g. "AlexTest")
+	ResourceID   string             `json:"resourceID"` // package GUID (e.g. "d8e90a3b...")
+	Type         string             `json:"type"`       // "Cloud Integration"
+	Name         string             `json:"name"`       // package display name
+	SubType      string             `json:"subType"`    // "package" | "Destination"
+	Version      string             `json:"version"`    // package version
 	Components   []CatalogComponent `json:"components"`
 	Dependencies []any              `json:"dependencies"`
 }
@@ -62,27 +64,28 @@ type CatalogContentResource struct {
 // component.name == Artifact.TechID is the matching key.
 // component.id is the artifact GUID required by ExportRequest.
 type CatalogComponent struct {
-	ID         string `json:"id"`         // artifact GUID
-	Name       string `json:"name"`       // artifact tech ID — matches Artifact.TechID in our DB
-	Type       string `json:"type"`       // "IFlow" | "ScriptCollection" | "OData Service" | "IntegrationAdapter" | …
-	Version    string `json:"version"`    // current version in CAS
+	ID         string `json:"id"`      // artifact GUID
+	Name       string `json:"name"`    // artifact tech ID — matches Artifact.TechID in our DB
+	Type       string `json:"type"`    // "IFlow" | "ScriptCollection" | "OData Service" | "IntegrationAdapter" | …
+	Version    string `json:"version"` // current version in CAS
 	Exportable bool   `json:"exportable"`
 }
 
 // ── Export request/response types ─────────────────────────────────────────────
 
 // ExportRequest is the body for POST /v1/contentResources/export.
-// No top-level "id" field: that field is a CAS UI browser-session artifact
-// (requestor=CASUI).  Server-to-server calls with requestor=CPIDelivery omit it.
+// The top-level "id" is a required string that the CAS API uses as a request
+// correlation key — it must be non-empty. We use the DR ID formatted as a string.
 type ExportRequest struct {
-	Requestor            string            `json:"requestor"`            // fixed "CPIDelivery"
-	Version              string            `json:"version"`              // fixed "1.0.0"
-	ExportMode           string            `json:"exportMode"`           // fixed "TransportManagementService"
-	ExportMediaType      string            `json:"exportMediaType"`      // fixed "MTAR"
-	Description          string            `json:"description"`          // "Delivery Request #<ID> — <Name>"
+	ID                   string            `json:"id"`              // required; use DR ID as string
+	Requestor            string            `json:"requestor"`       // fixed "CPIDelivery"
+	Version              string            `json:"version"`         // fixed "1.0.0"
+	ExportMode           string            `json:"exportMode"`      // fixed "TransportManagementService"
+	ExportMediaType      string            `json:"exportMediaType"` // fixed "MTAR"
+	Description          string            `json:"description"`     // "DR#<ID> | <Name> <Version> | …"
 	ContentResources     []ContentResource `json:"contentResources"`
 	SourceNode           string            `json:"sourceNode"`           // CpiTenant.TmsSourceNodeName
-	TransportDestination string            `json:"transportDestination"` // fixed "TransportManagementService" (v1)
+	TransportDestination string            `json:"transportDestination"` // fixed "TransportManagementService"
 	IsModifiable         bool              `json:"isModifiable"`         // fixed false
 }
 
@@ -90,16 +93,16 @@ type ExportRequest struct {
 // Fields are populated from the CAS catalog (CatalogContentResource) to ensure
 // correct GUIDs and package metadata.
 type ContentResource struct {
-	ID                   string                     `json:"id"`          // package tech ID
-	ResourceID           string                     `json:"resourceID"`  // package GUID
-	ContentType          string                     `json:"contentType"` // fixed "Cloud Integration"
-	SubType              string                     `json:"subType"`     // fixed "package"
-	Type                 string                     `json:"type"`        // fixed "Cloud Integration"
-	Name                 string                     `json:"name"`
-	Version              string                     `json:"version"`     // package version from catalog
-	Components           []ContentResourceComponent `json:"components"`
-	Dependencies         []any                      `json:"dependencies"`          // fixed []
-	MtaDescriptorSpecific MtaDescriptorSpecific     `json:"mtaDescriptorSpecific"` // fixed {"deployed-after":[]}
+	ID                    string                     `json:"id"`          // package tech ID
+	ResourceID            string                     `json:"resourceID"`  // package GUID
+	ContentType           string                     `json:"contentType"` // fixed "Cloud Integration"
+	SubType               string                     `json:"subType"`     // fixed "package"
+	Type                  string                     `json:"type"`        // fixed "Cloud Integration"
+	Name                  string                     `json:"name"`
+	Version               string                     `json:"version"` // package version from catalog
+	Components            []ContentResourceComponent `json:"components"`
+	Dependencies          []any                      `json:"dependencies"`          // fixed []
+	MtaDescriptorSpecific MtaDescriptorSpecific      `json:"mtaDescriptorSpecific"` // fixed {"deployed-after":[]}
 }
 
 // MtaDescriptorSpecific is the fixed MTA metadata appended to each ContentResource.
@@ -110,16 +113,16 @@ type MtaDescriptorSpecific struct {
 // ContentResourceComponent is one artifact entry within a ContentResource.
 // id must be the artifact GUID from the CAS catalog (not the tech ID).
 type ContentResourceComponent struct {
-	ID                   string      `json:"id"`                   // artifact GUID from catalog
-	Name                 string      `json:"name"`                 // artifact tech ID / display name
-	Type                 string      `json:"type"`                 // "IFlow" | "ScriptCollection" | …
-	Version              string      `json:"version"`              // version from ArtifactTenantOperation
-	Selected             bool        `json:"selected"`             // fixed true
-	Enabled              bool        `json:"enabled"`              // fixed true
-	Mandatory            bool        `json:"mandatory"`            // fixed false
-	DefaultSelect        bool        `json:"defaultSelect"`        // fixed false
-	AdditionalProperties any        `json:"additionalProperties"` // fixed null
-	Exportable           bool        `json:"exportable"`           // from catalog
+	ID                   string `json:"id"`                   // artifact GUID from catalog
+	Name                 string `json:"name"`                 // artifact tech ID / display name
+	Type                 string `json:"type"`                 // "IFlow" | "ScriptCollection" | …
+	Version              string `json:"version"`              // version from ArtifactTenantOperation
+	Selected             bool   `json:"selected"`             // fixed true
+	Enabled              bool   `json:"enabled"`              // fixed true
+	Mandatory            bool   `json:"mandatory"`            // fixed false
+	DefaultSelect        bool   `json:"defaultSelect"`        // fixed false
+	AdditionalProperties any    `json:"additionalProperties"` // fixed null
+	Exportable           bool   `json:"exportable"`           // from catalog
 }
 
 // ExportResponse is returned by POST /v1/contentResources/export.
@@ -140,8 +143,8 @@ type OperationStatus struct {
 	ProcessType string             `json:"processType"`
 	StartedAt   string             `json:"startedAt"`
 	EndedAt     string             `json:"endedAt,omitempty"`
-	State       string             `json:"state"`             // INITIAL / STARTED / RUNNING / FINISHED / FAILED
-	Progress    int                `json:"progress"`          // 0–100
+	State       string             `json:"state"`    // INITIAL / STARTED / RUNNING / FINISHED / FAILED
+	Progress    int                `json:"progress"` // 0–100
 	Messages    []OperationMessage `json:"messages,omitempty"`
 }
 
@@ -149,7 +152,7 @@ type OperationStatus struct {
 type OperationMessage struct {
 	ID        string `json:"id"`
 	Text      string `json:"text"`
-	Type      string `json:"type"`      // INFO / ERROR / WARNING
+	Type      string `json:"type"` // INFO / ERROR / WARNING
 	Timestamp string `json:"timestamp"`
 }
 
@@ -184,30 +187,43 @@ type Activity struct {
 
 // ── API methods ───────────────────────────────────────────────────────────────
 
-// ListContentResources fetches the CAS artifact catalog for this tenant's CPI subaccount.
-// Returns only entries; caller filters by SubType == "package".
-// The catalog is the authoritative source for artifact GUIDs and package metadata
-// required to build a valid ExportRequest.
-func (c *CasClient) ListContentResources(ctx context.Context) ([]CatalogContentResource, error) {
+// ListCloudIntegrationResources fetches CAS artifact catalog entries for Cloud Integration only.
+// packageIDs optionally restricts results to specific package tech IDs via the
+// server-side `filters` query parameter (e.g. "id eq 'pkg1' or id eq 'pkg2'").
+// Pass nil or empty slice to fetch the full Cloud Integration catalog.
+// Caller should further filter by SubType == "package" when needed.
+func (c *CasClient) ListCloudIntegrationResources(ctx context.Context, packageIDs []string) ([]CatalogContentResource, error) {
 	childCtx, cancel := context.WithTimeout(ctx, consts.LongRequestTimeout)
 	defer cancel()
 
 	fullURL := fmt.Sprintf("%s/v1/contentResources", c.ApiURL)
+	params := url.Values{}
+	// Always restrict to Cloud Integration; CAS also returns API Management, Destination Service, etc.
+	filterExpr := "type eq 'Cloud Integration'"
+	if len(packageIDs) > 0 {
+		parts := make([]string, len(packageIDs))
+		for i, id := range packageIDs {
+			parts[i] = fmt.Sprintf("id eq '%s'", id)
+		}
+		filterExpr += " and (" + strings.Join(parts, " or ") + ")"
+	}
+	params.Set("filters", filterExpr)
+	fullURL += "?" + params.Encode()
 	req := &env.HttpRequest{ApiURL: fullURL, Method: http.MethodGet}
 
 	body, statusCode, err := c.Do(childCtx, req)
 	if err != nil {
-		return nil, fmt.Errorf("ListContentResources: %w", err)
+		return nil, fmt.Errorf("ListCloudIntegrationResources: %w", err)
 	}
 	if statusCode != http.StatusOK {
-		return nil, fmt.Errorf("ListContentResources: unexpected status %d: %s", statusCode, safeBody(body))
+		return nil, fmt.Errorf("ListCloudIntegrationResources: unexpected status %d: %s", statusCode, safeBody(body))
 	}
 
 	var resp struct {
 		ContentResources []CatalogContentResource `json:"contentResources"`
 	}
 	if err := json.Unmarshal(*body, &resp); err != nil {
-		return nil, fmt.Errorf("ListContentResources: unmarshal: %w", err)
+		return nil, fmt.Errorf("ListCloudIntegrationResources: unmarshal: %w", err)
 	}
 	return resp.ContentResources, nil
 }

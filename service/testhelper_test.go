@@ -411,7 +411,7 @@ type mockCasClient struct {
 	opConfigErr error
 }
 
-func (m *mockCasClient) ListContentResources(_ context.Context) ([]cas.CatalogContentResource, error) {
+func (m *mockCasClient) ListCloudIntegrationResources(_ context.Context, _ []string) ([]cas.CatalogContentResource, error) {
 	return m.catalog, m.catalogErr
 }
 func (m *mockCasClient) TriggerExport(_ context.Context, _ cas.ExportRequest) (*cas.ExportResponse, error) {

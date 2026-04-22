@@ -440,25 +440,10 @@ func (h *Handler) GenerateTR(ctx *gin.Context) {
 		return
 	}
 
-	succeeded, failed, fatalErr := h.svc.GenerateTransportRequest(ctx.Request.Context(), tenantID, body.DeliveryRequestID, body.ArtifactOperationIDs)
-	if fatalErr != nil {
-		Fail(ctx, 500, fatalErr.Error())
-		return
-	}
-
-	// Build response payload from succeeded results.
-	type trResult struct {
-		TransportRequestID  string `json:"transportRequestID"`
-		TransportRequestURL string `json:"transportRequestURL"`
-	}
-	succeededResp := make(map[uint]trResult, len(succeeded))
-	for opID, tr := range succeeded {
-		succeededResp[opID] = trResult{TransportRequestID: tr.ID, TransportRequestURL: tr.URL}
-	}
-
-	failedResp := make(map[uint]string, len(failed))
-	for opID, err := range failed {
-		failedResp[opID] = err.Error()
-	}
-	OK(ctx, gin.H{"succeeded": succeededResp, "failed": failedResp})
+	// TR generation can take up to several minutes (CAS export + poll loop).
+	// Running it synchronously with the HTTP request context causes context.Canceled
+	// when the client times out. Delegate to the same background function used by
+	// InsertOps so TR results arrive via SSE instead of the HTTP response.
+	go h.svc.GenerateTRsInBackground(body.DeliveryRequestID, tenantID, body.ArtifactOperationIDs)
+	ctx.Status(202)
 }

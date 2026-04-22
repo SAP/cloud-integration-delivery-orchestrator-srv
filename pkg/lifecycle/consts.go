@@ -21,10 +21,12 @@ type ConditionState string
 
 // Canonical Delivery Request states.
 const (
-	RequestPending  RequestState = "NOT_REQUESTED"
-	RequestStarting RequestState = "REQUESTING"
-	RequestReady    RequestState = "READY"
-	RequestFailed   RequestState = "FAILED"
+	RequestPending      RequestState = "NOT_REQUESTED"
+	RequestStarting     RequestState = "REQUESTING"
+	RequestReady        RequestState = "READY"
+	RequestFailed       RequestState = "FAILED"
+	RequestTrGenerating RequestState = "TR_GENERATING" // TR generation in progress (background task)
+	RequestTrFailed     RequestState = "TR_FAILED"     // TR generation failed; manual retry available
 )
 
 // Canonical import states.
@@ -117,9 +119,9 @@ type BootstrapJobType string
 
 const (
 	JobTypePreview  BootstrapJobType = "preview"  // read-only inspection; no side effects
-	JobTypeApply    BootstrapJobType = "apply"     // creates all missing prerequisites
-	JobTypeRetry    BootstrapJobType = "retry"     // resumes apply from the last failed step
-	JobTypeValidate BootstrapJobType = "validate"  // re-checks readiness after manual operator action
+	JobTypeApply    BootstrapJobType = "apply"    // creates all missing prerequisites
+	JobTypeRetry    BootstrapJobType = "retry"    // resumes apply from the last failed step
+	JobTypeValidate BootstrapJobType = "validate" // re-checks readiness after manual operator action
 )
 
 // BootstrapJobState is the execution state of a TenantBootstrapJob.

@@ -6,7 +6,7 @@ package service
 //   1. Load tenant (readiness gate)
 //   2. Load DeliveryRequest + ArtifactTenantOperations from DB
 //   3. Build per-tenant CasClient via s.CAS
-//   4. Fetch CAS catalog (ListContentResources) to resolve artifact GUIDs + package metadata
+//   4. Fetch CAS catalog (ListCloudIntegrationResources) to resolve artifact GUIDs + package metadata
 //   5. For each op independently:
 //      a. Build single-artifact ContentResource (one artifact per TR, by design)
 //      b. TriggerExport → poll until FINISHED → read transportRequestID from config
@@ -85,6 +85,15 @@ func (s *Service) acquireTenantForTR(ctx context.Context, tenantID uint) (db.Cpi
 // succeeded and failed are per-op results; callers must inspect both —
 // succeeded TRs are already persisted and must not be re-created.
 func (s *Service) GenerateTransportRequest(ctx context.Context, tenantID, deliveryRequestID uint, artifactOperationIDs []uint) (map[uint]*TransportRequest, map[uint]error, error) {
+	// ── 0. Reset TR_FAILED ops to TR_GENERATING so the frontend sees the in-progress state.
+	//    This covers both the background (InsertOps) path and the manual retry (GenerateTR) path.
+	s.DB.WithContext(ctx).Model(&db.ArtifactTenantOperation{}).
+		Where("id IN ? AND request_state = ?", artifactOperationIDs, lifecycle.RequestTrFailed).
+		Updates(map[string]any{
+			"request_state": lifecycle.RequestTrGenerating,
+			"tr_error":      "",
+		})
+
 	// ── 1. Atomic readiness gate (SELECT FOR UPDATE) ─────────────────────────
 	tenant, err := s.acquireTenantForTR(ctx, tenantID)
 	if err != nil {
@@ -116,8 +125,18 @@ func (s *Service) GenerateTransportRequest(ctx context.Context, tenantID, delive
 		return nil, nil, fmt.Errorf("GenerateTransportRequest: build CAS client: %w", err)
 	}
 
-	// ── 5. Fetch CAS catalog + build lookup index ─────────────────────────────
-	catalog, err := casClient.ListContentResources(ctx)
+	// ── 5. Fetch CAS catalog for only the packages needed + build lookup index ──
+	packageIDs := make([]string, 0, len(ops))
+	seen := make(map[string]struct{}, len(ops))
+	for _, op := range ops {
+		if op.Artifact.PackageID != "" {
+			if _, ok := seen[op.Artifact.PackageID]; !ok {
+				seen[op.Artifact.PackageID] = struct{}{}
+				packageIDs = append(packageIDs, op.Artifact.PackageID)
+			}
+		}
+	}
+	catalog, err := casClient.ListCloudIntegrationResources(ctx, packageIDs)
 	if err != nil {
 		return nil, nil, fmt.Errorf("GenerateTransportRequest: fetch CAS catalog: %w", err)
 	}
@@ -159,11 +178,14 @@ func (s *Service) GenerateTransportRequest(ctx context.Context, tenantID, delive
 			continue
 		}
 
-		// Write TR ID back immediately. If this fails the TR is orphaned in TMS
-		// but not visible in DB; treat the op as failed so callers can retry.
+		// Write TR ID back immediately and reset state to NOT_REQUESTED.
 		if dbErr := s.DB.WithContext(ctx).Model(&db.ArtifactTenantOperation{}).
 			Where("id = ?", r.opID).
-			Update("transport_request_number", r.tr.ID).Error; dbErr != nil {
+			Updates(map[string]any{
+				"transport_request_number": r.tr.ID,
+				"request_state":            lifecycle.RequestPending,
+				"tr_error":                 "",
+			}).Error; dbErr != nil {
 			env.Logger().Errorw("GenerateTransportRequest: TR created but write-back failed (orphan TR)",
 				"trID", r.tr.ID, "opID", r.opID, "error", dbErr)
 			failed[r.opID] = fmt.Errorf("TR %s created in TMS but write-back failed: %w", r.tr.ID, dbErr)
@@ -223,9 +245,10 @@ func (s *Service) exportOneTR(
 		},
 	}
 
-	description := fmt.Sprintf("DR#%d | %s %s | Requested by: %s", dr.ID, op.Artifact.Name, op.ArtifactVersion, dr.CreatedBy)
+	description := fmt.Sprintf("DR#%d - %s %s - Requested by: %s", dr.ID, op.Artifact.Name, op.ArtifactVersion, dr.CreatedBy)
 
 	exportReq := cas.ExportRequest{
+		ID:                   fmt.Sprintf("%d", op.ID),
 		Requestor:            "CPIDelivery",
 		Version:              "1.0.0",
 		ExportMode:           "TransportManagementService",

@@ -36,8 +36,10 @@ const (
 )
 
 const (
-	Artifact_Type_Iflow ArtifactType = "Integration Flow"
-	Artifact_Type_Sc    ArtifactType = "Script Collection"
+	Artifact_Type_Iflow ArtifactType = "IFlow"
+	Artifact_Type_Sc    ArtifactType = "ScriptCollection"
+	Artifact_Type_Odata ArtifactType = "OData Service"
+	Artifact_Type_Adapter ArtifactType = "IntegrationAdapter"
 )
 
 const (

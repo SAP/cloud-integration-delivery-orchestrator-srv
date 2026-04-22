@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"mmt-delivery/db"
+	"mmt-delivery/pkg/env"
 	"mmt-delivery/pkg/lifecycle"
 	"time"
 
@@ -313,8 +314,81 @@ func (s *Service) InsertTenantOps(drID uint, ops []db.ArtifactTenantOperation, u
 	if err := s.DB.Create(&ops).Error; err != nil {
 		return nil, fmt.Errorf("failed to insert artifact tenant operations: %s", err)
 	}
-	s.publishDrOps(drID, s.snapshotOps(drID))
+
+	// Mark all new source-tenant ops as TR_GENERATING and kick off background TR generation.
+	// Only source-tenant ops need TRs; target-tenant ops are created during import.
+	newOpIDs := make([]uint, 0, len(ops))
+	for i := range ops {
+		if ops[i].TenantID == sourceTenant.ID {
+			newOpIDs = append(newOpIDs, ops[i].ID)
+		}
+	}
+	if len(newOpIDs) > 0 {
+		if err := s.DB.Model(&db.ArtifactTenantOperation{}).
+			Where("id IN ?", newOpIDs).
+			Update("request_state", lifecycle.RequestTrGenerating).Error; err != nil {
+			env.Logger().Warnw("InsertTenantOps: failed to mark ops as TR_GENERATING", "error", err)
+		} else {
+			for i := range ops {
+				for _, id := range newOpIDs {
+					if ops[i].ID == id {
+						ops[i].RequestState = lifecycle.RequestTrGenerating
+					}
+				}
+			}
+		}
+		s.publishDrOps(drID, s.snapshotOps(drID))
+		go s.GenerateTRsInBackground(drID, sourceTenant.ID, newOpIDs)
+	} else {
+		s.publishDrOps(drID, s.snapshotOps(drID))
+	}
+
 	return ops, nil
+}
+
+// GenerateTRsInBackground runs TR generation for newly inserted ops in an independent
+// context (decoupled from the HTTP request lifecycle). Results are written back to DB
+// and broadcast via SSE.
+func (s *Service) GenerateTRsInBackground(drID, tenantID uint, opIDs []uint) {
+	ctx, cancel := context.WithTimeout(context.Background(), casExportTimeout*time.Duration(len(opIDs))+2*time.Minute)
+	defer cancel()
+
+	succeeded, failed, fatalErr := s.GenerateTransportRequest(ctx, tenantID, drID, opIDs)
+	if fatalErr != nil {
+		env.Logger().Errorw("GenerateTRsInBackground: fatal error, marking all ops TR_FAILED",
+			"drID", drID, "tenantID", tenantID, "error", fatalErr)
+		s.DB.Model(&db.ArtifactTenantOperation{}).
+			Where("id IN ?", opIDs).
+			Updates(map[string]any{
+				"request_state": lifecycle.RequestTrFailed,
+				"tr_error":      fatalErr.Error(),
+			})
+		s.publishDrOps(drID, s.snapshotOps(drID))
+		return
+	}
+
+	for opID, tr := range succeeded {
+		// TR number already written by GenerateTransportRequest; reset state to NOT_REQUESTED.
+		s.DB.Model(&db.ArtifactTenantOperation{}).
+			Where("id = ?", opID).
+			Updates(map[string]any{
+				"request_state":            lifecycle.RequestPending,
+				"transport_request_number": tr.ID,
+				"tr_error":                 "",
+			})
+	}
+	for opID, err := range failed {
+		s.DB.Model(&db.ArtifactTenantOperation{}).
+			Where("id = ?", opID).
+			Updates(map[string]any{
+				"request_state": lifecycle.RequestTrFailed,
+				"tr_error":      err.Error(),
+			})
+		env.Logger().Warnw("GenerateTRsInBackground: TR generation failed for op",
+			"opID", opID, "error", err)
+	}
+
+	s.publishDrOps(drID, s.snapshotOps(drID))
 }
 
 // NOTE: can only update transport request number

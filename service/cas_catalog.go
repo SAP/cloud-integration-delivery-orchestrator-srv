@@ -35,7 +35,7 @@ func (s *Service) ListCasPackages(ctx context.Context, tenantID uint) ([]CasPack
 		return nil, fmt.Errorf("ListCasPackages: %w", err)
 	}
 
-	catalog, err := casClient.ListContentResources(ctx)
+	catalog, err := casClient.ListCloudIntegrationResources(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("ListCasPackages: fetch catalog: %w", err)
 	}

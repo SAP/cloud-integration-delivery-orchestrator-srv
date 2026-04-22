@@ -50,7 +50,7 @@ type IntegrationFactory func(ctx context.Context, tenant string) (IntegrationSer
 
 // CasService defines the CAS operations needed by the service layer.
 type CasService interface {
-	ListContentResources(ctx context.Context) ([]cas.CatalogContentResource, error)
+	ListCloudIntegrationResources(ctx context.Context, packageIDs []string) ([]cas.CatalogContentResource, error)
 	TriggerExport(ctx context.Context, req cas.ExportRequest) (*cas.ExportResponse, error)
 	PollOperation(ctx context.Context, processID string) (*cas.OperationStatus, error)
 	GetOperationConfig(ctx context.Context, processID string) (*cas.OperationConfig, error)

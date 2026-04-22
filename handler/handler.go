@@ -82,7 +82,6 @@ func (h *Handler) SetupRoutes(v1 *gin.RouterGroup, v2 *gin.RouterGroup, requireS
 	integrationRead.Use(requireScope("Integration.Read"))
 	{
 		integrationRead.GET("/tanant/packages", h.GetPackagesHandler)
-		integrationRead.GET("/tenant/packages/artifacts", h.GetPackageArtifactsHandler)
 		integrationRead.GET("/tenant/runtime", h.GetRuntimeArtifacts)
 		integrationRead.GET("/tms/nodes", h.GetTmsNodesHandler)
 		integrationRead.GET("/tms/trs", h.GetTranportRequestsHandler)

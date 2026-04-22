@@ -7,7 +7,6 @@ import (
 	"strconv"
 
 	"mmt-delivery/db"
-	"mmt-delivery/service"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -84,27 +83,6 @@ func (h *Handler) GetPackageIflowsHandler(ctx *gin.Context) {
 		return
 	}
 	OK(ctx, iflows)
-}
-
-// include type: script collection, iflow artifacts
-// Delegates to service.FetchPackageArtifacts for unified artifact retrieval.
-func (h *Handler) GetPackageArtifactsHandler(ctx *gin.Context) {
-	destName, ok := h.resolveCpiDestination(ctx)
-	if !ok {
-		return
-	}
-	packageID := ctx.Query("package")
-	client, err := h.cpi.Get(ctx, destName)
-	if err != nil {
-		Fail(ctx, 500, fmt.Sprintf("failed to create cpi client: %s", err))
-		return
-	}
-	artifacts, err := service.FetchPackageArtifacts(ctx, client, packageID)
-	if err != nil {
-		Fail(ctx, 500, fmt.Sprintf("failed to get artifacts: %s", err))
-		return
-	}
-	OK(ctx, artifacts)
 }
 
 // do not return entire destination instance, hide credentials
