@@ -1129,9 +1129,10 @@ func (s *Service) CreateDRFromMismatch(ruleID uint, req CreateDRFromMismatchRequ
 			TransportRequestNumber: "", // empty — to be filled later
 		}
 
-		// LoadArtifact (FirstOrCreate)
-		a, err := s.LoadArtifact(op)
-		if err != nil {
+		// Artifact tech ID here comes from the version snapshot (already correct);
+		// skip PIR lookup and upsert directly.
+		a := op.Artifact
+		if s.DB.FirstOrCreate(&a, &db.Artifact{TechID: a.TechID, Version: a.Version}).Error != nil {
 			skipErrors = append(skipErrors, MismatchSkipError{
 				ArtifactID: art.ID,
 				PackageID:  item.pkg,

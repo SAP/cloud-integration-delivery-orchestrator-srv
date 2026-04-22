@@ -321,7 +321,7 @@ func (h *Handler) HandleInsertOps(c *gin.Context) {
 		return
 	}
 	var ops []db.ArtifactTenantOperation
-	ops, err := h.svc.InsertTenantOps(req.DeliveryRequestID, req.Ops, user)
+	ops, err := h.svc.InsertTenantOps(c.Request.Context(), req.DeliveryRequestID, req.Ops, user)
 	if err != nil {
 		Fail(c, http.StatusInternalServerError, err.Error())
 		return

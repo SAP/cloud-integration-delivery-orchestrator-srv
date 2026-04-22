@@ -63,9 +63,9 @@ type ArtifactTenantOperation struct {
 	// CAS GUID cache — populated on first GenerateTransportRequest, reused on subsequent calls.
 	// Per-tenant because CAS GUIDs differ across tenants.
 	// Zero value = not yet populated; triggers a fallback CAS call in GenerateTransportRequest.
-	CasArtifactGUID      string // CatalogComponent.ID — artifact GUID required for export body
-	CasPackageResourceID string // CatalogContentResource.ResourceID — package GUID for export body
-	CasArtifactExportable bool  // CatalogComponent.Exportable — whether artifact can be exported
+	CasArtifactGUID       string // CatalogComponent.ID — artifact GUID required for export body
+	CasPackageResourceID  string // CatalogContentResource.ResourceID — package GUID for export body
+	CasArtifactExportable bool   // CatalogComponent.Exportable — whether artifact can be exported
 
 	// All 3 Phases
 	RequestState lifecycle.RequestState

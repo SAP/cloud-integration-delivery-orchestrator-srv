@@ -9,6 +9,7 @@ import (
 	"mmt-delivery/db"
 	"mmt-delivery/pkg/env"
 	"mmt-delivery/pkg/lifecycle"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -30,15 +31,85 @@ func (s *Service) DeleteDeliveryRequest(id uint) error {
 	return nil
 }
 
-// check and load artifact info into db, set ArtifactID in ops
-func (s *Service) LoadArtifact(op db.ArtifactTenantOperation) (atf db.Artifact, err error) {
+// LoadArtifact resolves the true CPI tech ID for the artifact via PIR OData, then
+// upserts it into the DB.  It queries GET /IntegrationPackages('{pkgID}')/<type>
+// and matches by display name (Artifact.Name == PIR Name field).
+//
+// destinationName is the source tenant's PirApiDestinationName, used to build
+// the CPI client (same pattern as deliver.go / checks.go).
+func (s *Service) LoadArtifact(ctx context.Context, destinationName string, op db.ArtifactTenantOperation) (atf db.Artifact, err error) {
 	a := &op.Artifact
+
+	cpiCli, err := s.CPI(ctx, destinationName)
+	if err != nil {
+		return atf, fmt.Errorf("LoadArtifact: build CPI client: %w", err)
+	}
+
+	techID, err := s.resolveTechID(ctx, cpiCli, a.PackageID, string(a.Type), a.Name, a.Version)
+	if err != nil {
+		return atf, fmt.Errorf("LoadArtifact: resolve tech ID for %q (package %q): %w", a.Name, a.PackageID, err)
+	}
+	a.TechID = techID
+
 	if s.DB.FirstOrCreate(a, &db.Artifact{TechID: a.TechID, Version: a.Version}).Error != nil {
 		err = fmt.Errorf("error when saving artifact %s:%s", a.TechID, a.Version)
 		return
 	}
 	atf = *a
 	return
+}
+
+// resolveTechID queries the CPI PIR OData API for the given package and artifact type,
+// then returns the tech ID of the single artifact whose display name AND version both match.
+// Returns an error if 0 or ≥2 matches are found.
+func (s *Service) resolveTechID(ctx context.Context, cpiCli IntegrationService, packageID, artifactType, displayName, version string) (string, error) {
+	type nameID struct{ name, version, id string }
+	var items []nameID
+
+	switch strings.ToLower(artifactType) {
+	case "iflow", "integrationflow":
+		iflows, err := cpiCli.GetPackageIflows(ctx, packageID)
+		if err != nil {
+			return "", fmt.Errorf("GetPackageIflows(%q): %w", packageID, err)
+		}
+		for _, f := range iflows {
+			items = append(items, nameID{f.Name, f.Version, f.ID})
+		}
+	case "scriptcollection":
+		scs, err := cpiCli.GetPackageScriptcollections(ctx, packageID)
+		if err != nil {
+			return "", fmt.Errorf("GetPackageScriptcollections(%q): %w", packageID, err)
+		}
+		for _, sc := range scs {
+			items = append(items, nameID{sc.Name, sc.Version, sc.ID})
+		}
+	default:
+		return "", fmt.Errorf("unsupported artifact type %q — only IFlow and ScriptCollection are supported", artifactType)
+	}
+
+	var matches []nameID
+	for _, it := range items {
+		if it.name == displayName && it.version == version {
+			matches = append(matches, it)
+		}
+	}
+
+	switch len(matches) {
+	case 0:
+		return "", fmt.Errorf("artifact %q version %q not found in CPI package %q via PIR API", displayName, version, packageID)
+	case 1:
+		return matches[0].id, nil
+	default:
+		techIDs := make([]string, len(matches))
+		for i, m := range matches {
+			techIDs[i] = m.id
+		}
+		return "", fmt.Errorf(
+			"ambiguous artifact name %q version %q in package %q: found %d artifacts with the same display name and version (tech IDs: %v). "+
+				"Please rename the artifacts in CPI to use unique display names within the package.",
+			displayName, version, packageID, len(matches), techIDs,
+		)
+	}
 }
 
 // queryTenantByNodeID queries a CPI tenant by its TMS source node ID
@@ -260,7 +331,7 @@ func (s *Service) DeleteTenantOps(drID uint, opIDs []uint) error {
 	return nil
 }
 
-func (s *Service) InsertTenantOps(drID uint, ops []db.ArtifactTenantOperation, user string) ([]db.ArtifactTenantOperation, error) {
+func (s *Service) InsertTenantOps(ctx context.Context, drID uint, ops []db.ArtifactTenantOperation, user string) ([]db.ArtifactTenantOperation, error) {
 	if len(ops) == 0 {
 		return nil, nil
 	}
@@ -276,7 +347,7 @@ func (s *Service) InsertTenantOps(drID uint, ops []db.ArtifactTenantOperation, u
 	errOps := make(map[uint]error)
 	for i := range ops {
 		op := &ops[i]
-		a, err := s.LoadArtifact(*op)
+		a, err := s.LoadArtifact(ctx, sourceTenant.PirApiDestinationName, *op)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load artifact for operation %d: %s", op.ID, err)
 		}
@@ -293,7 +364,19 @@ func (s *Service) InsertTenantOps(drID uint, ops []db.ArtifactTenantOperation, u
 			}
 		}
 		op.CreatedAt, op.CreatedBy = time.Now(), user
+		frontendPackageName, frontendPackageVersion := op.Artifact.PackageName, op.Artifact.PackageVersion
 		op.Artifact = a
+		// Back-fill package display name/version from frontend CAS data if not yet in DB.
+		// These fields are needed by exportOneTR; ensureCasGUIDs also populates them but
+		// only on the first TR generation. Pre-filling here avoids that extra CAS call.
+		if op.Artifact.PackageName == "" && frontendPackageName != "" {
+			op.Artifact.PackageName = frontendPackageName
+			op.Artifact.PackageVersion = frontendPackageVersion
+			s.DB.Model(&op.Artifact).Updates(map[string]any{
+				"package_name":    frontendPackageName,
+				"package_version": frontendPackageVersion,
+			})
+		}
 		op.DeliveryRequestID = drID
 		op.ArtifactTechID, op.ArtifactVersion = a.TechID, a.Version // cache techID and version for quick access
 		op.ImportState = lifecycle.ImportNotStarted

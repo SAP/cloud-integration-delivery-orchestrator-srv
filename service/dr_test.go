@@ -6,6 +6,7 @@ import (
 
 	"mmt-delivery/consts"
 	"mmt-delivery/db"
+	"mmt-delivery/pkg/cpi"
 	"mmt-delivery/pkg/lifecycle"
 	"mmt-delivery/pkg/tms"
 )
@@ -17,12 +18,13 @@ import (
 // drTestSetup creates tenants, rule, DR, and an artifact for DR operation tests.
 // It returns the created entities for use in tests.
 type drTestSetup struct {
-	tc       *testCleanup
-	source   db.CpiTenant
-	target   db.CpiTenant
-	rule     db.DeliveryRule
-	dr       db.DeliveryRequest
-	artifact db.Artifact
+	tc         *testCleanup
+	source     db.CpiTenant
+	target     db.CpiTenant
+	rule       db.DeliveryRule
+	dr         db.DeliveryRequest
+	artifact   db.Artifact
+	cpiFactory IntegrationFactory // pre-configured mock: serves PIR lookup for s.artifact
 }
 
 func setupDRTest(t *testing.T) drTestSetup {
@@ -63,13 +65,25 @@ func setupDRTest(t *testing.T) drTestSetup {
 		PackageID: "pkg1",
 	})
 
+	// cpiFactory pre-populates iflows so LoadArtifact's PIR lookup resolves the artifact.
+	cpiFactory := func(ctx context.Context, tenant string) (IntegrationService, error) {
+		return &mockCPIClient{
+			iflows: map[string][]cpi.IflowItem{
+				"pkg1": {{ArtifactCommonItem: cpi.ArtifactCommonItem{
+					ID: "iflow-" + suffix, Name: "IFlow " + suffix, Version: "1.0.5",
+				}}},
+			},
+		}, nil
+	}
+
 	return drTestSetup{
-		tc:       tc,
-		source:   source,
-		target:   target,
-		rule:     rule,
-		dr:       dr,
-		artifact: artifact,
+		tc:         tc,
+		source:     source,
+		target:     target,
+		rule:       rule,
+		dr:         dr,
+		artifact:   artifact,
+		cpiFactory: cpiFactory,
 	}
 }
 
@@ -78,12 +92,7 @@ func setupDRTest(t *testing.T) drTestSetup {
 func TestInsertTenantOps_EmptyTR(t *testing.T) {
 	s := setupDRTest(t)
 
-	factory := func(ctx context.Context, tenant string) (IntegrationService, error) {
-		// For downgrade check: return target tenant with version 1.0.4 (lower than 1.0.5)
-		return &mockCPIClient{}, nil
-	}
-
-	svc := newTestService(factory)
+	svc := newTestService(s.cpiFactory)
 
 	ops := []db.ArtifactTenantOperation{
 		{
@@ -95,7 +104,7 @@ func TestInsertTenantOps_EmptyTR(t *testing.T) {
 		},
 	}
 
-	result, err := svc.InsertTenantOps(s.dr.ID, ops, "test-user")
+	result, err := svc.InsertTenantOps(context.Background(), s.dr.ID, ops, "test-user")
 	if err != nil {
 		t.Fatalf("InsertTenantOps with empty TR should succeed, got error: %v", err)
 	}
@@ -120,11 +129,7 @@ func TestInsertTenantOps_WithTR(t *testing.T) {
 	}
 
 	// CPI mock for downgrade check
-	factory := func(ctx context.Context, tenant string) (IntegrationService, error) {
-		return &mockCPIClient{}, nil
-	}
-
-	svc := newTestService(factory, testServiceOpts{tms: tmsMock})
+	svc := newTestService(s.cpiFactory, testServiceOpts{tms: tmsMock})
 
 	ops := []db.ArtifactTenantOperation{
 		{
@@ -136,7 +141,7 @@ func TestInsertTenantOps_WithTR(t *testing.T) {
 		},
 	}
 
-	result, err := svc.InsertTenantOps(s.dr.ID, ops, "test-user")
+	result, err := svc.InsertTenantOps(context.Background(), s.dr.ID, ops, "test-user")
 	if err != nil {
 		t.Fatalf("InsertTenantOps with valid TR should succeed, got error: %v", err)
 	}
@@ -156,11 +161,7 @@ func TestInsertTenantOps_WithInvalidTR(t *testing.T) {
 		transportRequests: map[string]*tms.TransportRequestV1{},
 	}
 
-	factory := func(ctx context.Context, tenant string) (IntegrationService, error) {
-		return &mockCPIClient{}, nil
-	}
-
-	svc := newTestService(factory, testServiceOpts{tms: tmsMock})
+	svc := newTestService(s.cpiFactory, testServiceOpts{tms: tmsMock})
 
 	ops := []db.ArtifactTenantOperation{
 		{
@@ -172,7 +173,7 @@ func TestInsertTenantOps_WithInvalidTR(t *testing.T) {
 		},
 	}
 
-	_, err := svc.InsertTenantOps(s.dr.ID, ops, "test-user")
+	_, err := svc.InsertTenantOps(context.Background(), s.dr.ID, ops, "test-user")
 	if err == nil {
 		t.Fatal("InsertTenantOps with invalid TR should fail")
 	}
@@ -184,10 +185,7 @@ func TestUpdateTenantOps_EmptyToNonEmpty(t *testing.T) {
 	s := setupDRTest(t)
 
 	// First insert op with empty TR
-	factory := func(ctx context.Context, tenant string) (IntegrationService, error) {
-		return &mockCPIClient{}, nil
-	}
-	svc := newTestService(factory)
+	svc := newTestService(s.cpiFactory)
 
 	ops := []db.ArtifactTenantOperation{
 		{
@@ -198,7 +196,7 @@ func TestUpdateTenantOps_EmptyToNonEmpty(t *testing.T) {
 			TransportRequestNumber: "",
 		},
 	}
-	inserted, err := svc.InsertTenantOps(s.dr.ID, ops, "test-user")
+	inserted, err := svc.InsertTenantOps(context.Background(), s.dr.ID, ops, "test-user")
 	if err != nil {
 		t.Fatalf("InsertTenantOps failed: %v", err)
 	}
@@ -210,7 +208,7 @@ func TestUpdateTenantOps_EmptyToNonEmpty(t *testing.T) {
 			"TR-002": validTR("TR-002", s.source.TmsSourceNodeName, s.artifact.TechID, s.artifact.Version, s.artifact.Type),
 		},
 	}
-	svc2 := newTestService(factory, testServiceOpts{tms: tmsMock})
+	svc2 := newTestService(s.cpiFactory, testServiceOpts{tms: tmsMock})
 
 	updateOps := []db.ArtifactTenantOperation{
 		{
@@ -242,10 +240,7 @@ func TestUpdateTenantOps_EmptyToEmpty(t *testing.T) {
 	s := setupDRTest(t)
 
 	// Insert op with empty TR
-	factory := func(ctx context.Context, tenant string) (IntegrationService, error) {
-		return &mockCPIClient{}, nil
-	}
-	svc := newTestService(factory)
+	svc := newTestService(s.cpiFactory)
 
 	ops := []db.ArtifactTenantOperation{
 		{
@@ -256,14 +251,14 @@ func TestUpdateTenantOps_EmptyToEmpty(t *testing.T) {
 			TransportRequestNumber: "",
 		},
 	}
-	inserted, err := svc.InsertTenantOps(s.dr.ID, ops, "test-user")
+	inserted, err := svc.InsertTenantOps(context.Background(), s.dr.ID, ops, "test-user")
 	if err != nil {
 		t.Fatalf("InsertTenantOps failed: %v", err)
 	}
 	opID := inserted[0].ID
 
 	// Update with empty TR again — should skip validation (no TMS call needed)
-	svc2 := newTestService(factory) // no TMS mock — would crash if TrExist is called
+	svc2 := newTestService(s.cpiFactory) // no TMS mock — would crash if TrExist is called
 	updateOps := []db.ArtifactTenantOperation{
 		{
 			TransportRequestNumber: "",
@@ -417,10 +412,7 @@ func TestApprove_MissingTR(t *testing.T) {
 func TestInsertTenantOps_SkipDeploy(t *testing.T) {
 	s := setupDRTest(t)
 
-	factory := func(ctx context.Context, tenant string) (IntegrationService, error) {
-		return &mockCPIClient{}, nil
-	}
-	svc := newTestService(factory)
+	svc := newTestService(s.cpiFactory)
 
 	ops := []db.ArtifactTenantOperation{
 		{
@@ -433,7 +425,7 @@ func TestInsertTenantOps_SkipDeploy(t *testing.T) {
 		},
 	}
 
-	result, err := svc.InsertTenantOps(s.dr.ID, ops, "test-user")
+	result, err := svc.InsertTenantOps(context.Background(), s.dr.ID, ops, "test-user")
 	if err != nil {
 		t.Fatalf("InsertTenantOps with SkipDeploy should succeed, got error: %v", err)
 	}
@@ -454,10 +446,7 @@ func TestInsertTenantOps_SkipDeploy(t *testing.T) {
 func TestInsertTenantOps_NoSkipDeploy(t *testing.T) {
 	s := setupDRTest(t)
 
-	factory := func(ctx context.Context, tenant string) (IntegrationService, error) {
-		return &mockCPIClient{}, nil
-	}
-	svc := newTestService(factory)
+	svc := newTestService(s.cpiFactory)
 
 	ops := []db.ArtifactTenantOperation{
 		{
@@ -470,7 +459,7 @@ func TestInsertTenantOps_NoSkipDeploy(t *testing.T) {
 		},
 	}
 
-	result, err := svc.InsertTenantOps(s.dr.ID, ops, "test-user")
+	result, err := svc.InsertTenantOps(context.Background(), s.dr.ID, ops, "test-user")
 	if err != nil {
 		t.Fatalf("InsertTenantOps without SkipDeploy should succeed, got error: %v", err)
 	}
@@ -488,10 +477,7 @@ func TestInsertTenantOps_NoSkipDeploy(t *testing.T) {
 func TestUpdateTenantOps_EnableSkipDeploy(t *testing.T) {
 	s := setupDRTest(t)
 
-	factory := func(ctx context.Context, tenant string) (IntegrationService, error) {
-		return &mockCPIClient{}, nil
-	}
-	svc := newTestService(factory)
+	svc := newTestService(s.cpiFactory)
 
 	ops := []db.ArtifactTenantOperation{
 		{
@@ -503,7 +489,7 @@ func TestUpdateTenantOps_EnableSkipDeploy(t *testing.T) {
 			SkipDeploy:             false,
 		},
 	}
-	inserted, err := svc.InsertTenantOps(s.dr.ID, ops, "test-user")
+	inserted, err := svc.InsertTenantOps(context.Background(), s.dr.ID, ops, "test-user")
 	if err != nil {
 		t.Fatalf("InsertTenantOps failed: %v", err)
 	}
@@ -542,10 +528,7 @@ func TestUpdateTenantOps_EnableSkipDeploy(t *testing.T) {
 func TestUpdateTenantOps_DisableSkipDeploy(t *testing.T) {
 	s := setupDRTest(t)
 
-	factory := func(ctx context.Context, tenant string) (IntegrationService, error) {
-		return &mockCPIClient{}, nil
-	}
-	svc := newTestService(factory)
+	svc := newTestService(s.cpiFactory)
 
 	ops := []db.ArtifactTenantOperation{
 		{
@@ -557,7 +540,7 @@ func TestUpdateTenantOps_DisableSkipDeploy(t *testing.T) {
 			SkipDeploy:             true,
 		},
 	}
-	inserted, err := svc.InsertTenantOps(s.dr.ID, ops, "test-user")
+	inserted, err := svc.InsertTenantOps(context.Background(), s.dr.ID, ops, "test-user")
 	if err != nil {
 		t.Fatalf("InsertTenantOps failed: %v", err)
 	}

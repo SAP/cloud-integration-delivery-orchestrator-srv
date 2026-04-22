@@ -8,10 +8,11 @@ import (
 // CasPackage is one Cloud Integration package as returned by ListCasPackages.
 // Fields map directly from CatalogContentResource; no DB enrichment needed.
 type CasPackage struct {
-	ID        string        `json:"id"`
-	Name      string        `json:"name"`
-	Version   string        `json:"version"`
-	Artifacts []CasArtifact `json:"artifacts"`
+	ID         string        `json:"id"`
+	ResourceID string        `json:"resourceID"` // package GUID, required for CAS export body
+	Name       string        `json:"name"`
+	Version    string        `json:"version"`
+	Artifacts  []CasArtifact `json:"artifacts"`
 }
 
 // CasArtifact is one artifact within a CasPackage.
@@ -55,10 +56,11 @@ func (s *Service) ListCasPackages(ctx context.Context, tenantID uint) ([]CasPack
 			})
 		}
 		packages = append(packages, CasPackage{
-			ID:        entry.ID,
-			Name:      entry.Name,
-			Version:   entry.Version,
-			Artifacts: artifacts,
+			ID:         entry.ID,
+			ResourceID: entry.ResourceID,
+			Name:       entry.Name,
+			Version:    entry.Version,
+			Artifacts:  artifacts,
 		})
 	}
 	return packages, nil
