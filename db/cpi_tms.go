@@ -14,18 +14,20 @@ import (
 type Artifact struct {
 	gorm.Model
 
-	TechID      string `gorm:"index:ux_artifact_tech_version,unique"` // artifact technical id
-	Version     string `gorm:"index:ux_artifact_tech_version,unique"`
-	Name        string
-	PackageID   string       //package techical id
-	Type        ArtifactType // iflow, scriptCollection
-	Description string
-	CreatedBy   string //TODO: may not need it. same above
-	CreatedAt   string
-	ModifiedBy  string
-	ModifiedAt  string
-	Status      string // deploy task status. TODO: may not need it. status will be controlled by ArtifactTenantOperation
-	TaskId      string // task id. TODO: may not need it. same as above
+	TechID         string `gorm:"index:ux_artifact_tech_version,unique"` // artifact technical id
+	Version        string `gorm:"index:ux_artifact_tech_version,unique"`
+	Name           string
+	PackageID      string       // package technical id
+	PackageName    string       // package display name (CatalogContentResource.Name); cached to avoid CAS call at TR time
+	PackageVersion string       // package version (CatalogContentResource.Version); cached to avoid CAS call at TR time
+	Type           ArtifactType // iflow, scriptCollection
+	Description    string
+	CreatedBy      string //TODO: may not need it. same above
+	CreatedAt      string
+	ModifiedBy     string
+	ModifiedAt     string
+	Status         string // deploy task status. TODO: may not need it. status will be controlled by ArtifactTenantOperation
+	TaskId         string // task id. TODO: may not need it. same as above
 }
 
 type TransportRequest struct {

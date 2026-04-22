@@ -15,10 +15,9 @@ type CasPackage struct {
 }
 
 // CasArtifact is one artifact within a CasPackage.
-// techID = CatalogComponent.Name = Artifact.TechID in our DB.
-// guid   = CatalogComponent.ID   = artifact GUID required by generateTR.
+// CAS does not return the artifact tech ID; Name is the display name.
+// GUID = CatalogComponent.ID, required by GenerateTransportRequest.
 type CasArtifact struct {
-	TechID     string `json:"techID"`
 	GUID       string `json:"guid"`
 	Name       string `json:"name"`
 	Type       string `json:"type"`
@@ -48,7 +47,6 @@ func (s *Service) ListCasPackages(ctx context.Context, tenantID uint) ([]CasPack
 		artifacts := make([]CasArtifact, 0, len(entry.Components))
 		for _, comp := range entry.Components {
 			artifacts = append(artifacts, CasArtifact{
-				TechID:     comp.Name,
 				GUID:       comp.ID,
 				Name:       comp.Name,
 				Type:       comp.Type,

@@ -61,11 +61,12 @@ type CatalogContentResource struct {
 }
 
 // CatalogComponent is one artifact entry within a CatalogContentResource.
-// component.name == Artifact.TechID is the matching key.
+// component.name is the artifact display name — matches Artifact.Name in our DB.
 // component.id is the artifact GUID required by ExportRequest.
+// CAS does NOT return the artifact tech ID (CPI OData "Id" field).
 type CatalogComponent struct {
 	ID         string `json:"id"`      // artifact GUID
-	Name       string `json:"name"`    // artifact tech ID — matches Artifact.TechID in our DB
+	Name       string `json:"name"`    // artifact display name — matches Artifact.Name in our DB
 	Type       string `json:"type"`    // "IFlow" | "ScriptCollection" | "OData Service" | "IntegrationAdapter" | …
 	Version    string `json:"version"` // current version in CAS
 	Exportable bool   `json:"exportable"`

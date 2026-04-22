@@ -6,7 +6,9 @@ package service
 //   1. Load tenant (readiness gate)
 //   2. Load DeliveryRequest + ArtifactTenantOperations from DB
 //   3. Build per-tenant CasClient via s.CAS
-//   4. Fetch CAS catalog (ListCloudIntegrationResources) to resolve artifact GUIDs + package metadata
+//   4. GUID cache check: if all ops already have CasArtifactGUID populated,
+//      skip CAS entirely; otherwise call ListCloudIntegrationResources, populate
+//      the 5 new cache fields on ops+artifacts, and persist them to DB.
 //   5. For each op independently:
 //      a. Build single-artifact ContentResource (one artifact per TR, by design)
 //      b. TriggerExport → poll until FINISHED → read transportRequestID from config
@@ -30,12 +32,6 @@ import (
 	"mmt-delivery/pkg/env"
 	"mmt-delivery/pkg/lifecycle"
 )
-
-// casIndexEntry maps an artifact tech ID to its catalog component and parent package.
-type casIndexEntry struct {
-	comp cas.CatalogComponent
-	pkg  *cas.CatalogContentResource
-}
 
 // TransportRequest is the result of a successful export for one artifact operation.
 type TransportRequest struct {
@@ -75,6 +71,95 @@ func (s *Service) acquireTenantForTR(ctx context.Context, tenantID uint) (db.Cpi
 		return db.CpiTenant{}, fmt.Errorf("GenerateTransportRequest: readiness gate: %w", err)
 	}
 	return tenant, nil
+}
+
+// ensureCasGUIDs checks whether every op in the batch already has CasArtifactGUID
+// populated. If all are present the function returns immediately (cache hit, no CAS call).
+// If any are missing it calls ListCloudIntegrationResources once for the affected
+// packages, fills in the 5 cache fields (3 on op, 2 on artifact), and persists them.
+// On return, every op in the slice is guaranteed to have CasArtifactGUID set (or an
+// error is returned).
+func (s *Service) ensureCasGUIDs(ctx context.Context, casClient CasService, ops []db.ArtifactTenantOperation) error {
+	// Fast path: all GUIDs already cached.
+	allCached := true
+	for i := range ops {
+		if ops[i].CasArtifactGUID == "" {
+			allCached = false
+			break
+		}
+	}
+	if allCached {
+		return nil
+	}
+
+	// Slow path: fetch catalog for the affected packages.
+	packageIDs := make([]string, 0, len(ops))
+	seen := make(map[string]struct{}, len(ops))
+	for _, op := range ops {
+		if op.Artifact.PackageID != "" {
+			if _, ok := seen[op.Artifact.PackageID]; !ok {
+				seen[op.Artifact.PackageID] = struct{}{}
+				packageIDs = append(packageIDs, op.Artifact.PackageID)
+			}
+		}
+	}
+
+	catalog, err := casClient.ListCloudIntegrationResources(ctx, packageIDs)
+	if err != nil {
+		return fmt.Errorf("fetch CAS catalog: %w", err)
+	}
+
+	// Build lookup: artifact display name → {component, package}.
+	// CAS comp.Name is the artifact display name, which matches Artifact.Name in our DB.
+	// Tech ID is NOT returned by CAS and is not used in the export flow.
+	type entry struct {
+		comp cas.CatalogComponent
+		pkg  cas.CatalogContentResource
+	}
+	index := make(map[string]entry, len(catalog)*8)
+	for _, res := range catalog {
+		if res.SubType != "package" {
+			continue
+		}
+		for _, comp := range res.Components {
+			index[comp.Name] = entry{comp: comp, pkg: res}
+		}
+	}
+
+	// Populate cache fields and persist.
+	for i := range ops {
+		// Match by display name (Artifact.Name == CAS comp.Name).
+		e, ok := index[ops[i].Artifact.Name]
+		if !ok {
+			return fmt.Errorf("artifact %q (techID=%q) not found in CAS catalog", ops[i].Artifact.Name, ops[i].ArtifactTechID)
+		}
+
+		ops[i].CasArtifactGUID = e.comp.ID
+		ops[i].CasPackageResourceID = e.pkg.ResourceID
+		ops[i].CasArtifactExportable = e.comp.Exportable
+
+		if err := s.DB.WithContext(ctx).Model(&ops[i]).Updates(map[string]any{
+			"cas_artifact_guid":       e.comp.ID,
+			"cas_package_resource_id": e.pkg.ResourceID,
+			"cas_artifact_exportable": e.comp.Exportable,
+		}).Error; err != nil {
+			return fmt.Errorf("persist CAS GUIDs for op %d: %w", ops[i].ID, err)
+		}
+
+		// Update package-level fields on Artifact if not yet cached.
+		if ops[i].Artifact.PackageName == "" || ops[i].Artifact.PackageVersion == "" {
+			if err := s.DB.WithContext(ctx).Model(&ops[i].Artifact).Updates(map[string]any{
+				"package_name":    e.pkg.Name,
+				"package_version": e.pkg.Version,
+			}).Error; err != nil {
+				return fmt.Errorf("persist package metadata for artifact %d: %w", ops[i].ArtifactID, err)
+			}
+			ops[i].Artifact.PackageName = e.pkg.Name
+			ops[i].Artifact.PackageVersion = e.pkg.Version
+		}
+	}
+
+	return nil
 }
 
 // GenerateTransportRequest creates one TMS Transport Request per artifact operation
@@ -125,30 +210,11 @@ func (s *Service) GenerateTransportRequest(ctx context.Context, tenantID, delive
 		return nil, nil, fmt.Errorf("GenerateTransportRequest: build CAS client: %w", err)
 	}
 
-	// ── 5. Fetch CAS catalog for only the packages needed + build lookup index ──
-	packageIDs := make([]string, 0, len(ops))
-	seen := make(map[string]struct{}, len(ops))
-	for _, op := range ops {
-		if op.Artifact.PackageID != "" {
-			if _, ok := seen[op.Artifact.PackageID]; !ok {
-				seen[op.Artifact.PackageID] = struct{}{}
-				packageIDs = append(packageIDs, op.Artifact.PackageID)
-			}
-		}
-	}
-	catalog, err := casClient.ListCloudIntegrationResources(ctx, packageIDs)
-	if err != nil {
-		return nil, nil, fmt.Errorf("GenerateTransportRequest: fetch CAS catalog: %w", err)
-	}
-
-	index := make(map[string]casIndexEntry, len(catalog)*8)
-	for i := range catalog {
-		if catalog[i].SubType != "package" {
-			continue
-		}
-		for _, comp := range catalog[i].Components {
-			index[comp.Name] = casIndexEntry{comp: comp, pkg: &catalog[i]}
-		}
+	// ── 5. GUID cache: skip CAS if all ops already have CasArtifactGUID ─────
+	// On first run (or after a GUID invalidation) the cache fields are empty →
+	// fall back to calling ListCloudIntegrationResources, populate, and persist.
+	if err := s.ensureCasGUIDs(ctx, casClient, ops); err != nil {
+		return nil, nil, fmt.Errorf("GenerateTransportRequest: GUID cache: %w", err)
 	}
 
 	// ── 6. Per-op: one export → one TR (concurrent) ─────────────────────────
@@ -163,7 +229,7 @@ func (s *Service) GenerateTransportRequest(ctx context.Context, tenantID, delive
 
 	for _, op := range ops {
 		go func() {
-			tr, err := s.exportOneTR(ctx, casClient, &tenant, &dr, op, index)
+			tr, err := s.exportOneTR(ctx, casClient, &tenant, &dr, op)
 			resultCh <- opResult{opID: op.ID, tr: tr, err: err}
 		}()
 	}
@@ -199,44 +265,43 @@ func (s *Service) GenerateTransportRequest(ctx context.Context, tenantID, delive
 }
 
 // exportOneTR runs the full CAS export flow for a single artifact operation:
-// build ContentResource → TriggerExport → poll → return TR.
+// build ContentResource from cached GUID fields → TriggerExport → poll → return TR.
+// Precondition: op.CasArtifactGUID must be non-empty (ensureCasGUIDs guarantees this).
 func (s *Service) exportOneTR(
 	ctx context.Context,
 	casClient CasService,
 	tenant *db.CpiTenant,
 	dr *db.DeliveryRequest,
 	op db.ArtifactTenantOperation,
-	index map[string]casIndexEntry,
 ) (*TransportRequest, error) {
 	techID := op.ArtifactTechID
 	if techID == "" {
 		return nil, fmt.Errorf("operation %d has no ArtifactTechID", op.ID)
 	}
-	entry, ok := index[techID]
-	if !ok {
-		return nil, fmt.Errorf("artifact %q not found in CAS catalog", techID)
+	if op.CasArtifactGUID == "" {
+		return nil, fmt.Errorf("operation %d has no CasArtifactGUID (ensureCasGUIDs must be called first)", op.ID)
 	}
 
 	contentResource := cas.ContentResource{
-		ID:          entry.pkg.ID,
-		ResourceID:  entry.pkg.ResourceID,
+		ID:          op.Artifact.PackageID,
+		ResourceID:  op.CasPackageResourceID,
 		ContentType: "Cloud Integration",
 		SubType:     "package",
 		Type:        "Cloud Integration",
-		Name:        entry.pkg.Name,
-		Version:     entry.pkg.Version,
+		Name:        op.Artifact.PackageName,
+		Version:     op.Artifact.PackageVersion,
 		Components: []cas.ContentResourceComponent{
 			{
-				ID:                   entry.comp.ID,
-				Name:                 entry.comp.Name,
-				Type:                 entry.comp.Type,
+				ID:                   op.CasArtifactGUID,
+				Name:                 op.Artifact.Name,
+				Type:                 string(op.Artifact.Type),
 				Version:              op.ArtifactVersion,
 				Selected:             true,
 				Enabled:              true,
 				Mandatory:            false,
 				DefaultSelect:        false,
 				AdditionalProperties: nil,
-				Exportable:           entry.comp.Exportable,
+				Exportable:           op.CasArtifactExportable,
 			},
 		},
 		Dependencies: []any{},
