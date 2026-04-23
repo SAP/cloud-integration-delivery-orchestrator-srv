@@ -1,6 +1,7 @@
 package db
 
 import (
+	"mmt-delivery/consts"
 	"mmt-delivery/pkg/lifecycle"
 	"time"
 
@@ -46,13 +47,15 @@ type ArtifactTenantOperation struct {
 	gorm.Model
 	DeliveryRequestID uint `gorm:"index;not null"`
 
-	// for faster query and write, we use artifact_id as foreign key
-	// no need to CASCADE, artifact:version is like a metadata
-	ArtifactID uint     `gorm:"index;not null"`
-	Artifact   Artifact `gorm:"foreignKey:ArtifactID;references:ID"`
-
+	// Artifact identity — flattened from the former db.Artifact table (RFC-015).
+	// All fields are self-contained; no FK join required.
 	ArtifactTechID  string
 	ArtifactVersion string
+	ArtifactName    string
+	ArtifactType    consts.ArtifactType
+	PackageID       string
+	PackageName     string
+	PackageVersion  string
 
 	TenantID uint
 	Tenant   CpiTenant `gorm:"foreignKey:TenantID"`

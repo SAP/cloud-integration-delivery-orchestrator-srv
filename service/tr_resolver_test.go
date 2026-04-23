@@ -15,12 +15,11 @@ import (
 // =============================================================================
 
 // trTestSetup seeds the minimal entities required for TR generation tests:
-// a ready source tenant, a delivery request, and an artifact.
+// a ready source tenant and a delivery request.
 type trTestSetup struct {
-	tc       *testCleanup
-	tenant   db.CpiTenant
-	dr       db.DeliveryRequest
-	artifact db.Artifact
+	tc     *testCleanup
+	tenant db.CpiTenant
+	dr     db.DeliveryRequest
 }
 
 func setupTRTest(t *testing.T) trTestSetup {
@@ -44,18 +43,11 @@ func setupTRTest(t *testing.T) trTestSetup {
 		UpdatedBy:       "test",
 	})
 
-	artifact := seedArtifact(t, tc, db.Artifact{
-		TechID:  "iflow-" + suffix,
-		Version: "1.0.0",
-		Name:    "Test IFlow",
-		Type:    "iflow",
-	})
-
-	return trTestSetup{tc: tc, tenant: tenant, dr: dr, artifact: artifact}
+	return trTestSetup{tc: tc, tenant: tenant, dr: dr}
 }
 
 // makeCatalog builds a minimal CAS catalog containing one package with one component.
-// artifactDisplayName must match db.Artifact.Name for the ensureCasGUIDs lookup to succeed.
+// artifactDisplayName must match ArtifactTenantOperation.ArtifactName for the ensureCasGUIDs lookup to succeed.
 func makeCatalog(pkgID, artifactDisplayName string) []cas.CatalogContentResource {
 	return []cas.CatalogContentResource{
 		{
@@ -79,7 +71,7 @@ func makeCatalog(pkgID, artifactDisplayName string) []cas.CatalogContentResource
 }
 
 // makeFinishedCAS returns a mockCasClient pre-configured for a single FINISHED export.
-// artifactDisplayName must match the db.Artifact.Name used in the test.
+// artifactDisplayName must match the ArtifactName used in the seedOp call.
 func makeFinishedCAS(artifactDisplayName, trID string) *mockCasClient {
 	return &mockCasClient{
 		catalog: makeCatalog("pkg-"+artifactDisplayName, artifactDisplayName),
@@ -108,9 +100,9 @@ func TestGenerateTransportRequest_AllSucceed(t *testing.T) {
 
 	op := seedOp(t, db.ArtifactTenantOperation{
 		DeliveryRequestID: s.dr.ID,
-		ArtifactID:        s.artifact.ID,
 		ArtifactTechID:    "iflow-" + suffix,
 		ArtifactVersion:   "1.0.0",
+		ArtifactName:      "Test IFlow",
 		TenantID:          s.tenant.ID,
 	})
 
@@ -153,25 +145,18 @@ func TestGenerateTransportRequest_AllSucceed_MultipleOps(t *testing.T) {
 	suffix := t.Name()
 
 	// Two artifacts → two ops → two TRs.
-	art2 := seedArtifact(t, s.tc, db.Artifact{
-		TechID:  "iflow2-" + suffix,
-		Version: "2.0.0",
-		Name:    "Test IFlow 2",
-		Type:    "iflow",
-	})
-
 	op1 := seedOp(t, db.ArtifactTenantOperation{
 		DeliveryRequestID: s.dr.ID,
-		ArtifactID:        s.artifact.ID,
 		ArtifactTechID:    "iflow-" + suffix,
 		ArtifactVersion:   "1.0.0",
+		ArtifactName:      "Test IFlow",
 		TenantID:          s.tenant.ID,
 	})
 	op2 := seedOp(t, db.ArtifactTenantOperation{
 		DeliveryRequestID: s.dr.ID,
-		ArtifactID:        art2.ID,
 		ArtifactTechID:    "iflow2-" + suffix,
 		ArtifactVersion:   "2.0.0",
+		ArtifactName:      "Test IFlow 2",
 		TenantID:          s.tenant.ID,
 	})
 
@@ -236,9 +221,9 @@ func TestGenerateTransportRequest_AllFail_ArtifactNotInCatalog(t *testing.T) {
 
 	op := seedOp(t, db.ArtifactTenantOperation{
 		DeliveryRequestID: s.dr.ID,
-		ArtifactID:        s.artifact.ID,
 		ArtifactTechID:    "iflow-" + suffix,
 		ArtifactVersion:   "1.0.0",
+		ArtifactName:      "Test IFlow",
 		TenantID:          s.tenant.ID,
 	})
 
@@ -280,25 +265,20 @@ func TestGenerateTransportRequest_PartialSuccess(t *testing.T) {
 	s := setupTRTest(t)
 	suffix := t.Name()
 
-	art2 := seedArtifact(t, s.tc, db.Artifact{
-		TechID:  "iflow2-" + suffix,
-		Version: "1.0.0",
-		Name:    "Second IFlow",
-		Type:    "IFlow",
-	})
+	art2TechID := "iflow2-" + suffix
 
 	opOK := seedOp(t, db.ArtifactTenantOperation{
 		DeliveryRequestID: s.dr.ID,
-		ArtifactID:        s.artifact.ID,
 		ArtifactTechID:    "iflow-" + suffix,
 		ArtifactVersion:   "1.0.0",
+		ArtifactName:      "Test IFlow",
 		TenantID:          s.tenant.ID,
 	})
 	opFail := seedOp(t, db.ArtifactTenantOperation{
 		DeliveryRequestID: s.dr.ID,
-		ArtifactID:        art2.ID,
-		ArtifactTechID:    "iflow2-" + suffix,
+		ArtifactTechID:    art2TechID,
 		ArtifactVersion:   "1.0.0",
+		ArtifactName:      "Second IFlow",
 		TenantID:          s.tenant.ID,
 	})
 
@@ -439,9 +419,9 @@ func TestExportOneTR_PollFailed(t *testing.T) {
 
 	op := seedOp(t, db.ArtifactTenantOperation{
 		DeliveryRequestID: s.dr.ID,
-		ArtifactID:        s.artifact.ID,
 		ArtifactTechID:    "iflow-" + suffix,
 		ArtifactVersion:   "1.0.0",
+		ArtifactName:      "Test IFlow",
 		TenantID:          s.tenant.ID,
 	})
 
@@ -477,9 +457,9 @@ func TestExportOneTR_ContextCancellation(t *testing.T) {
 
 	op := seedOp(t, db.ArtifactTenantOperation{
 		DeliveryRequestID: s.dr.ID,
-		ArtifactID:        s.artifact.ID,
 		ArtifactTechID:    "iflow-" + suffix,
 		ArtifactVersion:   "1.0.0",
+		ArtifactName:      "Test IFlow",
 		TenantID:          s.tenant.ID,
 	})
 
@@ -519,9 +499,9 @@ func TestExportOneTR_MissingTransportRequestID(t *testing.T) {
 
 	op := seedOp(t, db.ArtifactTenantOperation{
 		DeliveryRequestID: s.dr.ID,
-		ArtifactID:        s.artifact.ID,
 		ArtifactTechID:    "iflow-" + suffix,
 		ArtifactVersion:   "1.0.0",
+		ArtifactName:      "Test IFlow",
 		TenantID:          s.tenant.ID,
 	})
 
@@ -558,9 +538,9 @@ func TestGenerateTransportRequest_CatalogError(t *testing.T) {
 
 	op := seedOp(t, db.ArtifactTenantOperation{
 		DeliveryRequestID: s.dr.ID,
-		ArtifactID:        s.artifact.ID,
 		ArtifactTechID:    "iflow-" + suffix,
 		ArtifactVersion:   "1.0.0",
+		ArtifactName:      "Test IFlow",
 		TenantID:          s.tenant.ID,
 	})
 

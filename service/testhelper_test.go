@@ -53,7 +53,6 @@ func TestMain(m *testing.M) {
 		&db.DeliveryRule{},
 		&db.VersionCompareSnapshot{},
 		&db.VersionCompareIncludedPackage{},
-		&db.Artifact{},
 		&db.DeliveryRequest{},
 		&db.ArtifactTenantOperation{},
 		&db.Condition{},
@@ -128,7 +127,6 @@ type testCleanup struct {
 	tenantIDs         []uint
 	ruleIDs           []uint
 	drIDs             []uint
-	artifactIDs       []uint
 	cleanIncludedPkgs bool // whether to clean VersionCompareIncludedPackage table
 }
 
@@ -149,10 +147,6 @@ func newTestCleanup(t *testing.T) *testCleanup {
 			testDB.Unscoped().Where("delivery_request_id IN ?", tc.drIDs).Delete(&db.Condition{})
 			testDB.Unscoped().Where("delivery_request_id IN ?", tc.drIDs).Delete(&db.ArtifactTenantOperation{})
 			testDB.Unscoped().Where("id IN ?", tc.drIDs).Delete(&db.DeliveryRequest{})
-		}
-		// Delete artifacts
-		if len(tc.artifactIDs) > 0 {
-			testDB.Unscoped().Where("id IN ?", tc.artifactIDs).Delete(&db.Artifact{})
 		}
 		// Delete snapshots for tracked rules
 		if len(tc.ruleIDs) > 0 {
@@ -175,10 +169,9 @@ func newTestCleanup(t *testing.T) *testCleanup {
 	return tc
 }
 
-func (tc *testCleanup) trackTenant(id uint)   { tc.tenantIDs = append(tc.tenantIDs, id) }
-func (tc *testCleanup) trackRule(id uint)     { tc.ruleIDs = append(tc.ruleIDs, id) }
-func (tc *testCleanup) trackDR(id uint)       { tc.drIDs = append(tc.drIDs, id) }
-func (tc *testCleanup) trackArtifact(id uint) { tc.artifactIDs = append(tc.artifactIDs, id) }
+func (tc *testCleanup) trackTenant(id uint) { tc.tenantIDs = append(tc.tenantIDs, id) }
+func (tc *testCleanup) trackRule(id uint)   { tc.ruleIDs = append(tc.ruleIDs, id) }
+func (tc *testCleanup) trackDR(id uint)     { tc.drIDs = append(tc.drIDs, id) }
 
 // --- Mock CPI Client ---
 
@@ -444,16 +437,6 @@ func seedOp(t *testing.T, op db.ArtifactTenantOperation) db.ArtifactTenantOperat
 		t.Fatalf("seedOp failed: %v", err)
 	}
 	return op
-}
-
-// seedArtifact creates an Artifact in the test DB, tracks it for cleanup, and returns it.
-func seedArtifact(t *testing.T, tc *testCleanup, art db.Artifact) db.Artifact {
-	t.Helper()
-	if err := testDB.Create(&art).Error; err != nil {
-		t.Fatalf("seedArtifact failed: %v", err)
-	}
-	tc.trackArtifact(art.ID)
-	return art
 }
 
 // validTR returns a valid RELEASED TransportRequestV1 for testing.

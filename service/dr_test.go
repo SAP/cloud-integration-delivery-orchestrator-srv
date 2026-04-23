@@ -15,23 +15,25 @@ import (
 // Phase 1 Tests: InsertTenantOps, UpdateTenantOps with optional TR
 // =============================================================================
 
-// drTestSetup creates tenants, rule, DR, and an artifact for DR operation tests.
-// It returns the created entities for use in tests.
+// drTestSetup creates tenants, rule, DR for DR operation tests.
 type drTestSetup struct {
-	tc         *testCleanup
-	source     db.CpiTenant
-	target     db.CpiTenant
-	rule       db.DeliveryRule
-	dr         db.DeliveryRequest
-	artifact   db.Artifact
-	cpiFactory IntegrationFactory // pre-configured mock: serves PIR lookup for s.artifact
+	tc             *testCleanup
+	source         db.CpiTenant
+	target         db.CpiTenant
+	rule           db.DeliveryRule
+	dr             db.DeliveryRequest
+	artifactTechID string
+	artifactVersion string
+	artifactName   string
+	artifactType   consts.ArtifactType
+	packageID      string
+	cpiFactory     IntegrationFactory // pre-configured mock: serves downgrade check
 }
 
 func setupDRTest(t *testing.T) drTestSetup {
 	t.Helper()
 	tc := newTestCleanup(t)
 
-	// Use test name as suffix for uniqueness across parallel tests
 	suffix := t.Name()
 
 	source := seedTenant(t, tc, "dr-src-"+suffix)
@@ -57,33 +59,52 @@ func setupDRTest(t *testing.T) drTestSetup {
 		UpdatedBy:       "test-user",
 	})
 
-	artifact := seedArtifact(t, tc, db.Artifact{
-		TechID:    "iflow-" + suffix,
-		Version:   "1.0.5",
-		Name:      "IFlow " + suffix,
-		Type:      consts.Artifact_Type_Iflow,
-		PackageID: "pkg1",
-	})
+	techID := "iflow-" + suffix
+	version := "1.0.5"
+	name := "IFlow " + suffix
 
-	// cpiFactory pre-populates iflows so LoadArtifact's PIR lookup resolves the artifact.
+	// cpiFactory serves PIR lookup (GetPackageIflows) and downgrade check (GetDesignTimeIflow).
+	// GetPackageIflows returns the artifact with the real tech ID so resolveTechID succeeds.
+	// GetDesignTimeIflow returns the same version so the downgrade check passes.
 	cpiFactory := func(ctx context.Context, tenant string) (IntegrationService, error) {
-		return &mockCPIClient{
-			iflows: map[string][]cpi.IflowItem{
-				"pkg1": {{ArtifactCommonItem: cpi.ArtifactCommonItem{
-					ID: "iflow-" + suffix, Name: "IFlow " + suffix, Version: "1.0.5",
-				}}},
+		return &mockCPIClientWithDesignTime{
+			mockCPIClient: mockCPIClient{
+				iflows: map[string][]cpi.IflowItem{
+					"pkg1": {
+						{ArtifactCommonItem: cpi.ArtifactCommonItem{ID: techID, Name: name, Version: version, PackageID: "pkg1"}},
+					},
+				},
 			},
+			iflowVersions: map[string]string{techID: version},
 		}, nil
 	}
 
 	return drTestSetup{
-		tc:         tc,
-		source:     source,
-		target:     target,
-		rule:       rule,
-		dr:         dr,
-		artifact:   artifact,
-		cpiFactory: cpiFactory,
+		tc:              tc,
+		source:          source,
+		target:          target,
+		rule:            rule,
+		dr:              dr,
+		artifactTechID:  techID,
+		artifactVersion: version,
+		artifactName:    name,
+		artifactType:    consts.Artifact_Type_Iflow,
+		packageID:       "pkg1",
+		cpiFactory:      cpiFactory,
+	}
+}
+
+// makeOp builds an ArtifactTenantOperation from the test setup's artifact fields.
+func (s *drTestSetup) makeOp(tenantID uint, tr string, skipDeploy bool) db.ArtifactTenantOperation {
+	return db.ArtifactTenantOperation{
+		TenantID:               tenantID,
+		ArtifactTechID:         s.artifactTechID,
+		ArtifactVersion:        s.artifactVersion,
+		ArtifactName:           s.artifactName,
+		ArtifactType:           s.artifactType,
+		PackageID:              s.packageID,
+		TransportRequestNumber: tr,
+		SkipDeploy:             skipDeploy,
 	}
 }
 
@@ -94,15 +115,7 @@ func TestInsertTenantOps_EmptyTR(t *testing.T) {
 
 	svc := newTestService(s.cpiFactory)
 
-	ops := []db.ArtifactTenantOperation{
-		{
-			TenantID:               s.target.ID,
-			ArtifactTechID:         s.artifact.TechID,
-			ArtifactVersion:        s.artifact.Version,
-			Artifact:               s.artifact,
-			TransportRequestNumber: "", // empty TR — should be allowed
-		},
-	}
+	ops := []db.ArtifactTenantOperation{s.makeOp(s.target.ID, "", false)}
 
 	result, err := svc.InsertTenantOps(context.Background(), s.dr.ID, ops, "test-user")
 	if err != nil {
@@ -124,22 +137,13 @@ func TestInsertTenantOps_WithTR(t *testing.T) {
 
 	tmsMock := &mockTMSClient{
 		transportRequests: map[string]*tms.TransportRequestV1{
-			"TR-001": validTR("TR-001", s.source.TmsSourceNodeName, s.artifact.TechID, s.artifact.Version, s.artifact.Type),
+			"TR-001": validTR("TR-001", s.source.TmsSourceNodeName, s.artifactTechID, s.artifactVersion, s.artifactType),
 		},
 	}
 
-	// CPI mock for downgrade check
 	svc := newTestService(s.cpiFactory, testServiceOpts{tms: tmsMock})
 
-	ops := []db.ArtifactTenantOperation{
-		{
-			TenantID:               s.target.ID,
-			ArtifactTechID:         s.artifact.TechID,
-			ArtifactVersion:        s.artifact.Version,
-			Artifact:               s.artifact,
-			TransportRequestNumber: "TR-001",
-		},
-	}
+	ops := []db.ArtifactTenantOperation{s.makeOp(s.target.ID, "TR-001", false)}
 
 	result, err := svc.InsertTenantOps(context.Background(), s.dr.ID, ops, "test-user")
 	if err != nil {
@@ -157,21 +161,12 @@ func TestInsertTenantOps_WithInvalidTR(t *testing.T) {
 	s := setupDRTest(t)
 
 	tmsMock := &mockTMSClient{
-		// TR-BAD not found
 		transportRequests: map[string]*tms.TransportRequestV1{},
 	}
 
 	svc := newTestService(s.cpiFactory, testServiceOpts{tms: tmsMock})
 
-	ops := []db.ArtifactTenantOperation{
-		{
-			TenantID:               s.target.ID,
-			ArtifactTechID:         s.artifact.TechID,
-			ArtifactVersion:        s.artifact.Version,
-			Artifact:               s.artifact,
-			TransportRequestNumber: "TR-BAD",
-		},
-	}
+	ops := []db.ArtifactTenantOperation{s.makeOp(s.target.ID, "TR-BAD", false)}
 
 	_, err := svc.InsertTenantOps(context.Background(), s.dr.ID, ops, "test-user")
 	if err == nil {
@@ -184,40 +179,22 @@ func TestInsertTenantOps_WithInvalidTR(t *testing.T) {
 func TestUpdateTenantOps_EmptyToNonEmpty(t *testing.T) {
 	s := setupDRTest(t)
 
-	// First insert op with empty TR
 	svc := newTestService(s.cpiFactory)
 
-	ops := []db.ArtifactTenantOperation{
-		{
-			TenantID:               s.target.ID,
-			ArtifactTechID:         s.artifact.TechID,
-			ArtifactVersion:        s.artifact.Version,
-			Artifact:               s.artifact,
-			TransportRequestNumber: "",
-		},
-	}
-	inserted, err := svc.InsertTenantOps(context.Background(), s.dr.ID, ops, "test-user")
+	inserted, err := svc.InsertTenantOps(context.Background(), s.dr.ID, []db.ArtifactTenantOperation{s.makeOp(s.target.ID, "", false)}, "test-user")
 	if err != nil {
 		t.Fatalf("InsertTenantOps failed: %v", err)
 	}
 	opID := inserted[0].ID
 
-	// Now update to a valid TR — should validate
 	tmsMock := &mockTMSClient{
 		transportRequests: map[string]*tms.TransportRequestV1{
-			"TR-002": validTR("TR-002", s.source.TmsSourceNodeName, s.artifact.TechID, s.artifact.Version, s.artifact.Type),
+			"TR-002": validTR("TR-002", s.source.TmsSourceNodeName, s.artifactTechID, s.artifactVersion, s.artifactType),
 		},
 	}
 	svc2 := newTestService(s.cpiFactory, testServiceOpts{tms: tmsMock})
 
-	updateOps := []db.ArtifactTenantOperation{
-		{
-			ArtifactTechID:         s.artifact.TechID,
-			ArtifactVersion:        s.artifact.Version,
-			Artifact:               s.artifact, // needed for TrExist metadata check
-			TransportRequestNumber: "TR-002",
-		},
-	}
+	updateOps := []OpUpdateItem{{TransportRequestNumber: "TR-002"}}
 	updateOps[0].ID = opID
 
 	result, err := svc2.UpdateTenantOps(s.dr.ID, updateOps, "test-user")
@@ -228,7 +205,6 @@ func TestUpdateTenantOps_EmptyToNonEmpty(t *testing.T) {
 		t.Fatalf("expected 1 result, got %d", len(result))
 	}
 
-	// Verify in DB
 	var dbOp db.ArtifactTenantOperation
 	testDB.First(&dbOp, opID)
 	if dbOp.TransportRequestNumber != "TR-002" {
@@ -239,31 +215,16 @@ func TestUpdateTenantOps_EmptyToNonEmpty(t *testing.T) {
 func TestUpdateTenantOps_EmptyToEmpty(t *testing.T) {
 	s := setupDRTest(t)
 
-	// Insert op with empty TR
 	svc := newTestService(s.cpiFactory)
 
-	ops := []db.ArtifactTenantOperation{
-		{
-			TenantID:               s.target.ID,
-			ArtifactTechID:         s.artifact.TechID,
-			ArtifactVersion:        s.artifact.Version,
-			Artifact:               s.artifact,
-			TransportRequestNumber: "",
-		},
-	}
-	inserted, err := svc.InsertTenantOps(context.Background(), s.dr.ID, ops, "test-user")
+	inserted, err := svc.InsertTenantOps(context.Background(), s.dr.ID, []db.ArtifactTenantOperation{s.makeOp(s.target.ID, "", false)}, "test-user")
 	if err != nil {
 		t.Fatalf("InsertTenantOps failed: %v", err)
 	}
 	opID := inserted[0].ID
 
-	// Update with empty TR again — should skip validation (no TMS call needed)
-	svc2 := newTestService(s.cpiFactory) // no TMS mock — would crash if TrExist is called
-	updateOps := []db.ArtifactTenantOperation{
-		{
-			TransportRequestNumber: "",
-		},
-	}
+	svc2 := newTestService(s.cpiFactory)
+	updateOps := []OpUpdateItem{{TransportRequestNumber: ""}}
 	updateOps[0].ID = opID
 
 	_, err = svc2.UpdateTenantOps(s.dr.ID, updateOps, "test-user")
@@ -276,8 +237,6 @@ func TestUpdateTenantOps_EmptyToEmpty(t *testing.T) {
 // Phase 1 Tests: Approve & RequestApproval TR validation
 // =============================================================================
 
-// setupApproveTest creates a full setup for Approve/RequestApproval tests:
-// source tenant, target tenant, rule, DR with ops that may or may not have TRs.
 type approveTestSetup struct {
 	tc     *testCleanup
 	source db.CpiTenant
@@ -316,20 +275,14 @@ func setupApproveTest(t *testing.T, trNumber string) approveTestSetup {
 		UpdatedBy:       "creator-user",
 	})
 
-	art := seedArtifact(t, tc, db.Artifact{
-		TechID:    "appr-iflow-" + suffix,
-		Version:   "2.0.3",
-		Name:      "Approve IFlow " + suffix,
-		Type:      consts.Artifact_Type_Iflow,
-		PackageID: "pkg-appr-" + suffix,
-	})
-
 	op := seedOp(t, db.ArtifactTenantOperation{
 		DeliveryRequestID:      dr.ID,
 		TenantID:               target.ID,
-		ArtifactID:             art.ID,
-		ArtifactTechID:         art.TechID,
-		ArtifactVersion:        art.Version,
+		ArtifactTechID:         "appr-iflow-" + suffix,
+		ArtifactVersion:        "2.0.3",
+		ArtifactName:           "Approve IFlow " + suffix,
+		ArtifactType:           consts.Artifact_Type_Iflow,
+		PackageID:              "pkg-appr-" + suffix,
 		TransportRequestNumber: trNumber,
 		RequestState:           lifecycle.RequestPending,
 		ImportState:            lifecycle.ImportNotStarted,
@@ -348,11 +301,9 @@ func setupApproveTest(t *testing.T, trNumber string) approveTestSetup {
 }
 
 func TestRequestApproval_MissingTR(t *testing.T) {
-	s := setupApproveTest(t, "") // empty TR
+	s := setupApproveTest(t, "")
 
-	// TMS mock — shouldn't matter, TrExist will fail on empty TR before calling TMS
 	tmsMock := &mockTMSClient{}
-
 	svc := newTestService(nil, testServiceOpts{tms: tmsMock})
 
 	err := svc.RequestApproval(s.dr.ID, "creator-user", []string{"approver-1"}, "please approve")
@@ -360,11 +311,9 @@ func TestRequestApproval_MissingTR(t *testing.T) {
 		t.Fatal("RequestApproval with missing TR should fail")
 	}
 
-	// Verify DR status did NOT change to WAITING_APPROVAL
 	var dr db.DeliveryRequest
 	testDB.First(&dr, s.dr.ID)
 	if dr.AggregateStatus != lifecycle.AggWaitingApprove {
-		// It was already WAITING_APPROVAL from setup; confirm it didn't change to something unexpected
 		t.Logf("DR status after failed RequestApproval: %s (unchanged from setup)", dr.AggregateStatus)
 	}
 }
@@ -385,7 +334,6 @@ func TestRequestApproval_WithValidTR(t *testing.T) {
 		t.Fatalf("RequestApproval with valid TR should succeed, got: %v", err)
 	}
 
-	// Verify DR status changed
 	var dr db.DeliveryRequest
 	testDB.First(&dr, s.dr.ID)
 	if dr.AggregateStatus != lifecycle.AggWaitingApprove {
@@ -394,7 +342,7 @@ func TestRequestApproval_WithValidTR(t *testing.T) {
 }
 
 func TestApprove_MissingTR(t *testing.T) {
-	s := setupApproveTest(t, "") // empty TR
+	s := setupApproveTest(t, "")
 
 	tmsMock := &mockTMSClient{}
 	svc := newTestService(nil, testServiceOpts{tms: tmsMock})
@@ -414,16 +362,7 @@ func TestInsertTenantOps_SkipDeploy(t *testing.T) {
 
 	svc := newTestService(s.cpiFactory)
 
-	ops := []db.ArtifactTenantOperation{
-		{
-			TenantID:               s.target.ID,
-			ArtifactTechID:         s.artifact.TechID,
-			ArtifactVersion:        s.artifact.Version,
-			Artifact:               s.artifact,
-			TransportRequestNumber: "",
-			SkipDeploy:             true,
-		},
-	}
+	ops := []db.ArtifactTenantOperation{s.makeOp(s.target.ID, "", true)}
 
 	result, err := svc.InsertTenantOps(context.Background(), s.dr.ID, ops, "test-user")
 	if err != nil {
@@ -448,16 +387,7 @@ func TestInsertTenantOps_NoSkipDeploy(t *testing.T) {
 
 	svc := newTestService(s.cpiFactory)
 
-	ops := []db.ArtifactTenantOperation{
-		{
-			TenantID:               s.target.ID,
-			ArtifactTechID:         s.artifact.TechID,
-			ArtifactVersion:        s.artifact.Version,
-			Artifact:               s.artifact,
-			TransportRequestNumber: "",
-			SkipDeploy:             false,
-		},
-	}
+	ops := []db.ArtifactTenantOperation{s.makeOp(s.target.ID, "", false)}
 
 	result, err := svc.InsertTenantOps(context.Background(), s.dr.ID, ops, "test-user")
 	if err != nil {
@@ -479,17 +409,7 @@ func TestUpdateTenantOps_EnableSkipDeploy(t *testing.T) {
 
 	svc := newTestService(s.cpiFactory)
 
-	ops := []db.ArtifactTenantOperation{
-		{
-			TenantID:               s.target.ID,
-			ArtifactTechID:         s.artifact.TechID,
-			ArtifactVersion:        s.artifact.Version,
-			Artifact:               s.artifact,
-			TransportRequestNumber: "",
-			SkipDeploy:             false,
-		},
-	}
-	inserted, err := svc.InsertTenantOps(context.Background(), s.dr.ID, ops, "test-user")
+	inserted, err := svc.InsertTenantOps(context.Background(), s.dr.ID, []db.ArtifactTenantOperation{s.makeOp(s.target.ID, "", false)}, "test-user")
 	if err != nil {
 		t.Fatalf("InsertTenantOps failed: %v", err)
 	}
@@ -502,12 +422,7 @@ func TestUpdateTenantOps_EnableSkipDeploy(t *testing.T) {
 		t.Fatalf("precondition: expected NOT_STARTED, got %s", inserted[0].DeployState)
 	}
 
-	updateOps := []db.ArtifactTenantOperation{
-		{
-			TransportRequestNumber: "",
-			SkipDeploy:             true,
-		},
-	}
+	updateOps := []OpUpdateItem{{TransportRequestNumber: "", SkipDeploy: true}}
 	updateOps[0].ID = opID
 
 	_, err = svc.UpdateTenantOps(s.dr.ID, updateOps, "test-user")
@@ -530,17 +445,7 @@ func TestUpdateTenantOps_DisableSkipDeploy(t *testing.T) {
 
 	svc := newTestService(s.cpiFactory)
 
-	ops := []db.ArtifactTenantOperation{
-		{
-			TenantID:               s.target.ID,
-			ArtifactTechID:         s.artifact.TechID,
-			ArtifactVersion:        s.artifact.Version,
-			Artifact:               s.artifact,
-			TransportRequestNumber: "",
-			SkipDeploy:             true,
-		},
-	}
-	inserted, err := svc.InsertTenantOps(context.Background(), s.dr.ID, ops, "test-user")
+	inserted, err := svc.InsertTenantOps(context.Background(), s.dr.ID, []db.ArtifactTenantOperation{s.makeOp(s.target.ID, "", true)}, "test-user")
 	if err != nil {
 		t.Fatalf("InsertTenantOps failed: %v", err)
 	}
@@ -553,12 +458,7 @@ func TestUpdateTenantOps_DisableSkipDeploy(t *testing.T) {
 		t.Fatalf("precondition: expected DEPLOY_DISABLED, got %s", inserted[0].DeployState)
 	}
 
-	updateOps := []db.ArtifactTenantOperation{
-		{
-			TransportRequestNumber: "",
-			SkipDeploy:             false,
-		},
-	}
+	updateOps := []OpUpdateItem{{TransportRequestNumber: "", SkipDeploy: false}}
 	updateOps[0].ID = opID
 
 	_, err = svc.UpdateTenantOps(s.dr.ID, updateOps, "test-user")
@@ -583,7 +483,6 @@ func TestApprove_AllTRPresent(t *testing.T) {
 		transportRequests: map[string]*tms.TransportRequestV1{
 			"TR-APPROVE-002": validTR("TR-APPROVE-002", s.source.TmsSourceNodeName, s.ops[0].ArtifactTechID, s.ops[0].ArtifactVersion, consts.Artifact_Type_Iflow),
 		},
-		// SyncDeliveryStatus calls TrNodeStatuses — provide a valid response
 		nodeStatuses: map[string]map[uint]tms.TrNodeStatus{
 			"TR-APPROVE-002": {
 				s.target.TmsSourceNodeID: {
@@ -605,7 +504,6 @@ func TestApprove_AllTRPresent(t *testing.T) {
 		t.Fatal("Approve returned nil DR")
 	}
 
-	// Verify approved status
 	var dbDR db.DeliveryRequest
 	testDB.First(&dbDR, s.dr.ID)
 	if dbDR.ApprovedBy != "approver-user" {

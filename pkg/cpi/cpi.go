@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"mmt-delivery/consts"
 	"mmt-delivery/pkg/cf"
@@ -53,7 +54,16 @@ func NewClient(ctx context.Context, destinationName string, resolver *cf.Destina
 	if err != nil {
 		return nil, fmt.Errorf("CPI destination(for it-tr/api) %s not found: %w", destinationName, err)
 	}
-	apiUrl := fmt.Sprintf("%s/v1", cpiDest.URL)
+	// Normalise base URL: strip any trailing /api/v1, /v1, or / that may have been
+	// included in the destination configuration, then always append /api/v1.
+	base := strings.TrimRight(cpiDest.URL, "/")
+	for _, suffix := range []string{"/api/v1", "/v1"} {
+		if trimmed, ok := strings.CutSuffix(base, suffix); ok {
+			base = trimmed
+			break
+		}
+	}
+	apiUrl := base + "/api/v1"
 	client, err := env.NewClient(ctx, cpiDest.ClientId, cpiDest.ClientSecret, cpiDest.TokenServiceURL, apiUrl)
 	return &CpiClient{client}, err
 }

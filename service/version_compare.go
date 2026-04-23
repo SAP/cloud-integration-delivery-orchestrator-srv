@@ -18,6 +18,14 @@ import (
 	"gorm.io/gorm"
 )
 
+// casArtifactEntry holds the minimal CAS-catalog fields needed for version compare.
+type casArtifactEntry struct {
+	TechID  string
+	Name    string
+	Version string
+	Type    string
+}
+
 // versionCompareCooldown is the minimum interval between triggers for the same rule.
 const versionCompareCooldown = 5 * time.Minute
 
@@ -284,7 +292,7 @@ func (s *Service) collectPackageSnapshot(
 	// For each tenant, fetch design-time artifacts for this package
 	type tenantArtifacts struct {
 		tenantID  uint
-		artifacts []db.Artifact
+		artifacts []casArtifactEntry
 		err       error
 	}
 
@@ -330,8 +338,6 @@ func (s *Service) collectPackageSnapshot(
 
 			versionInfo := db.ArtifactVersionInfo{
 				DesignTimeVersion: art.Version,
-				ModifiedBy:        art.ModifiedBy,
-				ModifiedAt:        art.ModifiedAt,
 			}
 
 			// Enrich with runtime info
@@ -1119,29 +1125,13 @@ func (s *Service) CreateDRFromMismatch(ruleID uint, req CreateDRFromMismatchRequ
 			TenantID:        rule.SourceTenantID,
 			ArtifactTechID:  art.ID,
 			ArtifactVersion: sourceVI.DesignTimeVersion,
-			Artifact: db.Artifact{
-				TechID:    art.ID,
-				Version:   sourceVI.DesignTimeVersion,
-				Name:      art.Name,
-				Type:      consts.ArtifactType(art.Type),
-				PackageID: item.pkg,
-			},
+			ArtifactName:    art.Name,
+			ArtifactType:    consts.ArtifactType(art.Type),
+			PackageID:       item.pkg,
 			TransportRequestNumber: "", // empty — to be filled later
 		}
 
-		// Artifact tech ID here comes from the version snapshot (already correct);
-		// skip PIR lookup and upsert directly.
-		a := op.Artifact
-		if s.DB.FirstOrCreate(&a, &db.Artifact{TechID: a.TechID, Version: a.Version}).Error != nil {
-			skipErrors = append(skipErrors, MismatchSkipError{
-				ArtifactID: art.ID,
-				PackageID:  item.pkg,
-				Reason:     fmt.Sprintf("failed to load artifact: %s", err),
-			})
-			continue
-		}
-		op.Artifact = a
-		op.ArtifactID = a.ID
+		// Artifact tech ID comes from the version snapshot (already correct) — no PIR lookup needed.
 
 		// Version downgrade check (tolerant — skip this artifact, don't block others)
 		downgradeErr := false
@@ -1265,17 +1255,16 @@ func computeMismatchCounts(data db.SnapshotData) (matched, mismatched, total int
 }
 
 // casArtifactsFromCatalog extracts artifacts for a specific package from a CAS catalog response.
-func casArtifactsFromCatalog(catalog []cas.CatalogContentResource, packageID string) []db.Artifact {
+func casArtifactsFromCatalog(catalog []cas.CatalogContentResource, packageID string) []casArtifactEntry {
 	for _, res := range catalog {
 		if res.SubType == "package" && res.ID == packageID {
-			arts := make([]db.Artifact, 0, len(res.Components))
+			arts := make([]casArtifactEntry, 0, len(res.Components))
 			for _, comp := range res.Components {
-				arts = append(arts, db.Artifact{
-					TechID:    comp.Name,
-					Name:      comp.Name,
-					Version:   comp.Version,
-					Type:      consts.ArtifactType(comp.Type),
-					PackageID: packageID,
+				arts = append(arts, casArtifactEntry{
+					TechID:  comp.Name,
+					Name:    comp.Name,
+					Version: comp.Version,
+					Type:    comp.Type,
 				})
 			}
 			return arts

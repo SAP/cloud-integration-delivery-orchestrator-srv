@@ -309,6 +309,16 @@ type OpsRequest struct {
 	DeliveryRequestID uint                         `json:"deliveryRequestID"`
 }
 
+// OpUpdateItem carries only the mutable fields for an existing op.
+// Using a dedicated type avoids accidentally accepting artifact identity
+// fields from the client, which must come from the DB (existingOp).
+type OpUpdateItem = service.OpUpdateItem
+
+type UpdateOpsRequest struct {
+	DeliveryRequestID uint           `json:"deliveryRequestID"`
+	Ops               []OpUpdateItem `json:"ops"`
+}
+
 func (h *Handler) HandleInsertOps(c *gin.Context) {
 	var req OpsRequest
 	if err := c.ShouldBindBodyWithJSON(&req); err != nil {
@@ -330,27 +340,33 @@ func (h *Handler) HandleInsertOps(c *gin.Context) {
 }
 
 func (h *Handler) HandleUpdateOps(c *gin.Context) {
-	var req OpsRequest
+	var req UpdateOpsRequest
 	if err := c.ShouldBindBodyWithJSON(&req); err != nil {
 		Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 	user := service.UserID(c)
-	ops, err := h.svc.UpdateTenantOps(req.DeliveryRequestID, req.Ops, user)
+	result, err := h.svc.UpdateTenantOps(req.DeliveryRequestID, req.Ops, user)
 	if err != nil {
 		Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	OK(c, ops)
+	OK(c, result)
 }
 
 func (h *Handler) HandleCheckTr(c *gin.Context) {
 	var req struct {
-		Op                db.ArtifactTenantOperation `json:"op"`
-		DeliveryRequestID uint                       `json:"deliveryRequestID"`
+		OpID                   uint   `json:"opID"`
+		TransportRequestNumber string `json:"transportRequestNumber"`
+		DeliveryRequestID      uint   `json:"deliveryRequestID"`
 	}
 	if err := c.ShouldBindBodyWithJSON(&req); err != nil {
 		Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	var op db.ArtifactTenantOperation
+	if err := h.db.First(&op, req.OpID).Error; err != nil {
+		Fail(c, http.StatusBadRequest, fmt.Sprintf("artifact tenant operation %d not found: %s", req.OpID, err))
 		return
 	}
 	var dr db.DeliveryRequest
@@ -358,23 +374,22 @@ func (h *Handler) HandleCheckTr(c *gin.Context) {
 		Fail(c, http.StatusInternalServerError, fmt.Sprintf("failed to get delivery request id %d: %s", req.DeliveryRequestID, err))
 		return
 	}
-	sourceTenantID := dr.SourceTenantID
-	if req.Op.TenantID != sourceTenantID {
-		Fail(c, http.StatusBadRequest, fmt.Sprintf("artifact tenant operation id %d has different source tenant id %d than delivery request source tenant id %d", req.Op.ID, req.Op.TenantID, sourceTenantID))
+	if op.TenantID != dr.SourceTenantID {
+		Fail(c, http.StatusBadRequest, fmt.Sprintf("operation %d belongs to tenant %d, not the source tenant of DR %d", op.ID, op.TenantID, req.DeliveryRequestID))
 		return
 	}
 	var sourceTenant db.CpiTenant
-	if err := h.db.First(&sourceTenant, sourceTenantID).Error; err != nil {
-		Fail(c, http.StatusInternalServerError, fmt.Sprintf("failed to get source tenant id %d: %s", sourceTenantID, err))
+	if err := h.db.First(&sourceTenant, dr.SourceTenantID).Error; err != nil {
+		Fail(c, http.StatusInternalServerError, fmt.Sprintf("failed to get source tenant %d: %s", dr.SourceTenantID, err))
 		return
 	}
-
-	_, err := h.svc.TrExist(&req.Op, &sourceTenant)
+	op.TransportRequestNumber = req.TransportRequestNumber
+	_, err := h.svc.TrExist(&op, &sourceTenant)
 	if err != nil {
 		Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	OKMsg(c, nil, "valid TR: "+req.Op.TransportRequestNumber)
+	OKMsg(c, nil, "valid TR: "+req.TransportRequestNumber)
 }
 
 // CancelDrRequest is the request body for canceling a delivery request

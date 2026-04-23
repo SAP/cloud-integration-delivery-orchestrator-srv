@@ -1612,13 +1612,6 @@ func TestPreviewDR_DuplicateDetection(t *testing.T) {
 	seedSnapshot(t, snap)
 
 	// Create an active DR that already contains iflow-dup at version 1.0.5
-	art := seedArtifact(t, tc, db.Artifact{
-		TechID:    "iflow-dup",
-		Version:   "1.0.5",
-		Name:      "IFlow Dup",
-		Type:      consts.Artifact_Type_Iflow,
-		PackageID: "pkg1",
-	})
 	existingDR := seedDeliveryRequest(t, tc, db.DeliveryRequest{
 		Name:            "Existing DR",
 		DeliveryRuleID:  rule.ID,
@@ -1630,9 +1623,11 @@ func TestPreviewDR_DuplicateDetection(t *testing.T) {
 	seedOp(t, db.ArtifactTenantOperation{
 		DeliveryRequestID:      existingDR.ID,
 		TenantID:               target.ID,
-		ArtifactID:             art.ID,
-		ArtifactTechID:         art.TechID,
-		ArtifactVersion:        art.Version,
+		ArtifactTechID:         "iflow-dup",
+		ArtifactVersion:        "1.0.5",
+		ArtifactName:           "IFlow Dup",
+		ArtifactType:           consts.Artifact_Type_Iflow,
+		PackageID:              "pkg1",
 		TransportRequestNumber: "",
 		RequestState:           lifecycle.RequestPending,
 		ImportState:            lifecycle.ImportNotStarted,
@@ -2011,13 +2006,6 @@ func TestCreateDR_DuplicateIncluded(t *testing.T) {
 	})
 
 	// Create an existing active DR with the same artifact
-	dupArt := seedArtifact(t, tc, db.Artifact{
-		TechID:    "dup-allowed-iflow",
-		Version:   "1.0.7",
-		Name:      "Dup Allowed",
-		Type:      consts.Artifact_Type_Iflow,
-		PackageID: "pkg1",
-	})
 	existingDR := seedDeliveryRequest(t, tc, db.DeliveryRequest{
 		Name:            "Existing Dup DR",
 		DeliveryRuleID:  rule.ID,
@@ -2029,9 +2017,11 @@ func TestCreateDR_DuplicateIncluded(t *testing.T) {
 	seedOp(t, db.ArtifactTenantOperation{
 		DeliveryRequestID: existingDR.ID,
 		TenantID:          target.ID,
-		ArtifactID:        dupArt.ID,
-		ArtifactTechID:    dupArt.TechID,
-		ArtifactVersion:   dupArt.Version,
+		ArtifactTechID:    "dup-allowed-iflow",
+		ArtifactVersion:   "1.0.7",
+		ArtifactName:      "Dup Allowed",
+		ArtifactType:      consts.Artifact_Type_Iflow,
+		PackageID:         "pkg1",
 		RequestState:      lifecycle.RequestPending,
 		ImportState:       lifecycle.ImportNotStarted,
 		DeployState:       lifecycle.DeployNotStarted,

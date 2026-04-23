@@ -222,6 +222,7 @@ func (h *Handler) SetupRoutes(v1 *gin.RouterGroup, v2 *gin.RouterGroup, requireS
 		system.GET("/integrations", h.GetIntegrations)
 		system.PUT("/integrations/:type", h.UpdateIntegration)
 		system.GET("/connectivity", h.CheckConnectivity)
+		system.POST("/backfill-tech-id", h.HandleBackfillTechIDs)
 	}
 
 	// --- v2 API (DeliveryRequest.Operate) ---

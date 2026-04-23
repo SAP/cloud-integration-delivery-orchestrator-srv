@@ -96,10 +96,10 @@ func (s *Service) ensureCasGUIDs(ctx context.Context, casClient CasService, ops 
 	packageIDs := make([]string, 0, len(ops))
 	seen := make(map[string]struct{}, len(ops))
 	for _, op := range ops {
-		if op.Artifact.PackageID != "" {
-			if _, ok := seen[op.Artifact.PackageID]; !ok {
-				seen[op.Artifact.PackageID] = struct{}{}
-				packageIDs = append(packageIDs, op.Artifact.PackageID)
+		if op.PackageID != "" {
+			if _, ok := seen[op.PackageID]; !ok {
+				seen[op.PackageID] = struct{}{}
+				packageIDs = append(packageIDs, op.PackageID)
 			}
 		}
 	}
@@ -110,7 +110,7 @@ func (s *Service) ensureCasGUIDs(ctx context.Context, casClient CasService, ops 
 	}
 
 	// Build lookup: artifact display name → {component, package}.
-	// CAS comp.Name is the artifact display name, which matches Artifact.Name in our DB.
+	// CAS comp.Name is the artifact display name, which matches ArtifactName in our DB.
 	// Tech ID is NOT returned by CAS and is not used in the export flow.
 	type entry struct {
 		comp cas.CatalogComponent
@@ -128,10 +128,10 @@ func (s *Service) ensureCasGUIDs(ctx context.Context, casClient CasService, ops 
 
 	// Populate cache fields and persist.
 	for i := range ops {
-		// Match by display name (Artifact.Name == CAS comp.Name).
-		e, ok := index[ops[i].Artifact.Name]
+		// Match by display name (ArtifactName == CAS comp.Name).
+		e, ok := index[ops[i].ArtifactName]
 		if !ok {
-			return fmt.Errorf("artifact %q (techID=%q) not found in CAS catalog", ops[i].Artifact.Name, ops[i].ArtifactTechID)
+			return fmt.Errorf("artifact %q (techID=%q) not found in CAS catalog", ops[i].ArtifactName, ops[i].ArtifactTechID)
 		}
 
 		ops[i].CasArtifactGUID = e.comp.ID
@@ -146,16 +146,16 @@ func (s *Service) ensureCasGUIDs(ctx context.Context, casClient CasService, ops 
 			return fmt.Errorf("persist CAS GUIDs for op %d: %w", ops[i].ID, err)
 		}
 
-		// Update package-level fields on Artifact if not yet cached.
-		if ops[i].Artifact.PackageName == "" || ops[i].Artifact.PackageVersion == "" {
-			if err := s.DB.WithContext(ctx).Model(&ops[i].Artifact).Updates(map[string]any{
+		// Update package display name/version on op if not yet cached.
+		if ops[i].PackageName == "" || ops[i].PackageVersion == "" {
+			if err := s.DB.WithContext(ctx).Model(&ops[i]).Updates(map[string]any{
 				"package_name":    e.pkg.Name,
 				"package_version": e.pkg.Version,
 			}).Error; err != nil {
-				return fmt.Errorf("persist package metadata for artifact %d: %w", ops[i].ArtifactID, err)
+				return fmt.Errorf("persist package metadata for op %d: %w", ops[i].ID, err)
 			}
-			ops[i].Artifact.PackageName = e.pkg.Name
-			ops[i].Artifact.PackageVersion = e.pkg.Version
+			ops[i].PackageName = e.pkg.Name
+			ops[i].PackageVersion = e.pkg.Version
 		}
 	}
 
@@ -194,7 +194,6 @@ func (s *Service) GenerateTransportRequest(ctx context.Context, tenantID, delive
 	// ── 3. Load ArtifactTenantOperations ─────────────────────────────────────
 	var ops []db.ArtifactTenantOperation
 	if err := s.DB.WithContext(ctx).
-		Preload("Artifact").
 		Where("id IN ? AND delivery_request_id = ? AND tenant_id = ?",
 			artifactOperationIDs, deliveryRequestID, tenantID).
 		Find(&ops).Error; err != nil {
@@ -283,18 +282,18 @@ func (s *Service) exportOneTR(
 	}
 
 	contentResource := cas.ContentResource{
-		ID:          op.Artifact.PackageID,
+		ID:          op.PackageID,
 		ResourceID:  op.CasPackageResourceID,
 		ContentType: "Cloud Integration",
 		SubType:     "package",
 		Type:        "Cloud Integration",
-		Name:        op.Artifact.PackageName,
-		Version:     op.Artifact.PackageVersion,
+		Name:        op.PackageName,
+		Version:     op.PackageVersion,
 		Components: []cas.ContentResourceComponent{
 			{
 				ID:                   op.CasArtifactGUID,
-				Name:                 op.Artifact.Name,
-				Type:                 string(op.Artifact.Type),
+				Name:                 op.ArtifactName,
+				Type:                 string(op.ArtifactType),
 				Version:              op.ArtifactVersion,
 				Selected:             true,
 				Enabled:              true,
@@ -310,7 +309,7 @@ func (s *Service) exportOneTR(
 		},
 	}
 
-	description := fmt.Sprintf("DR#%d - %s %s - Requested by: %s", dr.ID, op.Artifact.Name, op.ArtifactVersion, dr.CreatedBy)
+	description := fmt.Sprintf("DR#%d - %s %s - Requested by: %s", dr.ID, op.ArtifactName, op.ArtifactVersion, dr.CreatedBy)
 
 	exportReq := cas.ExportRequest{
 		ID:                   fmt.Sprintf("%d", op.ID),

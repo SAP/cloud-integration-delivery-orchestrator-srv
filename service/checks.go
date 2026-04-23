@@ -57,7 +57,7 @@ func (s *Service) checkVersionDowngradeInTenant(op *db.ArtifactTenantOperation, 
 	}
 	sourceVersion := op.ArtifactVersion
 	var targetVersion string
-	switch op.Artifact.Type {
+	switch op.ArtifactType {
 	case consts.Artifact_Type_Iflow:
 		iflow, err := cli.GetDesignTimeIflow(context.Background(), op.ArtifactTechID, "active")
 		if err != nil {
@@ -108,7 +108,7 @@ func (s *Service) TrExist(op *db.ArtifactTenantOperation, sourceTenant *db.CpiTe
 	index := -1
 	for i, md := range trV1.Content[0].Metadata {
 		// NOTE: tms response use Name, not tech ID
-		if (md.Name == op.Artifact.Name || md.Name == op.ArtifactTechID) && md.Type == op.Artifact.Type && md.Version == op.ArtifactVersion {
+		if (md.Name == op.ArtifactName || md.Name == op.ArtifactTechID) && md.Type == op.ArtifactType && md.Version == op.ArtifactVersion {
 			index = i
 			break
 		}

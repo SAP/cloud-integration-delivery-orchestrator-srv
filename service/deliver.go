@@ -163,7 +163,7 @@ func (s *Service) BatchDeployTenantOps(drID uint, opIDs []uint, targetTenantID u
 				failedOps = append(failedOps, *op)
 				continue
 			}
-			_, err = cpiCli.DeployArtifact(context.Background(), op.ArtifactTechID, op.ArtifactVersion, op.Artifact.Type)
+			_, err = cpiCli.DeployArtifact(context.Background(), op.ArtifactTechID, op.ArtifactVersion, op.ArtifactType)
 			if err != nil {
 				errOps[op.ID] = fmt.Errorf("failed to deploy artifact %s:%s to tenant %s: %s", op.ArtifactTechID, op.ArtifactVersion, op.Tenant.Name, err)
 				// mark as failed and continue
@@ -231,7 +231,7 @@ func (s *Service) queryOpsWithAcco(opIDs []uint) ([]db.ArtifactTenantOperation, 
 	}
 
 	var ops []db.ArtifactTenantOperation
-	if err := s.DB.Preload("Artifact").Preload("Tenant").
+	if err := s.DB.Preload("Tenant").
 		Find(&ops, opIDs).Error; err != nil {
 		return nil, fmt.Errorf("failed to query artifact operations of %v: %s", opIDs, err)
 	}

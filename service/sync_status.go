@@ -313,9 +313,13 @@ func (s *Service) syncImportState(deliveryRequestID uint, user string) []db.Cond
 				}
 				newOp := db.ArtifactTenantOperation{
 					DeliveryRequestID:      op.DeliveryRequestID,
-					ArtifactID:             op.ArtifactID,
 					ArtifactTechID:         op.ArtifactTechID,
 					ArtifactVersion:        op.ArtifactVersion,
+					ArtifactName:           op.ArtifactName,
+					ArtifactType:           op.ArtifactType,
+					PackageID:              op.PackageID,
+					PackageName:            op.PackageName,
+					PackageVersion:         op.PackageVersion,
 					TenantID:               tenantID,
 					TransportRequestNumber: trNumber,
 					SkipDeploy:             op.SkipDeploy,
@@ -331,15 +335,6 @@ func (s *Service) syncImportState(deliveryRequestID uint, user string) []db.Cond
 			state := lifecycle.DeriveImport(nState.Status)
 			if state == curOp.ImportState { // skip if state no change
 				s.Logger.Infof("no import state change for artifact %s(#%d) in node %d, current state: %s", curOp.ArtifactTechID, curOp.ID, nID, state)
-				// TODO(multi-instance): re-enable when PG advisory lock is in place (RFC 014 §5.2).
-				// Heal duplicate ops that diverged due to past concurrent-sync races:
-				// curOp is already at the target state, but sibling rows for the same
-				// (delivery_request_id, artifact_id, tenant_id, transport_request_number)
-				// may still be stale. Bring them in sync without emitting extra conditions.
-				// s.DB.Model(&db.ArtifactTenantOperation{}).
-				// 	Where("delivery_request_id = ? AND artifact_id = ? AND tenant_id = ? AND transport_request_number = ? AND id != ? AND import_state != ?",
-				// 		deliveryRequestID, curOp.ArtifactID, tenantID, trNumber, curOp.ID, state).
-				// 	Updates(map[string]interface{}{"import_state": state, "deploy_state": curOp.DeployState, "updated_by": user})
 				continue
 			}
 
@@ -363,12 +358,6 @@ func (s *Service) syncImportState(deliveryRequestID uint, user string) []db.Cond
 					},
 				}
 			}
-			// TODO(multi-instance): re-enable when PG advisory lock is in place (RFC 014 §5.2).
-			// Heal any duplicate ops created by past concurrent-sync races.
-			// s.DB.Model(&db.ArtifactTenantOperation{}).
-			// 	Where("delivery_request_id = ? AND artifact_id = ? AND tenant_id = ? AND transport_request_number = ? AND id != ? AND import_state != ?",
-			// 		deliveryRequestID, curOp.ArtifactID, tenantID, trNumber, curOp.ID, curOp.ImportState).
-			// 	Updates(map[string]interface{}{"import_state": curOp.ImportState, "deploy_state": curOp.DeployState, "updated_by": user})
 			// if imported, save to condition
 			if state == lifecycle.ImportComplete {
 				conditionMsg := fmt.Sprintf("artifact %s (version %s) has been successfully imported in tenant %d (node %d), at %s", curOp.ArtifactTechID, curOp.ArtifactVersion, tenantID, nID, nState.UpdatedAt)

@@ -31,87 +31,6 @@ func (s *Service) DeleteDeliveryRequest(id uint) error {
 	return nil
 }
 
-// LoadArtifact resolves the true CPI tech ID for the artifact via PIR OData, then
-// upserts it into the DB.  It queries GET /IntegrationPackages('{pkgID}')/<type>
-// and matches by display name (Artifact.Name == PIR Name field).
-//
-// destinationName is the source tenant's PirApiDestinationName, used to build
-// the CPI client (same pattern as deliver.go / checks.go).
-func (s *Service) LoadArtifact(ctx context.Context, destinationName string, op db.ArtifactTenantOperation) (atf db.Artifact, err error) {
-	a := &op.Artifact
-
-	cpiCli, err := s.CPI(ctx, destinationName)
-	if err != nil {
-		return atf, fmt.Errorf("LoadArtifact: build CPI client: %w", err)
-	}
-
-	techID, err := s.resolveTechID(ctx, cpiCli, a.PackageID, string(a.Type), a.Name, a.Version)
-	if err != nil {
-		return atf, fmt.Errorf("LoadArtifact: resolve tech ID for %q (package %q): %w", a.Name, a.PackageID, err)
-	}
-	a.TechID = techID
-
-	if s.DB.FirstOrCreate(a, &db.Artifact{TechID: a.TechID, Version: a.Version}).Error != nil {
-		err = fmt.Errorf("error when saving artifact %s:%s", a.TechID, a.Version)
-		return
-	}
-	atf = *a
-	return
-}
-
-// resolveTechID queries the CPI PIR OData API for the given package and artifact type,
-// then returns the tech ID of the single artifact whose display name AND version both match.
-// Returns an error if 0 or ≥2 matches are found.
-func (s *Service) resolveTechID(ctx context.Context, cpiCli IntegrationService, packageID, artifactType, displayName, version string) (string, error) {
-	type nameID struct{ name, version, id string }
-	var items []nameID
-
-	switch strings.ToLower(artifactType) {
-	case "iflow", "integrationflow":
-		iflows, err := cpiCli.GetPackageIflows(ctx, packageID)
-		if err != nil {
-			return "", fmt.Errorf("GetPackageIflows(%q): %w", packageID, err)
-		}
-		for _, f := range iflows {
-			items = append(items, nameID{f.Name, f.Version, f.ID})
-		}
-	case "scriptcollection":
-		scs, err := cpiCli.GetPackageScriptcollections(ctx, packageID)
-		if err != nil {
-			return "", fmt.Errorf("GetPackageScriptcollections(%q): %w", packageID, err)
-		}
-		for _, sc := range scs {
-			items = append(items, nameID{sc.Name, sc.Version, sc.ID})
-		}
-	default:
-		return "", fmt.Errorf("unsupported artifact type %q — only IFlow and ScriptCollection are supported", artifactType)
-	}
-
-	var matches []nameID
-	for _, it := range items {
-		if it.name == displayName && it.version == version {
-			matches = append(matches, it)
-		}
-	}
-
-	switch len(matches) {
-	case 0:
-		return "", fmt.Errorf("artifact %q version %q not found in CPI package %q via PIR API", displayName, version, packageID)
-	case 1:
-		return matches[0].id, nil
-	default:
-		techIDs := make([]string, len(matches))
-		for i, m := range matches {
-			techIDs[i] = m.id
-		}
-		return "", fmt.Errorf(
-			"ambiguous artifact name %q version %q in package %q: found %d artifacts with the same display name and version (tech IDs: %v). "+
-				"Please rename the artifacts in CPI to use unique display names within the package.",
-			displayName, version, packageID, len(matches), techIDs,
-		)
-	}
-}
-
 // queryTenantByNodeID queries a CPI tenant by its TMS source node ID
 func (s *Service) queryTenantByNodeID(nodeID uint) (*db.CpiTenant, error) {
 	var tenant db.CpiTenant
@@ -129,7 +48,6 @@ func (s *Service) QueryDrWithAssociations(drID uint) (dr *db.DeliveryRequest, er
 	if err := s.DB.
 		Preload("SourceTenant").
 		Preload("DeliveryRule").
-		Preload("ArtifactTenantOperations.Artifact").
 		Preload("ArtifactTenantOperations.Tenant").
 		Preload("Conditions", func(db *gorm.DB) *gorm.DB {
 			return db.Order("created_at asc")
@@ -144,7 +62,6 @@ func (s *Service) QueryDrWithAssociations(drID uint) (dr *db.DeliveryRequest, er
 func (s *Service) queryOpsInDrWithAcc(drID uint) (ops []db.ArtifactTenantOperation, err error) {
 	if err = s.DB.Where(&db.ArtifactTenantOperation{DeliveryRequestID: drID}).
 		Preload("Tenant").
-		Preload("Artifact").
 		Find(&ops).Error; err != nil {
 		err = fmt.Errorf("db query failed: %w", err)
 		return
@@ -331,6 +248,64 @@ func (s *Service) DeleteTenantOps(drID uint, opIDs []uint) error {
 	return nil
 }
 
+// resolveTechID queries the CPI PIR OData API for the given package and artifact type,
+// then returns the tech ID of the single artifact whose display name AND version both match.
+// Returns an error if 0 or ≥2 matches are found (ambiguous name → must reject).
+//
+// Core design: CAS API only provides artifact display name and GUID — not the tech ID.
+// Tech ID is only available from CPI PIR OData (Id field). This function is the mandatory
+// bridge: it must be called for every op inserted via InsertTenantOps so that
+// op.ArtifactTechID holds the real CPI tech ID required by the Deploy stage.
+func (s *Service) resolveTechID(ctx context.Context, cpiCli IntegrationService, packageID, artifactType, displayName, version string) (string, error) {
+	type nameID struct{ name, version, id string }
+	var items []nameID
+
+	switch strings.ToLower(artifactType) {
+	case "iflow", "integrationflow":
+		iflows, err := cpiCli.GetPackageIflows(ctx, packageID)
+		if err != nil {
+			return "", fmt.Errorf("GetPackageIflows(%q): %w", packageID, err)
+		}
+		for _, f := range iflows {
+			items = append(items, nameID{f.Name, f.Version, f.ID})
+		}
+	case "scriptcollection":
+		scs, err := cpiCli.GetPackageScriptcollections(ctx, packageID)
+		if err != nil {
+			return "", fmt.Errorf("GetPackageScriptcollections(%q): %w", packageID, err)
+		}
+		for _, sc := range scs {
+			items = append(items, nameID{sc.Name, sc.Version, sc.ID})
+		}
+	default:
+		return "", fmt.Errorf("unsupported artifact type %q — only IFlow and ScriptCollection are supported", artifactType)
+	}
+
+	var matches []nameID
+	for _, it := range items {
+		if it.name == displayName && it.version == version {
+			matches = append(matches, it)
+		}
+	}
+
+	switch len(matches) {
+	case 0:
+		return "", fmt.Errorf("artifact %q version %q not found in CPI package %q via PIR API", displayName, version, packageID)
+	case 1:
+		return matches[0].id, nil
+	default:
+		techIDs := make([]string, len(matches))
+		for i, m := range matches {
+			techIDs[i] = m.id
+		}
+		return "", fmt.Errorf(
+			"ambiguous artifact name %q version %q in package %q: found %d artifacts with the same display name and version (tech IDs: %v). "+
+				"Please rename the artifacts in CPI to use unique display names within the package.",
+			displayName, version, packageID, len(matches), techIDs,
+		)
+	}
+}
+
 func (s *Service) InsertTenantOps(ctx context.Context, drID uint, ops []db.ArtifactTenantOperation, user string) ([]db.ArtifactTenantOperation, error) {
 	if len(ops) == 0 {
 		return nil, nil
@@ -344,41 +319,43 @@ func (s *Service) InsertTenantOps(ctx context.Context, drID uint, ops []db.Artif
 	if err != nil {
 		return nil, fmt.Errorf("failed to get delivery rule %d: %s", dr.DeliveryRuleID, err)
 	}
-	errOps := make(map[uint]error)
+	// Build CPI client once — used for tech ID resolution for every op.
+	if s.CPI == nil {
+		return nil, fmt.Errorf("CPI factory not configured — cannot resolve tech IDs")
+	}
+	cpiCli, err := s.CPI(ctx, sourceTenant.PirApiDestinationName)
+	if err != nil {
+		return nil, fmt.Errorf("build CPI client for tech ID resolution: %w", err)
+	}
+
+	errOps := make(map[int]error) // keyed by slice index; op.ID is 0 before DB insert
 	for i := range ops {
 		op := &ops[i]
-		a, err := s.LoadArtifact(ctx, sourceTenant.PirApiDestinationName, *op)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load artifact for operation %d: %s", op.ID, err)
-		}
 
-		if err := s.DeliveryRuleCheck(op, &rule); err != nil {
-			errOps[op.ID] = err
+		// Resolve true CPI tech ID via PIR OData API before any checks.
+		// Frontend supplies only the display name (from CAS); checks like version-downgrade
+		// call GetDesignTimeIflow(techID) and must receive the real tech ID, not a display name.
+		techID, err := s.resolveTechID(ctx, cpiCli, op.PackageID, string(op.ArtifactType), op.ArtifactName, op.ArtifactVersion)
+		if err != nil {
+			errOps[i] = fmt.Errorf("resolve tech ID for artifact %q (package %q): %w", op.ArtifactName, op.PackageID, err)
 			continue
 		}
+		op.ArtifactTechID = techID
+
+		if err := s.DeliveryRuleCheck(op, &rule); err != nil {
+			errOps[i] = err
+			continue
+		}
+
 		// check TR — skip when TR is empty (allows auto-created ops from version compare to be saved without TR)
 		if op.TransportRequestNumber != "" {
 			if _, err := s.TrExist(op, &sourceTenant); err != nil {
-				errOps[op.ID] = fmt.Errorf("transport request check failed for artifact %s: %s", op.ArtifactTechID, err)
+				errOps[i] = fmt.Errorf("transport request check failed for artifact %s: %s", op.ArtifactTechID, err)
 				continue
 			}
 		}
 		op.CreatedAt, op.CreatedBy = time.Now(), user
-		frontendPackageName, frontendPackageVersion := op.Artifact.PackageName, op.Artifact.PackageVersion
-		op.Artifact = a
-		// Back-fill package display name/version from frontend CAS data if not yet in DB.
-		// These fields are needed by exportOneTR; ensureCasGUIDs also populates them but
-		// only on the first TR generation. Pre-filling here avoids that extra CAS call.
-		if op.Artifact.PackageName == "" && frontendPackageName != "" {
-			op.Artifact.PackageName = frontendPackageName
-			op.Artifact.PackageVersion = frontendPackageVersion
-			s.DB.Model(&op.Artifact).Updates(map[string]any{
-				"package_name":    frontendPackageName,
-				"package_version": frontendPackageVersion,
-			})
-		}
 		op.DeliveryRequestID = drID
-		op.ArtifactTechID, op.ArtifactVersion = a.TechID, a.Version // cache techID and version for quick access
 		op.ImportState = lifecycle.ImportNotStarted
 		op.RequestState = lifecycle.RequestPending
 		if op.SkipDeploy {
@@ -389,8 +366,8 @@ func (s *Service) InsertTenantOps(ctx context.Context, drID uint, ops []db.Artif
 	}
 	if len(errOps) > 0 {
 		errMsg := "errors occurred during insert artifact tenant operations:\n"
-		for id, e := range errOps {
-			errMsg += fmt.Sprintf("\t operation %d: %s\n", id, e)
+		for i, e := range errOps {
+			errMsg += fmt.Sprintf("\t op[%d] %s@%s: %s\n", i, ops[i].ArtifactName, ops[i].ArtifactVersion, e)
 		}
 		return nil, errors.New(errMsg)
 	}
@@ -474,9 +451,16 @@ func (s *Service) GenerateTRsInBackground(drID, tenantID uint, opIDs []uint) {
 	s.publishDrOps(drID, s.snapshotOps(drID))
 }
 
-// NOTE: can only update transport request number
-func (s *Service) UpdateTenantOps(drID uint, ops []db.ArtifactTenantOperation, user string) ([]db.ArtifactTenantOperation, error) {
-	if len(ops) == 0 {
+// OpUpdateItem carries the only mutable fields for an existing op.
+// Artifact identity fields are intentionally absent — they are read from DB.
+type OpUpdateItem struct {
+	ID                     uint   `json:"ID"`
+	TransportRequestNumber string `json:"TransportRequestNumber"`
+	SkipDeploy             bool   `json:"SkipDeploy"`
+}
+
+func (s *Service) UpdateTenantOps(drID uint, updateItems []OpUpdateItem, user string) ([]db.ArtifactTenantOperation, error) {
+	if len(updateItems) == 0 {
 		return nil, nil
 	}
 	dr, err := s.QueryDrWithAssociations(drID)
@@ -485,41 +469,44 @@ func (s *Service) UpdateTenantOps(drID uint, ops []db.ArtifactTenantOperation, u
 	}
 	sourceTenant := dr.SourceTenant
 	errOps := make(map[uint]error)
-	for i := range ops {
-		draftOp := &ops[i]
+	var result []db.ArtifactTenantOperation
+	for _, item := range updateItems {
 		var existingOp db.ArtifactTenantOperation
-		if err := s.DB.First(&existingOp, draftOp.ID).Error; err != nil {
-			errOps[draftOp.ID] = fmt.Errorf("failed to find artifact tenant operation %d: %s", draftOp.ID, err)
+		if err := s.DB.First(&existingOp, item.ID).Error; err != nil {
+			errOps[item.ID] = fmt.Errorf("failed to find artifact tenant operation %d: %s", item.ID, err)
 			continue
 		}
 		if existingOp.RequestState != lifecycle.RequestPending {
-			errOps[draftOp.ID] = fmt.Errorf("cannot update artifact tenant operation %d in state %s. Can only update pending operations", draftOp.ID, existingOp.RequestState)
+			errOps[item.ID] = fmt.Errorf("cannot update artifact tenant operation %d in state %s. Can only update pending operations", item.ID, existingOp.RequestState)
 			continue
 		}
-		if existingOp.TransportRequestNumber != draftOp.TransportRequestNumber {
+		if existingOp.TransportRequestNumber != item.TransportRequestNumber {
 			// Only validate TR when the new value is non-empty (empty→non-empty or non-empty→different non-empty).
 			// Skip when new TR is empty (allows clearing TR or keeping it empty for auto-created ops).
-			if draftOp.TransportRequestNumber != "" {
-				if _, err := s.TrExist(draftOp, &sourceTenant); err != nil {
-					errOps[draftOp.ID] = fmt.Errorf("transport request check failed for artifact %s, new %s, old: %s: %s",
-						draftOp.ArtifactTechID, draftOp.TransportRequestNumber, existingOp.TransportRequestNumber, err)
+			if item.TransportRequestNumber != "" {
+				// Use existingOp's artifact identity for TrExist validation; only the TR number comes from item.
+				checkOp := existingOp
+				checkOp.TransportRequestNumber = item.TransportRequestNumber
+				if _, err := s.TrExist(&checkOp, &sourceTenant); err != nil {
+					errOps[item.ID] = fmt.Errorf("transport request check failed for artifact %s, new %s, old: %s: %s",
+						existingOp.ArtifactTechID, item.TransportRequestNumber, existingOp.TransportRequestNumber, err)
 					continue
 				}
 			}
 		}
 		existingOp.UpdatedBy = user
-		existingOp.TransportRequestNumber = draftOp.TransportRequestNumber
-		existingOp.SkipDeploy = draftOp.SkipDeploy
-		if draftOp.SkipDeploy {
+		existingOp.TransportRequestNumber = item.TransportRequestNumber
+		existingOp.SkipDeploy = item.SkipDeploy
+		if item.SkipDeploy {
 			existingOp.DeployState = lifecycle.DeployDisabled
 		} else {
 			existingOp.DeployState = lifecycle.DeployNotStarted
 		}
-
 		if err := s.DB.Save(&existingOp).Error; err != nil {
-			errOps[draftOp.ID] = fmt.Errorf("failed to update artifact tenant operation %d: %s", draftOp.ID, err)
+			errOps[item.ID] = fmt.Errorf("failed to update artifact tenant operation %d: %s", item.ID, err)
+			continue
 		}
-		draftOp = &existingOp // update back
+		result = append(result, existingOp)
 	}
 	if len(errOps) > 0 {
 		errMsg := "errors occurred during update artifact tenant operations:\n"
@@ -529,7 +516,7 @@ func (s *Service) UpdateTenantOps(drID uint, ops []db.ArtifactTenantOperation, u
 		return nil, errors.New(errMsg)
 	}
 	s.publishDrOps(drID, s.snapshotOps(drID))
-	return ops, nil
+	return result, nil
 }
 
 func (s *Service) BatchInsertConditions(conditions []db.Condition) error {
