@@ -66,6 +66,10 @@ type cachedDest struct {
 // OAuth2ClientCredentials fields (ClientId, ClientSecret, TokenServiceURL,
 // TokenServiceURLType) and BasicAuthentication fields (User, Password) are
 // top-level, not nested — this matches the actual API wire format.
+//
+// AdditionalProperties holds destination-type-specific fields that don't have a
+// fixed slot in this struct (e.g. "sourceSystemId" for TMS destinations).
+// On marshal they are merged into the top-level JSON object alongside the fixed fields.
 type Destination struct {
 	Name                string `json:"Name"`
 	Description         string `json:"Description,omitempty"`
@@ -80,6 +84,7 @@ type Destination struct {
 	User                string `json:"User,omitempty"`
 	Password            string `json:"Password,omitempty"`
 	Port                string `json:"Port,omitempty"`
+	SourceSystemId      string `json:"sourceSystemId,omitempty"`
 }
 
 // NewDestinationServiceClient constructs a DestinationServiceClient from credentials

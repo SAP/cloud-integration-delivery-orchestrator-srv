@@ -72,156 +72,45 @@ func newTestHandlerWithSvc(t *testing.T) (*Handler, *gorm.DB) {
 	return h, database
 }
 
-// --- UpsertCpiTenant update path — key field change / state machine ---
+// --- UpsertCpiTenant update path ---
 
-// TestUpsertCpiTenant_Update_KeyFieldChange_Readying verifies that modifying a
-// key CF identity field while bootstrap is in progress (TenantReadying) is
-// rejected with 409.
-func TestUpsertCpiTenant_Update_KeyFieldChange_Readying(t *testing.T) {
+// TestUpsertCpiTenant_Update_RejectsCfIdentityChange verifies that updating CF
+// identity fields via UpsertCpiTenant returns 400; those fields must go through
+// PUT /api/v1/cpiTenant/:id/cfIdentity.
+func TestUpsertCpiTenant_Update_RejectsCfIdentityChange(t *testing.T) {
 	h, database := newTestHandlerWithSvc(t)
 
 	tenant := db.CpiTenant{
-		Name:           "test-tenant",
-		CfApiEndpoint:  "https://api.cf.eu10.hana.ondemand.com",
-		CfOrg:          "org-guid-abc",
-		CfSpace:        "space-guid-xyz",
-		LifecycleState: lifecycle.TenantReadying,
-	}
-	if err := database.Create(&tenant).Error; err != nil {
-		t.Fatalf("seed tenant: %v", err)
-	}
-
-	// Attempt to change CfOrg while bootstrap is running.
-	update := tenant
-	update.CfOrg = "org-guid-NEW"
-	w := postJSON(t, h.UpsertCpiTenant, update)
-	if w.Code != 409 {
-		t.Errorf("expected 409 when changing key field during readying, got %d: %s", w.Code, w.Body.String())
-	}
-}
-
-// TestUpsertCpiTenant_Update_KeyFieldChange_ResetsToMraft verifies that modifying
-// a key CF identity field from a non-readying state transitions the tenant back
-// to DRAFT and clears prerequisite statuses.
-func TestUpsertCpiTenant_Update_KeyFieldChange_ResetsToMraft(t *testing.T) {
-	h, database := newTestHandlerWithSvc(t)
-
-	tenant := db.CpiTenant{
-		Name:                  "test-tenant",
-		CfApiEndpoint:         "https://api.cf.eu10.hana.ondemand.com",
-		CfOrg:                 "org-guid-abc",
-		CfSpace:               "space-guid-xyz",
-		LifecycleState:        lifecycle.TenantNotReady,
-		PirApiStatus:          lifecycle.PrereqReady,
-		CasApplicationStatus:  lifecycle.PrereqReady,
-	}
-	if err := database.Create(&tenant).Error; err != nil {
-		t.Fatalf("seed tenant: %v", err)
-	}
-
-	update := tenant
-	update.CfOrg = "org-guid-NEW"
-	w := postJSON(t, h.UpsertCpiTenant, update)
-	if w.Code != 200 {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-
-	var updated db.CpiTenant
-	database.First(&updated, tenant.ID)
-	if updated.LifecycleState != lifecycle.TenantDraft {
-		t.Errorf("lifecycle_state = %q, want %q", updated.LifecycleState, lifecycle.TenantDraft)
-	}
-	if updated.PirApiStatus != lifecycle.PrereqMissing {
-		t.Errorf("PirApiStatus = %q, want %q", updated.PirApiStatus, lifecycle.PrereqMissing)
-	}
-}
-
-func TestKeyFieldChanged(t *testing.T) {
-	base := db.CpiTenant{
+		Name:          "test-tenant",
 		CfApiEndpoint: "https://api.cf.eu10.hana.ondemand.com",
 		CfOrg:         "org-guid-abc",
 		CfSpace:       "space-guid-xyz",
+		LifecycleState: lifecycle.TenantConfigured,
 	}
-
-	cases := []struct {
-		name    string
-		input   db.CpiTenant
-		changed bool
-	}{
-		{
-			"no change",
-			base,
-			false,
-		},
-		{
-			"CfApiEndpoint changed",
-			db.CpiTenant{CfApiEndpoint: "https://api.cf.eu20.hana.ondemand.com", CfOrg: base.CfOrg, CfSpace: base.CfSpace},
-			true,
-		},
-		{
-			"CfOrg changed",
-			db.CpiTenant{CfApiEndpoint: base.CfApiEndpoint, CfOrg: "org-guid-NEW", CfSpace: base.CfSpace},
-			true,
-		},
-		{
-			"CfSpace changed",
-			db.CpiTenant{CfApiEndpoint: base.CfApiEndpoint, CfOrg: base.CfOrg, CfSpace: "space-guid-NEW"},
-			true,
-		},
-		{
-			"all three changed",
-			db.CpiTenant{CfApiEndpoint: "x", CfOrg: "y", CfSpace: "z"},
-			true,
-		},
+	if err := database.Create(&tenant).Error; err != nil {
+		t.Fatalf("seed tenant: %v", err)
 	}
+	t.Cleanup(func() { database.Unscoped().Delete(&tenant) })
 
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			got := keyFieldChanged(base, c.input)
-			if got != c.changed {
-				t.Errorf("keyFieldChanged = %v, want %v", got, c.changed)
-			}
-		})
+	update := tenant
+	update.CfOrg = "org-guid-NEW"
+	w := postJSON(t, h.UpsertCpiTenant, update)
+	if w.Code != 400 {
+		t.Errorf("expected 400 when changing CF identity via UpsertCpiTenant, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
 // --- UpsertCpiTenant create path ---
 
-func TestUpsertCpiTenant_Create_RequiresFields(t *testing.T) {
+// TestUpsertCpiTenant_Create_RequiresName verifies that Name is required.
+func TestUpsertCpiTenant_Create_RequiresName(t *testing.T) {
 	h, database := newTestHandler(t)
+	_ = database
 
-	cases := []struct {
-		name           string
-		body           map[string]any
-		wantStatusCode int
-	}{
-		{
-			"missing both fields returns 400",
-			map[string]any{"name": "Tenant A"},
-			400,
-		},
-		{
-			"missing CfOrg returns 400",
-			map[string]any{"name": "Tenant A", "cfApiEndpoint": "https://api.cf.eu10.hana.ondemand.com"},
-			400,
-		},
-		{
-			"missing CfApiEndpoint returns 400",
-			map[string]any{"name": "Tenant A", "cfOrg": "org-guid"},
-			400,
-		},
+	w := postJSON(t, h.UpsertCpiTenant, map[string]any{})
+	if w.Code != 400 {
+		t.Errorf("expected 400 for missing name, got %d: %s", w.Code, w.Body.String())
 	}
-
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			w := postJSON(t, h.UpsertCpiTenant, c.body)
-			if w.Code != c.wantStatusCode {
-				t.Errorf("status = %d, want %d; body = %s", w.Code, c.wantStatusCode, w.Body.String())
-			}
-		})
-	}
-
-	_ = database // prevent unused warning; used via h.db
 }
 
 func TestUpsertCpiTenant_Create_SetsDraftState(t *testing.T) {
@@ -230,12 +119,7 @@ func TestUpsertCpiTenant_Create_SetsDraftState(t *testing.T) {
 		database.Unscoped().Where("1=1").Delete(&db.CpiTenant{})
 	})
 
-	body := map[string]any{
-		"name":          "Tenant Alpha",
-		"cfApiEndpoint": "https://api.cf.eu10.hana.ondemand.com",
-		"cfOrg":         "org-guid-alpha",
-	}
-	w := postJSON(t, h.UpsertCpiTenant, body)
+	w := postJSON(t, h.UpsertCpiTenant, map[string]any{"name": "Tenant Alpha"})
 	if w.Code != 200 {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
@@ -251,27 +135,4 @@ func TestUpsertCpiTenant_Create_SetsDraftState(t *testing.T) {
 	}
 }
 
-func TestUpsertCpiTenant_Create_RejectsDuplicateCfIdentity(t *testing.T) {
-	h, database := newTestHandler(t)
-	t.Cleanup(func() {
-		database.Unscoped().Where("1=1").Delete(&db.CpiTenant{})
-	})
 
-	body := map[string]any{
-		"name":          "Tenant Beta",
-		"cfApiEndpoint": "https://api.cf.eu10.hana.ondemand.com",
-		"cfOrg":         "org-guid-beta",
-	}
-
-	// First create should succeed
-	w1 := postJSON(t, h.UpsertCpiTenant, body)
-	if w1.Code != 200 {
-		t.Fatalf("first create: expected 200, got %d: %s", w1.Code, w1.Body.String())
-	}
-
-	// Second create with same (CfApiEndpoint, CfOrg) should be 409
-	w2 := postJSON(t, h.UpsertCpiTenant, body)
-	if w2.Code != 409 {
-		t.Errorf("duplicate create: expected 409, got %d: %s", w2.Code, w2.Body.String())
-	}
-}

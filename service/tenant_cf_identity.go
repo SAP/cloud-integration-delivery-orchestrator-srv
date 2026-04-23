@@ -2,11 +2,14 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"mmt-delivery/db"
 	"mmt-delivery/pkg/cf"
 	"mmt-delivery/pkg/lifecycle"
+
+	"gorm.io/gorm"
 )
 
 // CfIdentityInput carries the CF identity fields that Wizard Step 1 persists.
@@ -43,6 +46,19 @@ func (s *Service) SaveCfIdentity(ctx context.Context, tenantID uint, input CfIde
 		return fmt.Errorf("SaveCfIdentity: fetch tenant %d: %w", tenantID, err)
 	}
 
+	// ── Reject duplicate (CfApiEndpoint, CfOrg) if changing to a pair already in use ──
+	if input.CfApiEndpoint != tenant.CfApiEndpoint || input.CfOrg != tenant.CfOrg {
+		var conflict db.CpiTenant
+		err := s.DB.Where("cf_api_endpoint = ? AND cf_org = ? AND id != ?", input.CfApiEndpoint, input.CfOrg, tenantID).
+			First(&conflict).Error
+		if err == nil {
+			return fmt.Errorf("SaveCfIdentity: CF org %q on %q is already registered as another CPI tenant (id=%d)", input.CfOrg, input.CfApiEndpoint, conflict.ID)
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("SaveCfIdentity: check duplicate CF identity: %w", err)
+		}
+	}
+
 	// ── Detect key field changes ──────────────────────────────────────────────
 	// If any CF identity field is changing, invalidate prior bootstrap results.
 	fieldsChanged := tenant.CfApiEndpoint != input.CfApiEndpoint ||
@@ -67,6 +83,9 @@ func (s *Service) SaveCfIdentity(ctx context.Context, tenantID uint, input CfIde
 		updates["content_assembly_dest_status"] = lifecycle.PrereqMissing
 		updates["transport_management_dest_status"] = lifecycle.PrereqMissing
 		updates["tms_node_registration_status"] = lifecycle.PrereqMissing
+		updates["tms_source_node_name"] = ""
+		updates["central_tms_context_id"] = nil
+		updates["pir_api_url"] = ""
 	}
 	if err := s.DB.Model(&db.CpiTenant{}).Where("id = ?", tenantID).Updates(updates).Error; err != nil {
 		return fmt.Errorf("SaveCfIdentity: persist CF fields: %w", err)

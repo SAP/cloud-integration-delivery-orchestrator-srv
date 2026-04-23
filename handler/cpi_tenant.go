@@ -2,7 +2,6 @@ package handler
 
 import (
 	"errors"
-	"fmt"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -36,38 +35,26 @@ func (h *Handler) UpsertCpiTenant(ctx *gin.Context) {
 
 	if input.ID == 0 {
 		// ── Create path ──────────────────────────────────────────────────────────
-
-		input.CreatedBy = user
-
-		// CfApiEndpoint and CfOrg are required: without them the tenant cannot enter
-		// any meaningful bootstrap flow, and the DB unique index cannot protect
-		// against multiple empty-string rows at the business-logic level.
-		if input.CfApiEndpoint == "" || input.CfOrg == "" {
-			Fail(ctx, 400, "cfApiEndpoint and cfOrg are required")
+		// Creates a placeholder record with Name and Group only.
+		// CF identity (CfApiEndpoint, CfOrg, CfSpace) is set later via
+		// PUT /api/v1/cpiTenant/:id/cfIdentity when the operator starts bootstrap.
+		if input.Name == "" {
+			Fail(ctx, 400, "name is required")
 			return
 		}
 
-		// New tenants always start in DRAFT; bootstrap has not run yet.
-		input.LifecycleState = lifecycle.TenantDraft
-
-		// Reject duplicate (CfApiEndpoint, CfOrg) pair among active (non-deleted) tenants.
-		var existing db.CpiTenant
-		err := h.db.Where("cf_api_endpoint = ? AND cf_org = ?", input.CfApiEndpoint, input.CfOrg).
-			First(&existing).Error
-		if err == nil {
-			Fail(ctx, 409, fmt.Sprintf("CF org %q on %q is already registered as a CPI tenant", input.CfOrg, input.CfApiEndpoint))
-			return
+		placeholder := db.CpiTenant{
+			Name:           input.Name,
+			Group:          input.Group,
+			CreatedBy:      user,
+			UpdatedBy:      user,
+			LifecycleState: lifecycle.TenantDraft,
 		}
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
+		if err := h.db.Create(&placeholder).Error; err != nil {
 			Fail(ctx, 500, err.Error())
 			return
 		}
-
-		if err := h.db.Create(&input).Error; err != nil {
-			Fail(ctx, 500, err.Error())
-			return
-		}
-		OK(ctx, input)
+		OK(ctx, placeholder)
 		return
 	}
 
@@ -83,75 +70,24 @@ func (h *Handler) UpsertCpiTenant(ctx *gin.Context) {
 		return
 	}
 
-	// Reject CfOrg change to a value already owned by another active tenant on the same endpoint.
-	if input.CfOrg != "" && (input.CfOrg != existing.CfOrg || input.CfApiEndpoint != existing.CfApiEndpoint) {
-		var conflict db.CpiTenant
-		err := h.db.Where("cf_api_endpoint = ? AND cf_org = ? AND id != ?", input.CfApiEndpoint, input.CfOrg, input.ID).
-			First(&conflict).Error
-		if err == nil {
-			Fail(ctx, 409, fmt.Sprintf(
-				"CF org %q on %q is already registered as CPI tenant %q (id=%d)",
-				input.CfOrg, input.CfApiEndpoint, conflict.Name, conflict.ID,
-			))
-			return
-		}
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			Fail(ctx, 500, err.Error())
-			return
-		}
+	// CF identity fields (CfApiEndpoint, CfOrg, CfSpace) may only be changed via
+	// PUT /api/v1/cpiTenant/:id/cfIdentity (SaveCfIdentity / Wizard Step 1).
+	// That endpoint owns the bootstrap lifecycle reset; this endpoint does not.
+	if input.CfApiEndpoint != existing.CfApiEndpoint ||
+		input.CfOrg != existing.CfOrg ||
+		input.CfSpace != existing.CfSpace {
+		Fail(ctx, 400, "CF identity fields (cfApiEndpoint, cfOrg, cfSpace) must be updated via PUT /api/v1/cpiTenant/:id/cfIdentity")
+		return
 	}
 
 	// Callers must not set LifecycleState directly; preserve the current value.
 	input.LifecycleState = existing.LifecycleState
-
-	// If any key subaccount field changed, transition through the state machine.
-	// TransitionLifecycle rejects the event when bootstrap is in progress
-	// (TenantReadying has no EventKeyFieldChanged edge), returning 409.
-	if keyFieldChanged(existing, input) {
-		if err := h.svc.TransitionLifecycle(input.ID, service.EventKeyFieldChanged); err != nil {
-			if errors.Is(err, service.ErrTransitionNotAllowed) {
-				Fail(ctx, 409, "bootstrap is in progress; key fields cannot be modified")
-				return
-			}
-			Fail(ctx, 500, err.Error())
-			return
-		}
-		input.LifecycleState = lifecycle.TenantDraft
-		input.BlockingReason = ""
-		clearPrerequisiteStatuses(&input)
-	}
 
 	if err := h.db.Save(&input).Error; err != nil {
 		Fail(ctx, 500, err.Error())
 		return
 	}
 	OK(ctx, input)
-}
-
-// keyFieldChanged returns true if any bootstrap-sensitive CF identity field
-// differs between the stored tenant and the incoming update.
-// The three key fields are: CfApiEndpoint, CfOrg, CfSpace.
-// Changing any of them invalidates previous bootstrap results and forces
-// LifecycleState back to DRAFT via TransitionLifecycle(EventKeyFieldChanged).
-func keyFieldChanged(existing, input db.CpiTenant) bool {
-	return existing.CfApiEndpoint != input.CfApiEndpoint ||
-		existing.CfOrg != input.CfOrg ||
-		existing.CfSpace != input.CfSpace
-}
-
-// clearPrerequisiteStatuses resets all local prerequisite status fields to
-// "missing" so the UI shows an accurate "not yet inspected" state after a key
-// field change.
-func clearPrerequisiteStatuses(t *db.CpiTenant) {
-	t.PirApiStatus = lifecycle.PrereqMissing
-	t.CasApplicationStatus = lifecycle.PrereqMissing
-	t.CasStandardStatus = lifecycle.PrereqMissing
-	t.CloudIntegrationDestStatus = lifecycle.PrereqMissing
-	t.ContentAssemblyDestStatus = lifecycle.PrereqMissing
-	t.TransportManagementDestStatus = lifecycle.PrereqMissing
-	t.TmsNodeRegistrationStatus = lifecycle.PrereqMissing
-	t.TmsSourceNodeName = ""
-	t.CentralTmsContextID = nil
 }
 
 // SaveCfIdentity persists the CF identity fields (CfApiEndpoint, CfOrg, CfSpace)

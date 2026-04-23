@@ -166,22 +166,9 @@ type CpiTenant struct {
 
 	// SourceSystemID is the value written into the `sourceSystemId` Additional Property
 	// of the TransportManagementService destination during bootstrap.
-	//
-	// SAP Help reference:
-	//   https://help.sap.com/docs/content-agent-service/user-guide/create-transportmanagementservice-destination
-	//
-	// The destination supports per-content-type overrides:
-	//   sourceSystemId.CPI          → used when exporting CPI artifacts
-	//   sourceSystemId.APIManagement → used when exporting API Management artifacts
-	//   sourceSystemId.sap.build    → used when exporting Build Apps artifacts
-	//   sourceSystemId              → default fallback for any content type
-	//
-	// The value is described as "the ID of the source node of the transport route,
-	// for example, DEV_NODE" — which appears to be the TMS node name, not a numeric ID.
-	//
-	// TODO (Phase 3 implementation): Clarify whether this is identical to
-	// TmsSourceNodeName or a distinct value.  If identical, this field can be removed
-	// and bootstrap should write TmsSourceNodeName into sourceSystemId.CPI directly.
+	// RFC-013 §17 confirmed: sourceSystemId == TmsSourceNodeName.
+	// This field is superseded by TmsSourceNodeName and should not be used.
+	// Deprecated: use TmsSourceNodeName.
 	SourceSystemID string
 
 	// TmsSourceNodeName is the name of this tenant's source node in the central TMS landscape.
@@ -227,6 +214,11 @@ type CpiTenant struct {
 	// Used at: deploy process, artifact/package status queries.
 	// Default naming: "CPIDELIVERY_PIR_{tenantID}"
 	PirApiDestinationName string
+
+	// PirApiUrl is the PIR API root URL stored at bootstrap time for display purposes.
+	// Derived from the pir-api service key's url field; never written after bootstrap.
+	// Read-only: do not update via API.
+	PirApiUrl string
 
 	// LastCredentialRotationAt records when service key credentials were last rotated.
 	// Used to enforce rotation policy (at minimum annually; quarterly for high-sensitivity).

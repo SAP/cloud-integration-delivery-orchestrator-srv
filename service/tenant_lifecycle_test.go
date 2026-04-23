@@ -22,12 +22,10 @@ func TestTransitionLifecycle_ValidTransitions(t *testing.T) {
 		{"draft→readying via bootstrap_started", lifecycle.TenantDraft, EventBootstrapStarted, lifecycle.TenantReadying},
 
 		// CONFIGURED edges
-		{"configured→draft via key_field_changed", lifecycle.TenantConfigured, EventKeyFieldChanged, lifecycle.TenantDraft},
 		{"configured→readying via bootstrap_started", lifecycle.TenantConfigured, EventBootstrapStarted, lifecycle.TenantReadying},
 
 		// NOT_READY edges
 		{"not_ready→readying via bootstrap_started", lifecycle.TenantNotReady, EventBootstrapStarted, lifecycle.TenantReadying},
-		{"not_ready→draft via key_field_changed", lifecycle.TenantNotReady, EventKeyFieldChanged, lifecycle.TenantDraft},
 		{"not_ready→configured via cf_identity_configured", lifecycle.TenantNotReady, EventCfIdentityConfigured, lifecycle.TenantConfigured},
 
 		// READYING edges
@@ -35,7 +33,6 @@ func TestTransitionLifecycle_ValidTransitions(t *testing.T) {
 		{"readying→not_ready via bootstrap_failed", lifecycle.TenantReadying, EventBootstrapFailed, lifecycle.TenantNotReady},
 
 		// READY edges
-		{"ready→draft via key_field_changed", lifecycle.TenantReady, EventKeyFieldChanged, lifecycle.TenantDraft},
 		{"ready→readying via bootstrap_started", lifecycle.TenantReady, EventBootstrapStarted, lifecycle.TenantReadying},
 		{"ready→configured via cf_identity_configured", lifecycle.TenantReady, EventCfIdentityConfigured, lifecycle.TenantConfigured},
 	}
@@ -90,10 +87,8 @@ func TestTransitionLifecycle_InvalidTransitions(t *testing.T) {
 		{"not_ready rejects bootstrap_finished", lifecycle.TenantNotReady, EventBootstrapFinished},
 		{"not_ready rejects bootstrap_failed", lifecycle.TenantNotReady, EventBootstrapFailed},
 
-		// READYING cannot receive cf_identity_configured or key_field_changed
-		// (key_field_changed from readying is intentionally absent — see M3/B2)
+		// READYING cannot receive cf_identity_configured or bootstrap outcome events
 		{"readying rejects cf_identity_configured", lifecycle.TenantReadying, EventCfIdentityConfigured},
-		{"readying rejects key_field_changed", lifecycle.TenantReadying, EventKeyFieldChanged},
 		{"readying rejects bootstrap_started", lifecycle.TenantReadying, EventBootstrapStarted},
 
 		// READY cannot receive bootstrap outcomes (but CAN receive cf_identity_configured to re-configure)

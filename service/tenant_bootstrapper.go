@@ -40,6 +40,7 @@ func (s *Service) PreviewBootstrap(ctx context.Context, tenantID uint, cfToken s
 	if err != nil {
 		return nil, fmt.Errorf("preview: inspect: %w", err)
 	}
+	s.checkTmsSourceNode(tenant, result)
 	s.checkCentralTmsContext(result)
 
 	return buildPreview(tenant, result), nil
@@ -108,6 +109,7 @@ func (s *Service) ApplyBootstrap(ctx context.Context, tenantID uint, cfToken str
 		_ = s.TransitionLifecycle(tenantID, EventBootstrapFailed)
 		return 0, fmt.Errorf("apply: inspect: %w", err)
 	}
+	s.checkTmsSourceNode(tenant, result)
 	s.checkCentralTmsContext(result)
 	if len(result.PermissionIssues) > 0 {
 		_ = s.TransitionLifecycle(tenantID, EventBootstrapFailed)
@@ -394,17 +396,21 @@ func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string,
 	}
 
 	// Write provider-side CPIDELIVERY_PIR_{id} and CPIDELIVERY_CAS_{id} into
-	// cpi-delivery's own Destination Service.  Skipped when ProviderDest is not
-	// injected (e.g. local dev without CF bindings).  Both destinations are
-	// runtime-critical: TrResolver depends on them for deploy and TR generation.
-	if s.ProviderDest != nil {
-		provActs, err := bootstrapper.ensureProviderDestinations(ctx, tenant, result)
-		if err != nil {
-			fail(lifecycle.FailureRemoteSystemError, StepCheckDestinations, err.Error())
-			return
-		}
-		credentialActions = append(credentialActions, provActs...)
+	// cpi-delivery's own Destination Service.  Both destinations are runtime-critical:
+	// TrResolver depends on them for deploy and TR generation.
+	// ProviderDest is guaranteed non-nil at startup (main.go panics on init failure);
+	// a nil here indicates a programming error and must surface immediately.
+	if s.ProviderDest == nil {
+		fail(lifecycle.FailureRemoteSystemError, StepCheckDestinations,
+			"ProviderDest is nil — provider Destination Service client was not injected at startup")
+		return
 	}
+	provActs, err := bootstrapper.ensureProviderDestinations(ctx, tenant, result)
+	if err != nil {
+		fail(lifecycle.FailureRemoteSystemError, StepCheckDestinations, err.Error())
+		return
+	}
+	credentialActions = append(credentialActions, provActs...)
 
 	// Persist credential action log (no secrets — names and action types only).
 	// Audit-only; failure is best-effort.
@@ -419,10 +425,12 @@ func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string,
 	// Runtime-critical: TrResolver uses these names on every deploy / TR generation.
 	// A failure here must abort bootstrap — marking the tenant ready without these
 	// names would cause all runtime operations to fail silently after a restart.
-	if err := s.DB.Model(&db.CpiTenant{}).Where("id = ?", tenant.ID).Updates(map[string]any{
+	persistUpdates := map[string]any{
 		"cas_engine_destination_name": tenant.CasEngineDestinationName,
 		"pir_api_destination_name":    tenant.PirApiDestinationName,
-	}).Error; err != nil {
+		"pir_api_url":                 tenant.PirApiUrl,
+	}
+	if err := s.DB.Model(&db.CpiTenant{}).Where("id = ?", tenant.ID).Updates(persistUpdates).Error; err != nil {
 		fail(lifecycle.FailureRemoteSystemError, StepCheckDestinations,
 			fmt.Sprintf("persist destination names: %s", err))
 		return
@@ -656,6 +664,7 @@ func (b *bootstrapApplier) buildSubscriberDestinations(ctx context.Context, resu
 	// TransportManagementService — TMS OAuth credentials copied from the provider-side
 	// TmsApiDestinationName destination.  The URL is the fixed TMS backend endpoint.
 	// Both destinations share the same TMS subscription credentials (RFC 013 §10).
+	// sourceSystemId must match the tenant's TMS source node name (RFC 013 §17).
 	if tmsCtx != nil && tmsCtx.TmsApiDestinationName != "" && b.providerDest != nil {
 		tmsDest, err := b.providerDest.GetDestination(ctx, tmsCtx.TmsApiDestinationName)
 		if err != nil {
@@ -667,6 +676,10 @@ func (b *bootstrapApplier) buildSubscriberDestinations(ctx context.Context, resu
 		dest := *tmsDest
 		dest.Name = "TransportManagementService"
 		dest.Description = fmt.Sprintf("DO NOT MODIFY. Created by cpi-delivery bootstrap for tenant %d", tenant.ID)
+		if tenant.TmsSourceNodeName == "" {
+			return nil, fmt.Errorf("TmsSourceNodeName is empty — Apply should have been blocked by checkTmsSourceNode")
+		}
+		dest.SourceSystemId = tenant.TmsSourceNodeName
 		dests = append(dests, dest)
 	}
 
@@ -693,7 +706,7 @@ func (b *bootstrapApplier) buildSubscriberDestinations(ctx context.Context, resu
 // these are written directly via cf.DestinationServiceClient.UpsertDestination.
 func (b *bootstrapApplier) ensureProviderDestinations(ctx context.Context, tenant *db.CpiTenant, result *InspectionResult) ([]credentialAction, error) {
 	if b.providerDest == nil {
-		return nil, fmt.Errorf("ensureProviderDestinations: ProviderDest not injected")
+		return nil, fmt.Errorf("ensureProviderDestinations: ProviderDest is nil — provider Destination Service client was not injected at startup")
 	}
 
 	// Set provider-side destination names on the tenant struct for persistence.
@@ -717,6 +730,10 @@ func (b *bootstrapApplier) ensureProviderDestinations(ctx context.Context, tenan
 			}
 			if err := b.providerDest.UpsertDestination(ctx, dest); err != nil {
 				return nil, fmt.Errorf("upsert provider dest %q: %w", dest.Name, err)
+			}
+			// Store PIR root URL for display in the tenant info tab.
+			if pirURL, _ := creds["url"].(string); pirURL != "" {
+				tenant.PirApiUrl = pirURL
 			}
 			actions = append(actions, credentialAction{DestinationName: dest.Name, ActionType: "upserted"})
 		}
@@ -859,6 +876,18 @@ func (s *Service) checkCentralTmsContext(result *InspectionResult) {
 	tmsCtx, err := loadTmsContext(s.DB)
 	if err != nil || tmsCtx.TmsApiDestinationName == "" {
 		result.WaitingUserAction = append(result.WaitingUserAction, "CENTRAL_TMS_NOT_CONFIGURED")
+	}
+}
+
+// checkTmsSourceNode verifies that TMS Node registration is complete before
+// bootstrap apply is allowed.  Without TmsSourceNodeName the bootstrap cannot
+// write the sourceSystemId field on the TransportManagementService destination.
+//
+// This is a DB-only check (no CF API call) — analogous to checkCentralTmsContext.
+// The operator must complete TMS Node registration (wizard Step 2) before Apply.
+func (s *Service) checkTmsSourceNode(tenant *db.CpiTenant, result *InspectionResult) {
+	if tenant.TmsSourceNodeName == "" || tenant.TmsNodeRegistrationStatus != lifecycle.PrereqReady {
+		result.WaitingUserAction = append(result.WaitingUserAction, "TMS_NODE_NOT_REGISTERED")
 	}
 }
 

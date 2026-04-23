@@ -36,11 +36,6 @@ const (
 	// EventBootstrapFailed is fired when a bootstrap job reaches a terminal
 	// non-finished state (failed, waiting_user_action, partially_applied).
 	EventBootstrapFailed LifecycleEvent = "bootstrap_failed"
-
-	// EventKeyFieldChanged is fired by the update handler when any of the core
-	// CF identity fields change (CfApiEndpoint, CfOrg, CfSpace).
-	// Any bootstrap result is now stale.
-	EventKeyFieldChanged LifecycleEvent = "key_field_changed"
 )
 
 // allowedTransitions defines the valid (currentState, event) → nextState edges.
@@ -54,14 +49,11 @@ var allowedTransitions = map[lifecycle.TenantLifecycleState]map[LifecycleEvent]l
 		EventBootstrapStarted: lifecycle.TenantReadying,
 	},
 	lifecycle.TenantConfigured: {
-		// CF identity fields changed after Step 1 — must re-validate.
-		EventKeyFieldChanged: lifecycle.TenantDraft,
 		// Apply launched from wizard Step 3.
 		EventBootstrapStarted: lifecycle.TenantReadying,
 	},
 	lifecycle.TenantNotReady: {
-		EventBootstrapStarted:    lifecycle.TenantReadying,
-		EventKeyFieldChanged:     lifecycle.TenantDraft,
+		EventBootstrapStarted: lifecycle.TenantReadying,
 		// Operator saves CF identity on a tenant that previously failed bootstrap
 		// (e.g. correcting the CfSpace GUID after a CF_SPACE_NOT_FOUND failure).
 		// Transitions to configured so the wizard can re-run apply.
@@ -72,10 +64,8 @@ var allowedTransitions = map[lifecycle.TenantLifecycleState]map[LifecycleEvent]l
 		EventBootstrapFailed:   lifecycle.TenantNotReady,
 	},
 	lifecycle.TenantReady: {
-		EventKeyFieldChanged: lifecycle.TenantDraft,
 		// Operator intentionally re-applies bootstrap — e.g. to refresh service
 		// key credentials or re-sync destinations after an external change.
-		// The job is labeled JobTypeApply (not retry) because no failure preceded it.
 		EventBootstrapStarted: lifecycle.TenantReadying,
 		// Operator re-saves CF identity on a ready tenant (e.g. updating CfSpace
 		// after a space migration).  Transitions to configured so they can re-run apply.
