@@ -90,70 +90,32 @@ func (h *Handler) RegisterTmsNode(ctx *gin.Context) {
 	})
 }
 
-// GetTmsNodeStatus returns the current TMS node registration status.
-//
-// GET /api/v1/cpiTenant/:id/tms-node/status
-func (h *Handler) GetTmsNodeStatus(ctx *gin.Context) {
-	tenantID, ok := parseTenantID(ctx)
-	if !ok {
-		return
-	}
-
-	var tenant db.CpiTenant
-	if err := h.db.First(&tenant, tenantID).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			Fail(ctx, 404, "tenant not found")
-		} else {
-			Fail(ctx, 500, err.Error())
-		}
-		return
-	}
-
-	OK(ctx, gin.H{
-		"tmsNodeRegistrationStatus": tenant.TmsNodeRegistrationStatus,
-		"tmsSourceNodeName":         tenant.TmsSourceNodeName,
-	})
-}
-
-// GetTmsRoutes fetches the live Route list from TMS for this tenant's source node.
+// GetCurrentNodeRoutes fetches the live Route list from TMS for this tenant's
+// registered source node.
 //
 // GET /api/v1/cpiTenant/:id/tms-node/routes
-//
-// Requires TmsNodeRegistrationStatus to be registering or ready (node must exist).
-func (h *Handler) GetTmsRoutes(ctx *gin.Context) {
+func (h *Handler) GetCurrentNodeRoutes(ctx *gin.Context) {
 	tenantID, ok := parseTenantID(ctx)
 	if !ok {
 		return
 	}
 
-	var tenant db.CpiTenant
-	if err := h.db.First(&tenant, tenantID).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+	result, err := h.svc.GetCurrentNodeRoutes(ctx.Request.Context(), tenantID)
+	if err != nil {
+		switch {
+		case errors.Is(err, gorm.ErrRecordNotFound):
 			Fail(ctx, 404, "tenant not found")
-		} else {
+		case errors.Is(err, service.ErrNodeNotRegistered):
+			Fail(ctx, 400, err.Error())
+		default:
 			Fail(ctx, 500, err.Error())
 		}
 		return
 	}
 
-	if tenant.TmsSourceNodeID == 0 {
-		Fail(ctx, 400, "routes can only be queried after a TMS node has been registered")
-		return
-	}
-
-	routes, err := h.svc.GetTmsRoutes(ctx.Request.Context(), tenant.TmsSourceNodeID)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			Fail(ctx, 404, "tenant not found")
-			return
-		}
-		Fail(ctx, 500, err.Error())
-		return
-	}
-
 	OK(ctx, gin.H{
-		"nodeName": tenant.TmsSourceNodeName,
-		"routes":   routes,
+		"nodeName": result.NodeName,
+		"routes":   result.Routes,
 	})
 }
 

@@ -23,7 +23,7 @@ import (
 // It does NOT create a TenantBootstrapJob row — preview is lightweight and
 // read-only.  The result is returned directly to the caller (handler).
 //
-// No cfToken is required because InspectTenant is the only operation called.
+// No cfToken is required because InspectCfSubaccount is the only operation called.
 // Wait — preview still needs a cfToken to call CF API for the inspection.
 func (s *Service) PreviewBootstrap(ctx context.Context, tenantID uint, cfToken string) (*BootstrapPreview, error) {
 	tenant, err := s.getTenantForBootstrap(tenantID)
@@ -36,7 +36,7 @@ func (s *Service) PreviewBootstrap(ctx context.Context, tenantID uint, cfToken s
 		return nil, fmt.Errorf("preview: %w", err)
 	}
 
-	result, err := inspector.InspectTenant(ctx, tenant)
+	result, err := inspector.InspectCfSubaccount(ctx, tenant)
 	if err != nil {
 		return nil, fmt.Errorf("preview: inspect: %w", err)
 	}
@@ -104,7 +104,7 @@ func (s *Service) ApplyBootstrap(ctx context.Context, tenantID uint, cfToken str
 		_ = s.TransitionLifecycle(tenantID, EventBootstrapFailed)
 		return 0, fmt.Errorf("apply: build inspector: %w", err)
 	}
-	result, err := inspector.InspectTenant(ctx, tenant)
+	result, err := inspector.InspectCfSubaccount(ctx, tenant)
 	if err != nil {
 		_ = s.TransitionLifecycle(tenantID, EventBootstrapFailed)
 		return 0, fmt.Errorf("apply: inspect: %w", err)
@@ -214,7 +214,7 @@ func buildPreview(tenant *db.CpiTenant, result *InspectionResult) *BootstrapPrev
 
 // runBootstrap is the async apply phase.  It receives the InspectionResult
 // already produced by the synchronous inspect phase in ApplyBootstrap — it
-// does NOT re-run InspectTenant.
+// does NOT re-run InspectCfSubaccount.
 //
 // runBootstrap must NOT be called directly — use ApplyBootstrap.
 func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string, result *InspectionResult) {
@@ -448,7 +448,7 @@ func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string,
 // ── bootstrapApplier ─────────────────────────────────────────────────────────
 
 // bootstrapApplier performs the mutation phase of a bootstrap job.
-// It is constructed after the read-only InspectTenant phase completes.
+// It is constructed after the read-only InspectCfSubaccount phase completes.
 type bootstrapApplier struct {
 	cfClient     *cf.CFClient
 	tenant       *db.CpiTenant

@@ -30,7 +30,10 @@ import (
 
 // ── Public errors ─────────────────────────────────────────────────────────────
 
-// ErrRoutesNotConfigured is returned by ConfirmTmsRoutes when the operator
+// ErrNodeNotRegistered is returned by GetCurrentNodeRoutes when no TMS node
+// has been registered for the tenant yet (TmsSourceNodeID == 0).
+var ErrNodeNotRegistered = fmt.Errorf("routes can only be queried after a TMS node has been registered")
+
 // calls confirm but the Route list fetched from TMS is empty.  The caller
 // should translate this to a 400 HTTP response with error ROUTES_NOT_CONFIGURED.
 var ErrRoutesNotConfigured = fmt.Errorf("routes not configured: no routes found for this source node")
@@ -118,21 +121,38 @@ func (s *Service) ConfirmTmsRoutes(ctx context.Context, tenantID uint, nodeID ui
 	return &ConfirmTmsRoutesResult{Routes: routes}, nil
 }
 
-// ── GetTmsRoutes ──────────────────────────────────────────────────────────────
+// ── GetCurrentNodeRoutes ──────────────────────────────────────────────────────
 
-// GetTmsRoutes fetches all Routes where the tenant's TmsSourceNodeID appears as
-// either source or target.
-func (s *Service) GetTmsRoutes(ctx context.Context, nodeID uint) ([]db.TransportRoute, error) {
-	if nodeID == 0 {
-		return nil, fmt.Errorf("GetTmsRoutes: nodeID is required")
+// GetCurrentNodeRoutesResult holds the result of a successful GetCurrentNodeRoutes call.
+type GetCurrentNodeRoutesResult struct {
+	NodeName string
+	Routes   []db.TransportRoute
+}
+
+// GetCurrentNodeRoutes fetches all Routes where the tenant's registered
+// TmsSourceNodeID appears as either source or target.
+//
+// Returns ErrNodeNotRegistered if no TMS node has been registered yet.
+func (s *Service) GetCurrentNodeRoutes(ctx context.Context, tenantID uint) (*GetCurrentNodeRoutesResult, error) {
+	var tenant db.CpiTenant
+	if err := s.DB.Select("id", "tms_source_node_id", "tms_source_node_name").
+		First(&tenant, tenantID).Error; err != nil {
+		return nil, err
+	}
+	if tenant.TmsSourceNodeID == 0 {
+		return nil, ErrNodeNotRegistered
 	}
 
 	tmsCtx, err := loadTmsContext(s.DB)
 	if err != nil {
-		return nil, fmt.Errorf("GetTmsRoutes: get central TMS context: %w", err)
+		return nil, fmt.Errorf("GetCurrentNodeRoutes: get central TMS context: %w", err)
 	}
 
-	return s.fetchRoutesForNodeID(ctx, tmsCtx, nodeID)
+	routes, err := s.fetchRoutesForNodeID(ctx, tmsCtx, tenant.TmsSourceNodeID)
+	if err != nil {
+		return nil, fmt.Errorf("GetCurrentNodeRoutes: fetch routes: %w", err)
+	}
+	return &GetCurrentNodeRoutesResult{NodeName: tenant.TmsSourceNodeName, Routes: routes}, nil
 }
 
 // fetchRoutesForNodeID builds a TMS client and returns all v2 routes where

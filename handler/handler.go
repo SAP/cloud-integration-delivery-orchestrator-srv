@@ -122,8 +122,7 @@ func (h *Handler) SetupRoutes(v1 *gin.RouterGroup, v2 *gin.RouterGroup, requireS
 
 		// RFC 013 Phase 3: TMS Node registration (sync, independent of bootstrap)
 		tenantManage.POST("/cpiTenant/:id/tms-node/register", h.RegisterTmsNode)
-		tenantManage.GET("/cpiTenant/:id/tms-node/status", h.GetTmsNodeStatus)
-		tenantManage.GET("/cpiTenant/:id/tms-node/routes", h.GetTmsRoutes)
+		tenantManage.GET("/cpiTenant/:id/tms-node/routes", h.GetCurrentNodeRoutes)
 		tenantManage.POST("/cpiTenant/:id/tms-node/confirm", h.ConfirmTmsRoutes)
 
 		// RFC 013: central TMS context (admin-level, single record per v1 deployment)

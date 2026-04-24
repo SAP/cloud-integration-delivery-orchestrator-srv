@@ -163,8 +163,9 @@ func NewTenantInspector(cfAPIURL, bearerToken string) (*TenantInspector, error) 
 	return &TenantInspector{cfClient: cfcl, userID: userID}, nil
 }
 
-// InspectTenant runs all CHECK_* steps for the given tenant and returns an
-// InspectionResult.  It does NOT modify any resources — it is purely read-only.
+// InspectCfSubaccount runs all CHECK_* steps against the subscriber's CF
+// subaccount and returns an InspectionResult.  It does NOT modify any
+// resources — it is purely read-only.
 //
 // Step sequence:
 //
@@ -178,7 +179,7 @@ func NewTenantInspector(cfAPIURL, bearerToken string) (*TenantInspector, error) 
 //
 // Steps are sequential; early failures (e.g. space not accessible) cause later
 // dependent steps to be skipped gracefully.
-func (i *TenantInspector) InspectTenant(ctx context.Context, tenant *db.CpiTenant) (*InspectionResult, error) {
+func (i *TenantInspector) InspectCfSubaccount(ctx context.Context, tenant *db.CpiTenant) (*InspectionResult, error) {
 	result := &InspectionResult{
 		ServiceKeyGUIDs:   make(map[string]string),
 		DestinationExists: make(map[string]bool),
