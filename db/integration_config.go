@@ -17,7 +17,6 @@ var integrationSeeds = []IntegrationConfig{
 	{Type: "jira", DestinationName: "cpi-delivery-jira", Description: "JIRA issue tracking integration"},
 	{Type: "smtp", DestinationName: "cpi-delivery-smtp", Description: "Email notification via SMTP"},
 	{Type: "github", DestinationName: "cpi-delivery-github", Description: "GitHub code sync integration"},
-	{Type: "cookie_service", DestinationName: "cpi-delivery-cookie-service", Description: "CPI Cookie Service for browser automation - auto generate Transport Requests, view version history, etc."},
 }
 
 // SeedIntegrationConfigs ensures all predefined integration types exist in the database.
