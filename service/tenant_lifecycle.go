@@ -44,13 +44,17 @@ var allowedTransitions = map[lifecycle.TenantLifecycleState]map[LifecycleEvent]l
 	lifecycle.TenantDraft: {
 		// Wizard Step 1 complete: CF identity saved and token validated.
 		EventCfIdentityConfigured: lifecycle.TenantConfigured,
-		// Apply launched directly from draft (e.g. re-apply after key field change
-		// in a tool-driven flow where the caller skips the wizard).
-		EventBootstrapStarted: lifecycle.TenantReadying,
+		// EventBootstrapStarted is intentionally absent: draft means CF identity has
+		// not been validated (SaveCfIdentity not yet called).  ApplyBootstrap requires
+		// a validated CF identity (at least lifecycle = configured) to proceed.
 	},
 	lifecycle.TenantConfigured: {
 		// Apply launched from wizard Step 3.
 		EventBootstrapStarted: lifecycle.TenantReadying,
+		// Operator re-saves CF identity while already configured (e.g. correcting
+		// CfSpace after a typo).  Self-transition keeps the state at configured so
+		// SaveCfIdentity no longer needs to write lifecycle_state = draft directly.
+		EventCfIdentityConfigured: lifecycle.TenantConfigured,
 	},
 	lifecycle.TenantNotReady: {
 		EventBootstrapStarted: lifecycle.TenantReadying,

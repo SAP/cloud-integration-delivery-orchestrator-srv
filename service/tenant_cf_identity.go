@@ -10,6 +10,7 @@ import (
 	"mmt-delivery/pkg/lifecycle"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // CfIdentityInput carries the CF identity fields that Wizard Step 1 persists.
@@ -26,19 +27,18 @@ type CfIdentityInput struct {
 	CfSpace string `json:"cfSpace" binding:"required"`
 }
 
-// SaveCfIdentity persists the CF identity fields for the given tenant, then
-// validates the supplied cfToken against the CF API.
+// SaveCfIdentity is the backend entry point for Wizard Step 1 "Start Bootstrap" /
+// "Re-bootstrap". It performs three actions unconditionally:
 //
-// Validation checks (lightweight, read-only):
-//  1. The CF space resolves to an accessible space (space GUID is valid).
-//  2. The operator holds the space_developer role in that space.
+//  1. Validates the provided cfToken against the CF API
+//     (space accessible + operator holds space_developer role).
+//  2. Atomically resets ALL bootstrap-related state fields and transitions
+//     LifecycleState to CONFIGURED in a single SELECT FOR UPDATE transaction.
+//     The readying guard prevents SaveCfIdentity from corrupting a bootstrap
+//     goroutine that is already running.  Combining reset and transition in one
+//     transaction eliminates any window between the two writes.
 //
-// On success the tenant's LifecycleState is transitioned to TenantConfigured.
-// On validation failure the CF fields are still saved and the state remains
-// (or reverts to) TenantDraft so the operator can correct and retry.
-//
-// cfToken is never persisted.  It is used only within this function call to
-// validate the connection, then discarded.
+// cfToken is never persisted; it is used only within this call and then discarded.
 func (s *Service) SaveCfIdentity(ctx context.Context, tenantID uint, input CfIdentityInput, cfToken string) error {
 	// ── Load tenant ──────────────────────────────────────────────────────────
 	var tenant db.CpiTenant
@@ -59,41 +59,9 @@ func (s *Service) SaveCfIdentity(ctx context.Context, tenantID uint, input CfIde
 		}
 	}
 
-	// ── Detect key field changes ──────────────────────────────────────────────
-	// If any CF identity field is changing, invalidate prior bootstrap results.
-	fieldsChanged := tenant.CfApiEndpoint != input.CfApiEndpoint ||
-		tenant.CfOrg != input.CfOrg ||
-		tenant.CfSpace != input.CfSpace
-
-	// ── Persist CF identity fields ───────────────────────────────────────────
-	updates := map[string]any{
-		"cf_api_endpoint": input.CfApiEndpoint,
-		"cf_org":          input.CfOrg,
-		"cf_space":        input.CfSpace,
-	}
-	if fieldsChanged {
-		// Reset lifecycle and all prerequisite statuses so stale bootstrap
-		// results are not trusted after a CF identity change.
-		updates["lifecycle_state"] = lifecycle.TenantDraft
-		updates["blocking_reason"] = ""
-		updates["pir_api_status"] = lifecycle.PrereqMissing
-		updates["cas_application_status"] = lifecycle.PrereqMissing
-		updates["cas_standard_status"] = lifecycle.PrereqMissing
-		updates["cloud_integration_dest_status"] = lifecycle.PrereqMissing
-		updates["content_assembly_dest_status"] = lifecycle.PrereqMissing
-		updates["transport_management_dest_status"] = lifecycle.PrereqMissing
-		updates["tms_node_registration_status"] = lifecycle.PrereqMissing
-		updates["tms_source_node_name"] = ""
-		updates["central_tms_context_id"] = nil
-		updates["pir_api_url"] = ""
-	}
-	if err := s.DB.Model(&db.CpiTenant{}).Where("id = ?", tenantID).Updates(updates).Error; err != nil {
-		return fmt.Errorf("SaveCfIdentity: persist CF fields: %w", err)
-	}
-
 	// ── Validate cfToken against CF API ──────────────────────────────────────
-	// Extract operator user_id from the token (fails fast if token is malformed
-	// or expired).
+	// Validation runs before any state reset: a bad token must not downgrade
+	// an otherwise healthy tenant.
 	userID, err := cf.ExtractUserID(cfToken)
 	if err != nil {
 		return fmt.Errorf("SaveCfIdentity: extract user_id from cfToken: %w", err)
@@ -120,10 +88,50 @@ func (s *Service) SaveCfIdentity(ctx context.Context, tenantID uint, input CfIde
 		return fmt.Errorf("SaveCfIdentity: operator does not hold space_developer role in space %q", input.CfSpace)
 	}
 
-	// ── Transition to TenantConfigured ───────────────────────────────────────
-	// Read the current state fresh (the updates above may have set it to draft).
-	if err := s.TransitionLifecycle(tenantID, EventCfIdentityConfigured); err != nil {
-		return fmt.Errorf("SaveCfIdentity: transition lifecycle: %w", err)
+	// ── Atomic guard + full state reset + lifecycle transition ───────────────
+	// All three writes share one SELECT FOR UPDATE transaction:
+	//   1. Guard: reject if lifecycle = readying (bootstrap already running).
+	//   2. Reset all prereq and CF identity fields.
+	//   3. Transition lifecycle → configured via transitionLifecycleWithTx.
+	// Combining reset and transition in one transaction eliminates the window
+	// where a concurrent ApplyBootstrap could observe the post-reset state
+	// before lifecycle reaches configured.
+	// lifecycle_state is intentionally excluded from updates: it is written
+	// exclusively by transitionLifecycleWithTx via the allowedTransitions table.
+	updates := map[string]any{
+		"cf_api_endpoint":                  input.CfApiEndpoint,
+		"cf_org":                           input.CfOrg,
+		"cf_space":                         input.CfSpace,
+		"blocking_reason":                  "",
+		"pir_api_status":                   lifecycle.PrereqMissing,
+		"cas_application_status":           lifecycle.PrereqMissing,
+		"cas_standard_status":              lifecycle.PrereqMissing,
+		"cloud_integration_dest_status":    lifecycle.PrereqMissing,
+		"content_assembly_dest_status":     lifecycle.PrereqMissing,
+		"transport_management_dest_status": lifecycle.PrereqMissing,
+		"tms_node_registration_status":     lifecycle.PrereqMissing,
+		"tms_source_node_name":             "",
+		"tms_source_node_id":               0,
+		"central_tms_context_id":           nil,
+		"pir_api_url":                      "",
+		"pir_api_destination_name":         "",
+		"cas_engine_destination_name":      "",
+	}
+	if err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var t db.CpiTenant
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Select("id", "lifecycle_state").First(&t, tenantID).Error; err != nil {
+			return err
+		}
+		if t.LifecycleState == lifecycle.TenantReadying {
+			return fmt.Errorf("bootstrap is currently running; wait for it to complete or call ResetBootstrap first")
+		}
+		if err := tx.Model(&db.CpiTenant{}).Where("id = ?", tenantID).Updates(updates).Error; err != nil {
+			return err
+		}
+		return s.transitionLifecycleWithTx(tx, tenantID, EventCfIdentityConfigured)
+	}); err != nil {
+		return fmt.Errorf("SaveCfIdentity: reset and configure: %w", err)
 	}
 
 	return nil

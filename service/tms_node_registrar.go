@@ -4,18 +4,15 @@ package service
 //
 // TMS Node registration is a synchronous HTTP operation separate from the
 // bootstrap apply/retry lifecycle.  It is triggered by the operator after
-// bootstrap completes (LifecycleState = ready) via the /tms-node/* endpoints.
+// CF identity is configured (LifecycleState >= configured) via the /tms-node/* endpoints.
 //
-// Registration mode:
-//   - manual: operator pre-creates the TMS node; product validates its structure
-//             (node existence + at least one target with a non-empty DestinationName).
-//
-// mode=auto is not supported in the current deployment topology; see ErrAutoModeNotSupported.
-//
-// After registration (TmsNodeRegistrationStatus = registering), the operator
-// configures a Route in TMS UI and calls POST /tms-node/confirm to transition
-// to ready.  If the Route list is empty at confirm time, a 400 error is
-// returned and the status stays at registering.
+// Flow:
+//   - RegisterTmsNode: operator selects a TMS node; backend atomically stores
+//     nodeId/nodeName and sets TmsNodeRegistrationStatus = registering.
+//     No TMS API call is made — node validity is the operator's responsibility.
+//   - ConfirmTmsRoutes: operator asserts that they have configured a Route in the
+//     TMS UI.  Backend fetches the live route list; if non-empty, status → ready.
+//     If empty, 400 ROUTES_NOT_CONFIGURED is returned and status stays registering.
 //
 // Design reference: 02-bootstrap-state-and-data-model.md § "TMS Node 注册独立生命周期"
 //                   05-detailed-execution-tasks.md § 3.1–3.3
@@ -28,9 +25,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	"mmt-delivery/db"
-	"mmt-delivery/pkg/env"
 	"mmt-delivery/pkg/lifecycle"
-	"mmt-delivery/pkg/tms"
 )
 
 // ── Public errors ─────────────────────────────────────────────────────────────
@@ -49,40 +44,25 @@ var ErrAlreadyRegistering = fmt.Errorf("TMS node is already in registering state
 
 // ConfirmTmsRoutesResult holds the routes returned by a successful confirm call.
 type ConfirmTmsRoutesResult struct {
-	Routes []tms.V1TransportRoute
+	Routes []db.TransportRoute
 }
 
 // ── RegisterTmsNode ───────────────────────────────────────────────────────────
 
-// RegisterTmsNode executes TMS Node registration for the given tenant.
+// RegisterTmsNode persists the operator-selected TMS node for the given tenant.
 //
 // nodeId is the numeric TMS node ID selected by the operator from the node list.
 // nodeName is the node's name, stored as TmsSourceNodeName for CAS export requests.
 //
 // Atomically claims TmsNodeRegistrationStatus = registering via SELECT FOR UPDATE
-// before executing any TMS API calls, preventing double-registration races.
+// before writing nodeId/nodeName, preventing double-registration races.
 // Returns ErrAlreadyRegistering if another request already claimed the slot.
 //
-// On success TmsNodeRegistrationStatus is written to registering and both
-// TmsSourceNodeName and TmsSourceNodeID are persisted.
-// On failure TmsNodeRegistrationStatus is written to failed.
+// No TMS API validation is performed: node existence and target configuration
+// are the operator's responsibility in the TMS system.  Issues will surface
+// naturally when ConfirmTmsRoutes checks for routes.
 func (s *Service) RegisterTmsNode(ctx context.Context, tenantID uint, nodeId uint, nodeName string) error {
-	tmsCtx, err := loadTmsContext(s.DB)
-	if err != nil {
-		return fmt.Errorf("RegisterTmsNode: get central TMS context: %w", err)
-	}
-
-	nodeClient, err := buildTmsClient(ctx, tmsCtx, s.ProviderDest)
-	if err != nil {
-		return fmt.Errorf("RegisterTmsNode: build TMS node client: %w", err)
-	}
-
-	// Atomically claim registering status and persist both nodeId and nodeName,
-	// which are fully known from the request at this point.
-	// The transaction holds a row-level lock until it commits, so a concurrent
-	// request that also passed the handler guard will block here and then see
-	// PrereqRegistering, returning ErrAlreadyRegistering.
-	if err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var t db.CpiTenant
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Select("id", "tms_node_registration_status").
@@ -97,57 +77,7 @@ func (s *Service) RegisterTmsNode(ctx context.Context, tenantID uint, nodeId uin
 			"tms_source_node_name":         nodeName,
 			"tms_source_node_id":           nodeId,
 		}).Error
-	}); err != nil {
-		return err
-	}
-
-	// registering claimed — validate the node via TMS API.
-	// Any failure here writes PrereqFailed (best-effort) and returns the error.
-	return s.validateNode(ctx, tenantID, nodeClient, nodeId, nodeName)
-}
-
-// validateNode checks the structure of an operator-selected TMS node by ID.
-// The registering status has already been atomically claimed by the caller
-// (RegisterTmsNode transaction); this function only validates the node via
-// the TMS API and writes failed on any error.
-//
-// Flow:
-//  1. GetNode(nodeId) → node must exist
-//  2. Node must have at least one target with a non-empty DestinationName (structural check)
-//
-// Note: the target destination's existence and credentials are NOT validated via
-// the Destination Service.  cpi-delivery's ProviderDest points to cpi-delivery's
-// own subaccount Destination Service, whereas TMS node target destinations live
-// in the TMS subaccount Destination Service — two separate instances in a
-// multi-subaccount BTP deployment.  Destination validity is the operator's
-// responsibility (B2 resolution).
-func (s *Service) validateNode(ctx context.Context, tenantID uint, nodeClient *tms.TmsClient, nodeId uint, nodeName string) error {
-	if nodeId == 0 {
-		return s.writeTmsStatus(tenantID, lifecycle.PrereqFailed,
-			fmt.Errorf("nodeId is required"))
-	}
-
-	node, err := nodeClient.GetNode(ctx, nodeId)
-	if err != nil {
-		return s.writeTmsStatus(tenantID, lifecycle.PrereqFailed,
-			fmt.Errorf("config_mismatch: TMS API error looking up node %d (%q): %w", nodeId, nodeName, err))
-	}
-	if node.ID == 0 {
-		return s.writeTmsStatus(tenantID, lifecycle.PrereqFailed,
-			fmt.Errorf("config_mismatch: TMS node %d (%q) does not exist", nodeId, nodeName))
-	}
-
-	// Structural check: node must have at least one target with a destination name.
-	if len(node.Targets) == 0 {
-		return s.writeTmsStatus(tenantID, lifecycle.PrereqFailed,
-			fmt.Errorf("config_mismatch: TMS node %d (%q) has no targets", nodeId, nodeName))
-	}
-	if node.Targets[0].DestinationName == "" {
-		return s.writeTmsStatus(tenantID, lifecycle.PrereqFailed,
-			fmt.Errorf("config_mismatch: TMS node %d (%q) target[0] has no destinationName", nodeId, nodeName))
-	}
-
-	return nil
+	})
 }
 
 // ── ConfirmTmsRoutes ──────────────────────────────────────────────────────────
@@ -155,13 +85,12 @@ func (s *Service) validateNode(ctx context.Context, tenantID uint, nodeClient *t
 // ConfirmTmsRoutes is called when the operator asserts that they have completed
 // Route configuration in the TMS UI.
 //
-//   - Fetches the current Route list from TMS (source = TmsSourceNodeName).
+//   - Fetches all Routes where nodeID is source or target.
 //   - Route list empty → returns ErrRoutesNotConfigured; status stays registering.
 //   - Route list non-empty → writes TmsNodeRegistrationStatus = ready.
-func (s *Service) ConfirmTmsRoutes(ctx context.Context, tenantID uint) (*ConfirmTmsRoutesResult, error) {
-	tenant, err := s.getTenantForBootstrap(tenantID)
-	if err != nil {
-		return nil, err
+func (s *Service) ConfirmTmsRoutes(ctx context.Context, tenantID uint, nodeID uint) (*ConfirmTmsRoutesResult, error) {
+	if nodeID == 0 {
+		return nil, fmt.Errorf("ConfirmTmsRoutes: nodeID is required")
 	}
 
 	tmsCtx, err := loadTmsContext(s.DB)
@@ -169,7 +98,7 @@ func (s *Service) ConfirmTmsRoutes(ctx context.Context, tenantID uint) (*Confirm
 		return nil, fmt.Errorf("ConfirmTmsRoutes: get central TMS context: %w", err)
 	}
 
-	routes, err := s.fetchRoutesForNode(ctx, tmsCtx, tenant.TmsSourceNodeName)
+	routes, err := s.fetchRoutesForNodeID(ctx, tmsCtx, nodeID)
 	if err != nil {
 		return nil, fmt.Errorf("ConfirmTmsRoutes: fetch routes: %w", err)
 	}
@@ -179,7 +108,7 @@ func (s *Service) ConfirmTmsRoutes(ctx context.Context, tenantID uint) (*Confirm
 	}
 
 	// Routes confirmed — write ready and bind to the CentralTmsContext.
-	if err := s.DB.Model(&db.CpiTenant{}).Where("id = ?", tenant.ID).Updates(map[string]any{
+	if err := s.DB.Model(&db.CpiTenant{}).Where("id = ?", tenantID).Updates(map[string]any{
 		"tms_node_registration_status": lifecycle.PrereqReady,
 		"central_tms_context_id":       tmsCtx.ID,
 	}).Error; err != nil {
@@ -191,16 +120,11 @@ func (s *Service) ConfirmTmsRoutes(ctx context.Context, tenantID uint) (*Confirm
 
 // ── GetTmsRoutes ──────────────────────────────────────────────────────────────
 
-// GetTmsRoutes fetches the live Route list from TMS for the tenant's source node.
-// It reads TmsSourceNodeName from the tenant, looks up the node by name to get
-// its numeric ID, then calls ListRoutesBySourceNode.
-func (s *Service) GetTmsRoutes(ctx context.Context, tenantID uint) ([]tms.V1TransportRoute, error) {
-	tenant, err := s.getTenantForBootstrap(tenantID)
-	if err != nil {
-		return nil, err
-	}
-	if tenant.TmsSourceNodeName == "" {
-		return nil, fmt.Errorf("GetTmsRoutes: tenant %d has no TmsSourceNodeName", tenantID)
+// GetTmsRoutes fetches all Routes where the tenant's TmsSourceNodeID appears as
+// either source or target.
+func (s *Service) GetTmsRoutes(ctx context.Context, nodeID uint) ([]db.TransportRoute, error) {
+	if nodeID == 0 {
+		return nil, fmt.Errorf("GetTmsRoutes: nodeID is required")
 	}
 
 	tmsCtx, err := loadTmsContext(s.DB)
@@ -208,41 +132,25 @@ func (s *Service) GetTmsRoutes(ctx context.Context, tenantID uint) ([]tms.V1Tran
 		return nil, fmt.Errorf("GetTmsRoutes: get central TMS context: %w", err)
 	}
 
-	return s.fetchRoutesForNode(ctx, tmsCtx, tenant.TmsSourceNodeName)
+	return s.fetchRoutesForNodeID(ctx, tmsCtx, nodeID)
 }
 
-// fetchRoutesForNode builds a TMS client and returns the Route list for nodeName.
-// Shared by GetTmsRoutes and ConfirmTmsRoutes so that ConfirmTmsRoutes can reuse
-// the tmsCtx it already holds without an extra DB round-trip.
-func (s *Service) fetchRoutesForNode(ctx context.Context, tmsCtx *db.CentralTmsContext, nodeName string) ([]tms.V1TransportRoute, error) {
-	nodeClient, err := buildTmsClient(ctx, tmsCtx, s.ProviderDest)
+// fetchRoutesForNodeID builds a TMS client and returns all v2 routes where
+// nodeID appears as source or target. Shared by GetTmsRoutes and ConfirmTmsRoutes.
+func (s *Service) fetchRoutesForNodeID(ctx context.Context, tmsCtx *db.CentralTmsContext, nodeID uint) ([]db.TransportRoute, error) {
+	tmsClient, err := buildTmsClient(ctx, tmsCtx, s.ProviderDest)
 	if err != nil {
-		return nil, fmt.Errorf("fetchRoutesForNode: build TMS client: %w", err)
+		return nil, fmt.Errorf("fetchRoutesForNodeID: build TMS client: %w", err)
 	}
-
-	node, err := nodeClient.GetNodeByName(ctx, nodeName)
+	all, err := tmsClient.GetRoutes(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("fetchRoutesForNode: look up node %q: %w", nodeName, err)
+		return nil, fmt.Errorf("fetchRoutesForNodeID: get routes: %w", err)
 	}
-	if node == nil {
-		return nil, fmt.Errorf("fetchRoutesForNode: node %q not found in TMS", nodeName)
+	var result []db.TransportRoute
+	for _, r := range all {
+		if r.SourceNodeID == nodeID || r.TargetNodeID == nodeID {
+			result = append(result, r)
+		}
 	}
-
-	return nodeClient.ListRoutesBySourceNode(ctx, node.ID)
-}
-
-// writeTmsStatus writes failed status and returns the original error, so callers
-// can do:
-//
-//	return s.writeTmsStatus(id, lifecycle.PrereqFailed, err)
-//
-// The DB write is best-effort: if it fails the error is logged but the original
-// error is still returned (consistent with Phase 2 finish()/fail() pattern).
-func (s *Service) writeTmsStatus(tenantID uint, status lifecycle.PrerequisiteStatus, origErr error) error {
-	if err := s.DB.Model(&db.CpiTenant{}).Where("id = ?", tenantID).
-		Update("tms_node_registration_status", status).Error; err != nil {
-		env.Logger().Errorw("writeTmsStatus: failed to persist TMS registration status",
-			"tenantID", tenantID, "targetStatus", status, "error", err)
-	}
-	return origErr
+	return result, nil
 }

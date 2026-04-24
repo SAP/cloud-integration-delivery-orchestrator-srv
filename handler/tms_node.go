@@ -32,7 +32,7 @@ import (
 //	{ "nodeId": 42, "nodeName": "DEV_NODE" }
 //
 // Preconditions checked here:
-//   - LifecycleState = ready (bootstrap must be complete)
+//   - LifecycleState != draft (CF Connection / Step 1 must be complete)
 //   - TmsNodeRegistrationStatus != registering (prevent double-registration
 //     while waiting for Route confirmation)
 func (h *Handler) RegisterTmsNode(ctx *gin.Context) {
@@ -50,7 +50,9 @@ func (h *Handler) RegisterTmsNode(ctx *gin.Context) {
 		return
 	}
 
-	// Guard: bootstrap must be complete before TMS node registration can start.
+	// Guard: CF identity must be saved (Step 1 complete) before TMS node registration.
+	// Registration happens in wizard Step 2, before bootstrap Apply — LifecycleState
+	// will be 'configured' (or 'ready' for re-bootstrap), never 'draft'.
 	var tenant db.CpiTenant
 	if err := h.db.First(&tenant, tenantID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -61,8 +63,8 @@ func (h *Handler) RegisterTmsNode(ctx *gin.Context) {
 		return
 	}
 
-	if tenant.LifecycleState != lifecycle.TenantReady {
-		Fail(ctx, 400, "bootstrap must be completed (lifecycleState=ready) before TMS node registration")
+	if tenant.LifecycleState == lifecycle.TenantDraft {
+		Fail(ctx, 400, "complete CF Connection (Step 1) before registering a TMS node")
 		return
 	}
 
@@ -117,8 +119,7 @@ func (h *Handler) GetTmsNodeStatus(ctx *gin.Context) {
 //
 // GET /api/v1/cpiTenant/:id/tms-node/routes
 //
-// Requires TmsNodeRegistrationStatus = registering (node must exist before
-// routes can be configured).
+// Requires TmsNodeRegistrationStatus to be registering or ready (node must exist).
 func (h *Handler) GetTmsRoutes(ctx *gin.Context) {
 	tenantID, ok := parseTenantID(ctx)
 	if !ok {
@@ -135,12 +136,12 @@ func (h *Handler) GetTmsRoutes(ctx *gin.Context) {
 		return
 	}
 
-	if tenant.TmsNodeRegistrationStatus != lifecycle.PrereqRegistering {
-		Fail(ctx, 400, "routes can only be queried when TmsNodeRegistrationStatus=registering")
+	if tenant.TmsSourceNodeID == 0 {
+		Fail(ctx, 400, "routes can only be queried after a TMS node has been registered")
 		return
 	}
 
-	routes, err := h.svc.GetTmsRoutes(ctx.Request.Context(), tenantID)
+	routes, err := h.svc.GetTmsRoutes(ctx.Request.Context(), tenant.TmsSourceNodeID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			Fail(ctx, 404, "tenant not found")
@@ -186,7 +187,7 @@ func (h *Handler) ConfirmTmsRoutes(ctx *gin.Context) {
 		return
 	}
 
-	result, err := h.svc.ConfirmTmsRoutes(ctx.Request.Context(), tenantID)
+	result, err := h.svc.ConfirmTmsRoutes(ctx.Request.Context(), tenantID, tenant.TmsSourceNodeID)
 	if err != nil {
 		if errors.Is(err, service.ErrRoutesNotConfigured) {
 			ctx.JSON(400, gin.H{
