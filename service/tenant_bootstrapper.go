@@ -675,7 +675,7 @@ func (b *bootstrapApplier) buildSubscriberDestinations(ctx context.Context, resu
 		}
 		dest := *tmsDest
 		dest.Name = "TransportManagementService"
-		dest.Description = fmt.Sprintf("DO NOT MODIFY. Created by cpi-delivery bootstrap for tenant %d", tenant.ID)
+		dest.Description = fmt.Sprintf("DO NOT MODIFY. TransportManagementService for tenant %d, sourceSystemId=%s. Created by cpi-delivery bootstrap.", tenant.ID, tenant.TmsSourceNodeName)
 		if tenant.TmsSourceNodeName == "" {
 			return nil, fmt.Errorf("TmsSourceNodeName is empty — Apply should have been blocked by checkTmsSourceNode")
 		}
@@ -717,46 +717,50 @@ func (b *bootstrapApplier) ensureProviderDestinations(ctx context.Context, tenan
 	var actions []credentialAction
 
 	// CPIDELIVERY_PIR_{id} — PIR api root URL (base URL, not transport module path).
-	if result.PirApiInstanceGUID != "" {
-		keyGUID, ok := result.ServiceKeyGUIDs[result.PirApiInstanceGUID]
-		if ok {
-			creds, err := b.cfClient.GetServiceKeyCredentials(ctx, keyGUID)
-			if err != nil {
-				return nil, fmt.Errorf("get PIR api key credentials for provider dest: %w", err)
-			}
-			dest, err := buildOAuthDestination(tenant.PirApiDestinationName, nil /* base URL as-is */, tenant.ID, creds)
-			if err != nil {
-				return nil, err
-			}
-			if err := b.providerDest.UpsertDestination(ctx, dest); err != nil {
-				return nil, fmt.Errorf("upsert provider dest %q: %w", dest.Name, err)
-			}
-			// Store PIR root URL for display in the tenant info tab.
-			if pirURL, _ := creds["url"].(string); pirURL != "" {
-				tenant.PirApiUrl = pirURL
-			}
-			actions = append(actions, credentialAction{DestinationName: dest.Name, ActionType: "upserted"})
-		}
+	if result.PirApiInstanceGUID == "" {
+		return nil, fmt.Errorf("ensureProviderDestinations: PIR API service instance not found in inspect result — cannot build provider destination")
 	}
+	pirKeyGUID, ok := result.ServiceKeyGUIDs[result.PirApiInstanceGUID]
+	if !ok {
+		return nil, fmt.Errorf("ensureProviderDestinations: no service key GUID for PIR instance %q — inspect did not resolve a service key", result.PirApiInstanceGUID)
+	}
+	pirCreds, err := b.cfClient.GetServiceKeyCredentials(ctx, pirKeyGUID)
+	if err != nil {
+		return nil, fmt.Errorf("get PIR api key credentials for provider dest: %w", err)
+	}
+	pirDest, err := buildOAuthDestination(tenant.PirApiDestinationName, nil /* base URL as-is */, tenant.ID, pirCreds)
+	if err != nil {
+		return nil, err
+	}
+	if err := b.providerDest.UpsertDestination(ctx, pirDest); err != nil {
+		return nil, fmt.Errorf("upsert provider dest %q: %w", pirDest.Name, err)
+	}
+	if pirDest.URL == "" {
+		return nil, fmt.Errorf("ensureProviderDestinations: PIR destination %q has empty URL after credential resolution", pirDest.Name)
+	}
+	tenant.PirApiUrl = pirDest.URL
+	actions = append(actions, credentialAction{DestinationName: pirDest.Name, ActionType: "upserted"})
 
 	// CPIDELIVERY_CAS_{id} — CAS application root URL (content-agent/application).
-	if result.CasApplicationInstanceGUID != "" {
-		keyGUID, ok := result.ServiceKeyGUIDs[result.CasApplicationInstanceGUID]
-		if ok {
-			creds, err := b.cfClient.GetServiceKeyCredentials(ctx, keyGUID)
-			if err != nil {
-				return nil, fmt.Errorf("get CAS application key credentials for provider dest: %w", err)
-			}
-			dest, err := buildOAuthDestination(tenant.CasEngineDestinationName, nil /* base URL as-is */, tenant.ID, creds)
-			if err != nil {
-				return nil, err
-			}
-			if err := b.providerDest.UpsertDestination(ctx, dest); err != nil {
-				return nil, fmt.Errorf("upsert provider dest %q: %w", dest.Name, err)
-			}
-			actions = append(actions, credentialAction{DestinationName: dest.Name, ActionType: "upserted"})
-		}
+	if result.CasApplicationInstanceGUID == "" {
+		return nil, fmt.Errorf("ensureProviderDestinations: CAS application service instance not found in inspect result — cannot build provider destination")
 	}
+	casKeyGUID, ok := result.ServiceKeyGUIDs[result.CasApplicationInstanceGUID]
+	if !ok {
+		return nil, fmt.Errorf("ensureProviderDestinations: no service key GUID for CAS instance %q — inspect did not resolve a service key", result.CasApplicationInstanceGUID)
+	}
+	casCreds, err := b.cfClient.GetServiceKeyCredentials(ctx, casKeyGUID)
+	if err != nil {
+		return nil, fmt.Errorf("get CAS application key credentials for provider dest: %w", err)
+	}
+	casDest, err := buildOAuthDestination(tenant.CasEngineDestinationName, nil /* base URL as-is */, tenant.ID, casCreds)
+	if err != nil {
+		return nil, err
+	}
+	if err := b.providerDest.UpsertDestination(ctx, casDest); err != nil {
+		return nil, fmt.Errorf("upsert provider dest %q: %w", casDest.Name, err)
+	}
+	actions = append(actions, credentialAction{DestinationName: casDest.Name, ActionType: "upserted"})
 
 	return actions, nil
 }
@@ -854,7 +858,7 @@ func buildOAuthDestination(name string, urlTransform func(string) string, tenant
 
 	return cf.Destination{
 		Name:                name,
-		Description:         fmt.Sprintf("DO NOT MODIFY. Created by cpi-delivery bootstrap for tenant %d", tenantID),
+		Description:         fmt.Sprintf("DO NOT MODIFY. %s for tenant %d. Created by cpi-delivery bootstrap.", name, tenantID),
 		Type:                "HTTP",
 		URL:                 destURL,
 		Authentication:      "OAuth2ClientCredentials",
