@@ -419,7 +419,7 @@ func (h *Handler) HandleCancelDr(c *gin.Context) {
 	OKMsg(c, nil, "Delivery request canceled successfully")
 }
 
-// GenerateTR creates a TMS Transport Request for the given tenant via CAS.
+// HandleGenTR creates a TMS Transport Request for the given tenant via CAS.
 //
 // POST /api/v1/cpiTenant/:id/generateTR
 //
@@ -436,7 +436,7 @@ func (h *Handler) HandleCancelDr(c *gin.Context) {
 //
 // DB loading, CAS catalog resolution, ContentResource grouping, and TR write-back
 // are all handled by the service layer.
-func (h *Handler) GenerateTR(ctx *gin.Context) {
+func (h *Handler) HandleGenTR(ctx *gin.Context) {
 	tenantID, ok := parseTenantID(ctx)
 	if !ok {
 		return
@@ -455,10 +455,27 @@ func (h *Handler) GenerateTR(ctx *gin.Context) {
 		return
 	}
 
-	// TR generation can take up to several minutes (CAS export + poll loop).
-	// Running it synchronously with the HTTP request context causes context.Canceled
-	// when the client times out. Delegate to the same background function used by
-	// InsertOps so TR results arrive via SSE instead of the HTTP response.
-	go h.svc.GenerateTRsInBackground(body.DeliveryRequestID, tenantID, body.ArtifactOperationIDs)
-	ctx.Status(202)
+	succeeded, failed, fatalErr := h.svc.GenerateTransportRequest(ctx.Request.Context(), tenantID, body.DeliveryRequestID, body.ArtifactOperationIDs)
+	if fatalErr != nil {
+		Fail(ctx, http.StatusInternalServerError, fatalErr.Error())
+		return
+	}
+
+	type trResult struct {
+		TransportRequestID  string `json:"transportRequestID"`
+		TransportRequestURL string `json:"transportRequestURL"`
+	}
+	succeededOut := make(map[string]trResult, len(succeeded))
+	for opID, tr := range succeeded {
+		succeededOut[fmt.Sprintf("%d", opID)] = trResult{
+			TransportRequestID:  tr.ID,
+			TransportRequestURL: tr.URL,
+		}
+	}
+	failedOut := make(map[string]string, len(failed))
+	for opID, err := range failed {
+		failedOut[fmt.Sprintf("%d", opID)] = err.Error()
+	}
+
+	OK(ctx, gin.H{"succeeded": succeededOut, "failed": failedOut})
 }

@@ -130,7 +130,7 @@ func (h *Handler) SetupRoutes(v1 *gin.RouterGroup, v2 *gin.RouterGroup, requireS
 		tenantManage.PUT("/centralTmsContext", h.UpsertCentralTmsContext)
 
 		// RFC 013 Phase 4: CAS-based TR generation
-		tenantManage.POST("/cpiTenant/:id/generateTR", h.GenerateTR)
+		tenantManage.POST("/cpiTenant/:id/generateTR", h.HandleGenTR)
 	}
 
 	// --- DeliveryRule.Read ---

@@ -249,13 +249,13 @@ func (s *Service) DeleteTenantOps(drID uint, opIDs []uint) error {
 }
 
 // resolveTechID queries the CPI PIR OData API for the given package and artifact type,
-// then returns the tech ID of the single artifact whose display name AND version both match.
-// Returns an error if 0 or ≥2 matches are found (ambiguous name → must reject).
+// then returns the tech ID of the artifact whose display name AND version both match.
 //
-// Core design: CAS API only provides artifact display name and GUID — not the tech ID.
-// Tech ID is only available from CPI PIR OData (Id field). This function is the mandatory
-// bridge: it must be called for every op inserted via InsertTenantOps so that
-// op.ArtifactTechID holds the real CPI tech ID required by the Deploy stage.
+// Uniqueness rule: if the package contains more than one artifact with the same display
+// name (regardless of version), the lookup is rejected as ambiguous. ArtifactName is not
+// a unique key in CPI — ArtifactTechID is — but CAS only exposes the display name, making
+// it the only available identifier. Duplicate names within a package are therefore treated
+// as a naming-convention violation and must be resolved by the user in CPI before delivery.
 func (s *Service) resolveTechID(ctx context.Context, cpiCli IntegrationService, packageID, artifactType, displayName, version string) (string, error) {
 	type nameID struct{ name, version, id string }
 	var items []nameID
@@ -281,29 +281,34 @@ func (s *Service) resolveTechID(ctx context.Context, cpiCli IntegrationService, 
 		return "", fmt.Errorf("unsupported artifact type %q — only IFlow and ScriptCollection are supported", artifactType)
 	}
 
-	var matches []nameID
+	// Reject if any other artifact in the package shares the same display name,
+	// regardless of version. Duplicate names are ambiguous because CAS cannot
+	// return tech IDs — we have no reliable way to distinguish them.
+	var sameNameItems []nameID
 	for _, it := range items {
-		if it.name == displayName && it.version == version {
-			matches = append(matches, it)
+		if it.name == displayName {
+			sameNameItems = append(sameNameItems, it)
 		}
 	}
-
-	switch len(matches) {
-	case 0:
-		return "", fmt.Errorf("artifact %q version %q not found in CPI package %q via PIR API", displayName, version, packageID)
-	case 1:
-		return matches[0].id, nil
-	default:
-		techIDs := make([]string, len(matches))
-		for i, m := range matches {
+	if len(sameNameItems) > 1 {
+		techIDs := make([]string, len(sameNameItems))
+		for i, m := range sameNameItems {
 			techIDs[i] = m.id
 		}
 		return "", fmt.Errorf(
-			"ambiguous artifact name %q version %q in package %q: found %d artifacts with the same display name and version (tech IDs: %v). "+
+			"ambiguous artifact name %q in package %q: found %d artifacts sharing the same display name (tech IDs: %v). "+
 				"Please rename the artifacts in CPI to use unique display names within the package.",
-			displayName, version, packageID, len(matches), techIDs,
+			displayName, packageID, len(sameNameItems), techIDs,
 		)
 	}
+
+	// Find the artifact matching both name and version.
+	for _, it := range sameNameItems {
+		if it.version == version {
+			return it.id, nil
+		}
+	}
+	return "", fmt.Errorf("artifact %q version %q not found in CPI package %q via PIR API", displayName, version, packageID)
 }
 
 func (s *Service) InsertTenantOps(ctx context.Context, drID uint, ops []db.ArtifactTenantOperation, user string) ([]db.ArtifactTenantOperation, error) {
@@ -375,8 +380,8 @@ func (s *Service) InsertTenantOps(ctx context.Context, drID uint, ops []db.Artif
 		return nil, fmt.Errorf("failed to insert artifact tenant operations: %s", err)
 	}
 
-	// Mark all new source-tenant ops as TR_GENERATING and kick off background TR generation.
-	// Only source-tenant ops need TRs; target-tenant ops are created during import.
+	// Generate TRs synchronously for new source-tenant ops.
+	// All DB writes and SSE broadcast are handled inside GenerateTransportRequest.
 	newOpIDs := make([]uint, 0, len(ops))
 	for i := range ops {
 		if ops[i].TenantID == sourceTenant.ID {
@@ -384,71 +389,20 @@ func (s *Service) InsertTenantOps(ctx context.Context, drID uint, ops []db.Artif
 		}
 	}
 	if len(newOpIDs) > 0 {
-		if err := s.DB.Model(&db.ArtifactTenantOperation{}).
-			Where("id IN ?", newOpIDs).
-			Update("request_state", lifecycle.RequestTrGenerating).Error; err != nil {
-			env.Logger().Warnw("InsertTenantOps: failed to mark ops as TR_GENERATING", "error", err)
-		} else {
-			for i := range ops {
-				for _, id := range newOpIDs {
-					if ops[i].ID == id {
-						ops[i].RequestState = lifecycle.RequestTrGenerating
-					}
-				}
-			}
+		if _, _, fatalErr := s.GenerateTransportRequest(ctx, sourceTenant.ID, drID, newOpIDs); fatalErr != nil {
+			return nil, fatalErr
 		}
-		s.publishDrOps(drID, s.snapshotOps(drID))
-		go s.GenerateTRsInBackground(drID, sourceTenant.ID, newOpIDs)
-	} else {
-		s.publishDrOps(drID, s.snapshotOps(drID))
+		// Reload all ops from DB to carry the final TR state.
+		allIDs := make([]uint, len(ops))
+		for i, op := range ops {
+			allIDs[i] = op.ID
+		}
+		if err := s.DB.Where("id IN ?", allIDs).Find(&ops).Error; err != nil {
+			env.Logger().Warnw("InsertTenantOps: failed to reload ops after TR generation", "error", err)
+		}
 	}
 
 	return ops, nil
-}
-
-// GenerateTRsInBackground runs TR generation for newly inserted ops in an independent
-// context (decoupled from the HTTP request lifecycle). Results are written back to DB
-// and broadcast via SSE.
-func (s *Service) GenerateTRsInBackground(drID, tenantID uint, opIDs []uint) {
-	ctx, cancel := context.WithTimeout(context.Background(), casExportTimeout*time.Duration(len(opIDs))+2*time.Minute)
-	defer cancel()
-
-	succeeded, failed, fatalErr := s.GenerateTransportRequest(ctx, tenantID, drID, opIDs)
-	if fatalErr != nil {
-		env.Logger().Errorw("GenerateTRsInBackground: fatal error, marking all ops TR_FAILED",
-			"drID", drID, "tenantID", tenantID, "error", fatalErr)
-		s.DB.Model(&db.ArtifactTenantOperation{}).
-			Where("id IN ?", opIDs).
-			Updates(map[string]any{
-				"request_state": lifecycle.RequestTrFailed,
-				"tr_error":      fatalErr.Error(),
-			})
-		s.publishDrOps(drID, s.snapshotOps(drID))
-		return
-	}
-
-	for opID, tr := range succeeded {
-		// TR number already written by GenerateTransportRequest; reset state to NOT_REQUESTED.
-		s.DB.Model(&db.ArtifactTenantOperation{}).
-			Where("id = ?", opID).
-			Updates(map[string]any{
-				"request_state":            lifecycle.RequestPending,
-				"transport_request_number": tr.ID,
-				"tr_error":                 "",
-			})
-	}
-	for opID, err := range failed {
-		s.DB.Model(&db.ArtifactTenantOperation{}).
-			Where("id = ?", opID).
-			Updates(map[string]any{
-				"request_state": lifecycle.RequestTrFailed,
-				"tr_error":      err.Error(),
-			})
-		env.Logger().Warnw("GenerateTRsInBackground: TR generation failed for op",
-			"opID", opID, "error", err)
-	}
-
-	s.publishDrOps(drID, s.snapshotOps(drID))
 }
 
 // OpUpdateItem carries the only mutable fields for an existing op.

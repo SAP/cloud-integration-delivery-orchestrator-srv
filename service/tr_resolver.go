@@ -62,8 +62,8 @@ func (s *Service) acquireTenantForTR(ctx context.Context, tenantID uint) (db.Cpi
 		if tenant.TmsNodeRegistrationStatus != lifecycle.PrereqReady {
 			return fmt.Errorf("tenant %d tmsNodeRegistrationStatus=%q, must be ready", tenantID, tenant.TmsNodeRegistrationStatus)
 		}
-		if tenant.TmsSourceNodeName == "" {
-			return fmt.Errorf("tenant %d has no TmsSourceNodeName", tenantID)
+		if tenant.TmsSourceNodeName == "" || tenant.TmsSourceNodeID == 0 {
+			return fmt.Errorf("tenant %d has no TmsSourceNodeName or TmsSourceNodeID", tenantID)
 		}
 		return nil
 	})
@@ -109,8 +109,9 @@ func (s *Service) ensureCasGUIDs(ctx context.Context, casClient CasService, ops 
 		return fmt.Errorf("fetch CAS catalog: %w", err)
 	}
 
-	// Build lookup: artifact display name → {component, package}.
-	// CAS comp.Name is the artifact display name, which matches ArtifactName in our DB.
+	// Build lookup: (packageID, artifactName) → {component, package}.
+	// Key is "packageID::artifactName" to isolate across packages and to reject
+	// same-package same-name duplicates (matching resolveTechID behavior).
 	// Tech ID is NOT returned by CAS and is not used in the export flow.
 	type entry struct {
 		comp cas.CatalogComponent
@@ -122,14 +123,19 @@ func (s *Service) ensureCasGUIDs(ctx context.Context, casClient CasService, ops 
 			continue
 		}
 		for _, comp := range res.Components {
-			index[comp.Name] = entry{comp: comp, pkg: res}
+			key := res.ID + "::" + comp.Name
+			if _, exists := index[key]; exists {
+				return fmt.Errorf("ambiguous artifact %q in package %q: multiple components share the same display name — rename to unique names within the package", comp.Name, res.ID)
+			}
+			index[key] = entry{comp: comp, pkg: res}
 		}
 	}
 
 	// Populate cache fields and persist.
 	for i := range ops {
-		// Match by display name (ArtifactName == CAS comp.Name).
-		e, ok := index[ops[i].ArtifactName]
+		// Match by (packageID, artifactName).
+		key := ops[i].PackageID + "::" + ops[i].ArtifactName
+		e, ok := index[key]
 		if !ok {
 			return fmt.Errorf("artifact %q (techID=%q) not found in CAS catalog", ops[i].ArtifactName, ops[i].ArtifactTechID)
 		}
@@ -171,24 +177,41 @@ func (s *Service) ensureCasGUIDs(ctx context.Context, casClient CasService, ops 
 // succeeded TRs are already persisted and must not be re-created.
 func (s *Service) GenerateTransportRequest(ctx context.Context, tenantID, deliveryRequestID uint, artifactOperationIDs []uint) (map[uint]*TransportRequest, map[uint]error, error) {
 	// ── 0. Reset TR_FAILED ops to TR_GENERATING so the frontend sees the in-progress state.
-	//    This covers both the background (InsertOps) path and the manual retry (GenerateTR) path.
-	s.DB.WithContext(ctx).Model(&db.ArtifactTenantOperation{}).
+	//    This covers both the InsertOps path and the manual retry (GenerateTR) path.
+	if dbErr := s.DB.WithContext(ctx).Model(&db.ArtifactTenantOperation{}).
 		Where("id IN ? AND request_state = ?", artifactOperationIDs, lifecycle.RequestTrFailed).
 		Updates(map[string]any{
 			"request_state": lifecycle.RequestTrGenerating,
 			"tr_error":      "",
-		})
+		}).Error; dbErr != nil {
+		env.Logger().Warnw("GenerateTransportRequest: failed to reset TR_FAILED ops to TR_GENERATING", "error", dbErr)
+	}
+
+	// fatalf handles pre-op fatal errors: restores any ops we moved to TR_GENERATING back
+	// to TR_FAILED, broadcasts the state change via SSE, and returns the error to the caller.
+	fatalf := func(err error) (map[uint]*TransportRequest, map[uint]error, error) {
+		if dbErr := s.DB.WithContext(ctx).Model(&db.ArtifactTenantOperation{}).
+			Where("id IN ? AND request_state = ?", artifactOperationIDs, lifecycle.RequestTrGenerating).
+			Updates(map[string]any{
+				"request_state": lifecycle.RequestTrFailed,
+				"tr_error":      err.Error(),
+			}).Error; dbErr != nil {
+			env.Logger().Warnw("GenerateTransportRequest: failed to reset TR_GENERATING ops on fatal error", "error", dbErr)
+		}
+		s.publishDrOps(deliveryRequestID, s.snapshotOps(deliveryRequestID))
+		return nil, nil, err
+	}
 
 	// ── 1. Atomic readiness gate (SELECT FOR UPDATE) ─────────────────────────
 	tenant, err := s.acquireTenantForTR(ctx, tenantID)
 	if err != nil {
-		return nil, nil, err
+		return fatalf(err)
 	}
 
 	// ── 2. Load DeliveryRequest ───────────────────────────────────────────────
 	var dr db.DeliveryRequest
 	if err := s.DB.WithContext(ctx).First(&dr, deliveryRequestID).Error; err != nil {
-		return nil, nil, fmt.Errorf("GenerateTransportRequest: load delivery request %d: %w", deliveryRequestID, err)
+		return fatalf(fmt.Errorf("GenerateTransportRequest: load delivery request %d: %w", deliveryRequestID, err))
 	}
 
 	// ── 3. Load ArtifactTenantOperations ─────────────────────────────────────
@@ -197,23 +220,23 @@ func (s *Service) GenerateTransportRequest(ctx context.Context, tenantID, delive
 		Where("id IN ? AND delivery_request_id = ? AND tenant_id = ?",
 			artifactOperationIDs, deliveryRequestID, tenantID).
 		Find(&ops).Error; err != nil {
-		return nil, nil, fmt.Errorf("GenerateTransportRequest: load operations: %w", err)
+		return fatalf(fmt.Errorf("GenerateTransportRequest: load operations: %w", err))
 	}
 	if len(ops) == 0 {
-		return nil, nil, fmt.Errorf("GenerateTransportRequest: no matching operations for tenant %d, DR %d", tenantID, deliveryRequestID)
+		return fatalf(fmt.Errorf("GenerateTransportRequest: no matching operations for tenant %d, DR %d", tenantID, deliveryRequestID))
 	}
 
 	// ── 4. Build per-tenant CasClient ────────────────────────────────────────
 	casClient, err := s.CAS(ctx, tenantID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("GenerateTransportRequest: build CAS client: %w", err)
+		return fatalf(fmt.Errorf("GenerateTransportRequest: build CAS client: %w", err))
 	}
 
 	// ── 5. GUID cache: skip CAS if all ops already have CasArtifactGUID ─────
 	// On first run (or after a GUID invalidation) the cache fields are empty →
 	// fall back to calling ListCloudIntegrationResources, populate, and persist.
 	if err := s.ensureCasGUIDs(ctx, casClient, ops); err != nil {
-		return nil, nil, fmt.Errorf("GenerateTransportRequest: GUID cache: %w", err)
+		return fatalf(fmt.Errorf("GenerateTransportRequest: GUID cache: %w", err))
 	}
 
 	// ── 6. Per-op: one export → one TR (concurrent) ─────────────────────────
@@ -240,6 +263,15 @@ func (s *Service) GenerateTransportRequest(ctx context.Context, tenantID, delive
 		r := <-resultCh
 		if r.err != nil {
 			failed[r.opID] = r.err
+			if dbErr := s.DB.WithContext(ctx).Model(&db.ArtifactTenantOperation{}).
+				Where("id = ?", r.opID).
+				Updates(map[string]any{
+					"request_state": lifecycle.RequestTrFailed,
+					"tr_error":      r.err.Error(),
+				}).Error; dbErr != nil {
+				env.Logger().Warnw("GenerateTransportRequest: failed to write TR_FAILED for op",
+					"opID", r.opID, "error", dbErr)
+			}
 			continue
 		}
 
@@ -260,6 +292,7 @@ func (s *Service) GenerateTransportRequest(ctx context.Context, tenantID, delive
 		succeeded[r.opID] = r.tr
 	}
 
+	s.publishDrOps(deliveryRequestID, s.snapshotOps(deliveryRequestID))
 	return succeeded, failed, nil
 }
 
@@ -343,7 +376,7 @@ func (s *Service) exportOneTR(
 
 		switch status.State {
 		case "FINISHED":
-			// fall through to config read below
+			// Go switch does not fall-through by default; execution resumes after the switch block.
 		case "FAILED":
 			return nil, fmt.Errorf("CAS export FAILED (artifact=%q, processId=%s)", techID, processID)
 		default:
