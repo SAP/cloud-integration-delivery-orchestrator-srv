@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -455,7 +456,7 @@ func (h *Handler) HandleGenTR(ctx *gin.Context) {
 		return
 	}
 
-	succeeded, failed, fatalErr := h.svc.GenerateTransportRequest(ctx.Request.Context(), tenantID, body.DeliveryRequestID, body.ArtifactOperationIDs)
+	succeeded, failed, fatalErr := h.svc.GenerateTransportRequest(context.WithoutCancel(ctx.Request.Context()), tenantID, body.DeliveryRequestID, body.ArtifactOperationIDs)
 	if fatalErr != nil {
 		Fail(ctx, http.StatusInternalServerError, fatalErr.Error())
 		return

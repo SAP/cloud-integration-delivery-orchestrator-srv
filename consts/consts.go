@@ -55,7 +55,7 @@ const (
 // HTTP request timeout constants — used by pkg/tms, pkg/cpi, pkg/xsuaa
 const (
 	DefaultRequestTimeout = 30 * time.Second // GET 请求（轻量）
-	LongRequestTimeout    = 60 * time.Second // GET 请求（大数据量，如日志、文件下载）
+	LongRequestTimeout    = 120 * time.Second // GET 请求（大数据量，如日志、文件下载）
 	ImportTimeout         = 60 * time.Second // POST/DELETE 请求（Import、Deploy、Upload、Undeploy）
 )
 

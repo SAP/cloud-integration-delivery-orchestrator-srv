@@ -3,14 +3,15 @@ package handler
 import (
 	"errors"
 	"fmt"
-	"net/http"
 	"strconv"
 
 	"mmt-delivery/db"
+	"mmt-delivery/service"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
+
 
 // resolveCpiDestination looks up a tenant by ID from the DB and returns its PirApiDestinationName.
 // Writes an appropriate error response and returns ("", false) on any failure.
@@ -62,28 +63,6 @@ func (h *Handler) GetPackagesHandler(ctx *gin.Context) {
 	OK(ctx, packages)
 }
 
-// get all iflows under a package
-func (h *Handler) GetPackageIflowsHandler(ctx *gin.Context) {
-	destName, ok := h.resolveCpiDestination(ctx)
-	if !ok {
-		return
-	}
-	packageID := ctx.Query("package")
-
-	cpiClient, err := h.cpi.Get(ctx, destName)
-	if err != nil {
-		h.logger.Errorf("error creating CPI client: %s", err)
-		Fail(ctx, 500, err.Error())
-		return
-	}
-	iflows, err := cpiClient.GetPackageIflows(ctx, packageID)
-	if err != nil {
-		h.logger.Error("Error while retrieving iflows within a package")
-		Fail(ctx, 500, fmt.Sprintf("internal server error: %s", err))
-		return
-	}
-	OK(ctx, iflows)
-}
 
 // do not return entire destination instance, hide credentials
 type DestinationResp struct {
@@ -110,7 +89,38 @@ func (h *Handler) GetDestinationsHandler(ctx *gin.Context) {
 	OK(ctx, destList)
 }
 
-// Get all deployed(runtime) artifacts by cpi tenant
+// GetPackageArtifactsHandler returns all design-time artifacts (IFlows + ScriptCollections)
+// for a given package, merged into a single list.
+//
+// GET /api/v1/tenant/packages/artifacts?tenant=<tenantID>&package=<packageID>
+//
+// Response shape mirrors the frontend Artifact interface:
+//
+//	{ TechID, Version, PackageId, Name, Description, CreatedBy, CreatedAt,
+//	  ModifiedBy, ModifiedAt, Type, TaskId, Status }
+func (h *Handler) GetPackageArtifactsHandler(ctx *gin.Context) {
+	destName, ok := h.resolveCpiDestination(ctx)
+	if !ok {
+		return
+	}
+	packageID := ctx.Query("package")
+	if packageID == "" {
+		Fail(ctx, 400, "missing required query param: package")
+		return
+	}
+	cpiClient, err := h.cpi.Get(ctx, destName)
+	if err != nil {
+		Fail(ctx, 500, fmt.Sprintf("failed to create CPI client: %s", err))
+		return
+	}
+	artifacts, err := service.GetPackageArtifacts(ctx, cpiClient, packageID)
+	if err != nil {
+		Fail(ctx, 500, fmt.Sprintf("failed to get artifacts for package %q: %s", packageID, err))
+		return
+	}
+	OK(ctx, artifacts)
+}
+
 func (h *Handler) GetRuntimeArtifacts(ctx *gin.Context) {
 	destName, ok := h.resolveCpiDestination(ctx)
 	if !ok {
@@ -127,20 +137,4 @@ func (h *Handler) GetRuntimeArtifacts(ctx *gin.Context) {
 		return
 	}
 	OK(ctx, artifacts)
-}
-
-// GetCasContentResources returns all packages and artifacts for a tenant from CAS.
-// Replaces the two-step CPI flow (GET /tanant/packages + GET /tenant/packages/artifacts).
-// Requires tenant.CasEngineDestinationName to be configured.
-func (h *Handler) GetCasContentResources(ctx *gin.Context) {
-	tenantID, ok := parseTenantID(ctx)
-	if !ok {
-		return
-	}
-	packages, err := h.svc.ListCasPackages(ctx.Request.Context(), tenantID)
-	if err != nil {
-		Fail(ctx, http.StatusInternalServerError, fmt.Sprintf("failed to list CAS packages: %s", err))
-		return
-	}
-	OK(ctx, packages)
 }

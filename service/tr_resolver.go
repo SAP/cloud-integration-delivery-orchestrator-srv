@@ -110,20 +110,27 @@ func (s *Service) ensureCasGUIDs(ctx context.Context, casClient CasService, ops 
 	}
 
 	// Build lookup: (packageID, artifactName) → {component, package}.
-	// Key is "packageID::artifactName" to isolate across packages and to reject
-	// same-package same-name duplicates (matching resolveTechID behavior).
+	// Only index entries that are actually needed by ops; duplicates within
+	// unrelated artifacts in the same package are irrelevant.
 	// Tech ID is NOT returned by CAS and is not used in the export flow.
 	type entry struct {
 		comp cas.CatalogComponent
 		pkg  cas.CatalogContentResource
 	}
-	index := make(map[string]entry, len(catalog)*8)
+	neededKeys := make(map[string]struct{}, len(ops))
+	for _, op := range ops {
+		neededKeys[op.PackageID+"::"+op.ArtifactName] = struct{}{}
+	}
+	index := make(map[string]entry, len(neededKeys))
 	for _, res := range catalog {
 		if res.SubType != "package" {
 			continue
 		}
 		for _, comp := range res.Components {
 			key := res.ID + "::" + comp.Name
+			if _, needed := neededKeys[key]; !needed {
+				continue
+			}
 			if _, exists := index[key]; exists {
 				return fmt.Errorf("ambiguous artifact %q in package %q: multiple components share the same display name — rename to unique names within the package", comp.Name, res.ID)
 			}
@@ -133,35 +140,30 @@ func (s *Service) ensureCasGUIDs(ctx context.Context, casClient CasService, ops 
 
 	// Populate cache fields and persist.
 	for i := range ops {
-		// Match by (packageID, artifactName).
+		// Match by (packageID, artifactName) — TechID is not available in CAS catalog.
 		key := ops[i].PackageID + "::" + ops[i].ArtifactName
 		e, ok := index[key]
 		if !ok {
 			return fmt.Errorf("artifact %q (techID=%q) not found in CAS catalog", ops[i].ArtifactName, ops[i].ArtifactTechID)
 		}
 
+		// Populate cache fields in-memory and persist — overwrite unconditionally
+		// since CAS is the authoritative source for these values.
 		ops[i].CasArtifactGUID = e.comp.ID
 		ops[i].CasPackageResourceID = e.pkg.ResourceID
 		ops[i].CasArtifactExportable = e.comp.Exportable
+		
+		ops[i].PackageName = e.pkg.Name
+		ops[i].PackageVersion = e.pkg.Version
 
 		if err := s.DB.WithContext(ctx).Model(&ops[i]).Updates(map[string]any{
 			"cas_artifact_guid":       e.comp.ID,
 			"cas_package_resource_id": e.pkg.ResourceID,
 			"cas_artifact_exportable": e.comp.Exportable,
+			"package_name":            e.pkg.Name,
+			"package_version":         e.pkg.Version,
 		}).Error; err != nil {
 			return fmt.Errorf("persist CAS GUIDs for op %d: %w", ops[i].ID, err)
-		}
-
-		// Update package display name/version on op if not yet cached.
-		if ops[i].PackageName == "" || ops[i].PackageVersion == "" {
-			if err := s.DB.WithContext(ctx).Model(&ops[i]).Updates(map[string]any{
-				"package_name":    e.pkg.Name,
-				"package_version": e.pkg.Version,
-			}).Error; err != nil {
-				return fmt.Errorf("persist package metadata for op %d: %w", ops[i].ID, err)
-			}
-			ops[i].PackageName = e.pkg.Name
-			ops[i].PackageVersion = e.pkg.Version
 		}
 	}
 

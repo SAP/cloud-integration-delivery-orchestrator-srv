@@ -17,7 +17,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"strings"
 
 	"mmt-delivery/consts"
 	"mmt-delivery/pkg/env"
@@ -189,8 +188,8 @@ type Activity struct {
 // ── API methods ───────────────────────────────────────────────────────────────
 
 // ListCloudIntegrationResources fetches CAS artifact catalog entries for Cloud Integration only.
-// packageIDs optionally restricts results to specific package tech IDs via the
-// server-side `filters` query parameter (e.g. "id eq 'pkg1' or id eq 'pkg2'").
+// packageIDs optionally restricts results to specific package tech IDs; filtering is done
+// client-side after fetching because the CAS API does not support combining type and id filters.
 // Pass nil or empty slice to fetch the full Cloud Integration catalog.
 // Caller should further filter by SubType == "package" when needed.
 func (c *CasClient) ListCloudIntegrationResources(ctx context.Context, packageIDs []string) ([]CatalogContentResource, error) {
@@ -199,16 +198,8 @@ func (c *CasClient) ListCloudIntegrationResources(ctx context.Context, packageID
 
 	fullURL := fmt.Sprintf("%s/v1/contentResources", c.ApiURL)
 	params := url.Values{}
-	// Always restrict to Cloud Integration; CAS also returns API Management, Destination Service, etc.
-	filterExpr := "type eq 'Cloud Integration'"
-	if len(packageIDs) > 0 {
-		parts := make([]string, len(packageIDs))
-		for i, id := range packageIDs {
-			parts[i] = fmt.Sprintf("id eq '%s'", id)
-		}
-		filterExpr += " and (" + strings.Join(parts, " or ") + ")"
-	}
-	params.Set("filters", filterExpr)
+	// Restrict to Cloud Integration only; CAS also returns API Management, Destination Service, etc.
+	params.Set("filters", "type eq 'Cloud Integration'")
 	fullURL += "?" + params.Encode()
 	req := &env.HttpRequest{ApiURL: fullURL, Method: http.MethodGet}
 
@@ -226,7 +217,22 @@ func (c *CasClient) ListCloudIntegrationResources(ctx context.Context, packageID
 	if err := json.Unmarshal(*body, &resp); err != nil {
 		return nil, fmt.Errorf("ListCloudIntegrationResources: unmarshal: %w", err)
 	}
-	return resp.ContentResources, nil
+
+	// Client-side package filter (CAS API does not support combining type + id filters).
+	if len(packageIDs) == 0 {
+		return resp.ContentResources, nil
+	}
+	wanted := make(map[string]struct{}, len(packageIDs))
+	for _, id := range packageIDs {
+		wanted[id] = struct{}{}
+	}
+	filtered := make([]CatalogContentResource, 0, len(packageIDs))
+	for _, r := range resp.ContentResources {
+		if _, ok := wanted[r.ID]; ok {
+			filtered = append(filtered, r)
+		}
+	}
+	return filtered, nil
 }
 
 // TriggerExport calls POST /v1/contentResources/export and returns the

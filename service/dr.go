@@ -324,28 +324,10 @@ func (s *Service) InsertTenantOps(ctx context.Context, drID uint, ops []db.Artif
 	if err != nil {
 		return nil, fmt.Errorf("failed to get delivery rule %d: %s", dr.DeliveryRuleID, err)
 	}
-	// Build CPI client once — used for tech ID resolution for every op.
-	if s.CPI == nil {
-		return nil, fmt.Errorf("CPI factory not configured — cannot resolve tech IDs")
-	}
-	cpiCli, err := s.CPI(ctx, sourceTenant.PirApiDestinationName)
-	if err != nil {
-		return nil, fmt.Errorf("build CPI client for tech ID resolution: %w", err)
-	}
 
 	errOps := make(map[int]error) // keyed by slice index; op.ID is 0 before DB insert
 	for i := range ops {
 		op := &ops[i]
-
-		// Resolve true CPI tech ID via PIR OData API before any checks.
-		// Frontend supplies only the display name (from CAS); checks like version-downgrade
-		// call GetDesignTimeIflow(techID) and must receive the real tech ID, not a display name.
-		techID, err := s.resolveTechID(ctx, cpiCli, op.PackageID, string(op.ArtifactType), op.ArtifactName, op.ArtifactVersion)
-		if err != nil {
-			errOps[i] = fmt.Errorf("resolve tech ID for artifact %q (package %q): %w", op.ArtifactName, op.PackageID, err)
-			continue
-		}
-		op.ArtifactTechID = techID
 
 		if err := s.DeliveryRuleCheck(op, &rule); err != nil {
 			errOps[i] = err
@@ -389,7 +371,7 @@ func (s *Service) InsertTenantOps(ctx context.Context, drID uint, ops []db.Artif
 		}
 	}
 	if len(newOpIDs) > 0 {
-		if _, _, fatalErr := s.GenerateTransportRequest(ctx, sourceTenant.ID, drID, newOpIDs); fatalErr != nil {
+		if _, _, fatalErr := s.GenerateTransportRequest(context.WithoutCancel(ctx), sourceTenant.ID, drID, newOpIDs); fatalErr != nil {
 			return nil, fatalErr
 		}
 		// Reload all ops from DB to carry the final TR state.
