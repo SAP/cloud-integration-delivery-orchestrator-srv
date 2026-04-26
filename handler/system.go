@@ -2,7 +2,6 @@ package handler
 
 import (
 	"fmt"
-	"strconv"
 	"time"
 
 	"mmt-delivery/db"
@@ -155,32 +154,4 @@ func (h *Handler) CheckConnectivity(ctx *gin.Context) {
 		CheckedAt: time.Now(),
 		Results:   results,
 	})
-}
-
-// HandleBackfillTechIDs resolves correct CPI tech IDs for ops whose ArtifactTechID
-// is likely a display name (set before RFC-016). Safe to run multiple times.
-//
-// POST /api/v1/system/backfill-tech-id?dryRun=true&tenant=3
-//
-//   - dryRun=true   — report only, no DB writes (default: false)
-//   - tenant=<id>   — restrict to one tenant (default: all tenants)
-func (h *Handler) HandleBackfillTechIDs(ctx *gin.Context) {
-	dryRun := ctx.Query("dryRun") == "true"
-
-	var tenantFilter uint
-	if raw := ctx.Query("tenant"); raw != "" {
-		id, err := strconv.ParseUint(raw, 10, 64)
-		if err != nil || id == 0 {
-			Fail(ctx, 400, "invalid tenant query param — must be a positive integer")
-			return
-		}
-		tenantFilter = uint(id)
-	}
-
-	result, err := h.svc.BackfillArtifactTechIDs(ctx.Request.Context(), dryRun, tenantFilter)
-	if err != nil {
-		Fail(ctx, 500, fmt.Sprintf("backfill failed: %v", err))
-		return
-	}
-	OK(ctx, result)
 }

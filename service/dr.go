@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"mmt-delivery/db"
 	"mmt-delivery/pkg/lifecycle"
-	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -248,68 +247,6 @@ func (s *Service) DeleteTenantOps(drID uint, opIDs []uint) error {
 	return nil
 }
 
-// resolveTechID queries the CPI PIR OData API for the given package and artifact type,
-// then returns the tech ID of the artifact whose display name AND version both match.
-//
-// Uniqueness rule: if the package contains more than one artifact with the same display
-// name (regardless of version), the lookup is rejected as ambiguous. ArtifactName is not
-// a unique key in CPI — ArtifactTechID is — but CAS only exposes the display name, making
-// it the only available identifier. Duplicate names within a package are therefore treated
-// as a naming-convention violation and must be resolved by the user in CPI before delivery.
-func (s *Service) resolveTechID(ctx context.Context, cpiCli IntegrationService, packageID, artifactType, displayName, version string) (string, error) {
-	type nameID struct{ name, version, id string }
-	var items []nameID
-
-	switch strings.ToLower(artifactType) {
-	case "iflow", "integrationflow":
-		iflows, err := cpiCli.GetPackageIflows(ctx, packageID)
-		if err != nil {
-			return "", fmt.Errorf("GetPackageIflows(%q): %w", packageID, err)
-		}
-		for _, f := range iflows {
-			items = append(items, nameID{f.Name, f.Version, f.ID})
-		}
-	case "scriptcollection":
-		scs, err := cpiCli.GetPackageScriptcollections(ctx, packageID)
-		if err != nil {
-			return "", fmt.Errorf("GetPackageScriptcollections(%q): %w", packageID, err)
-		}
-		for _, sc := range scs {
-			items = append(items, nameID{sc.Name, sc.Version, sc.ID})
-		}
-	default:
-		return "", fmt.Errorf("unsupported artifact type %q — only IFlow and ScriptCollection are supported", artifactType)
-	}
-
-	// Reject if any other artifact in the package shares the same display name,
-	// regardless of version. Duplicate names are ambiguous because CAS cannot
-	// return tech IDs — we have no reliable way to distinguish them.
-	var sameNameItems []nameID
-	for _, it := range items {
-		if it.name == displayName {
-			sameNameItems = append(sameNameItems, it)
-		}
-	}
-	if len(sameNameItems) > 1 {
-		techIDs := make([]string, len(sameNameItems))
-		for i, m := range sameNameItems {
-			techIDs[i] = m.id
-		}
-		return "", fmt.Errorf(
-			"ambiguous artifact name %q in package %q: found %d artifacts sharing the same display name (tech IDs: %v). "+
-				"Please rename the artifacts in CPI to use unique display names within the package.",
-			displayName, packageID, len(sameNameItems), techIDs,
-		)
-	}
-
-	// Find the artifact matching both name and version.
-	for _, it := range sameNameItems {
-		if it.version == version {
-			return it.id, nil
-		}
-	}
-	return "", fmt.Errorf("artifact %q version %q not found in CPI package %q via PIR API", displayName, version, packageID)
-}
 
 func (s *Service) InsertTenantOps(ctx context.Context, drID uint, ops []db.ArtifactTenantOperation, user string) ([]db.ArtifactTenantOperation, error) {
 	if len(ops) == 0 {
