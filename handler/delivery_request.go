@@ -355,44 +355,6 @@ func (h *Handler) HandleUpdateOps(c *gin.Context) {
 	OK(c, result)
 }
 
-func (h *Handler) HandleCheckTr(c *gin.Context) {
-	var req struct {
-		OpID                   uint   `json:"opID"`
-		TransportRequestNumber string `json:"transportRequestNumber"`
-		DeliveryRequestID      uint   `json:"deliveryRequestID"`
-	}
-	if err := c.ShouldBindBodyWithJSON(&req); err != nil {
-		Fail(c, http.StatusBadRequest, err.Error())
-		return
-	}
-	var op db.ArtifactTenantOperation
-	if err := h.db.First(&op, req.OpID).Error; err != nil {
-		Fail(c, http.StatusBadRequest, fmt.Sprintf("artifact tenant operation %d not found: %s", req.OpID, err))
-		return
-	}
-	var dr db.DeliveryRequest
-	if err := h.db.First(&dr, req.DeliveryRequestID).Error; err != nil {
-		Fail(c, http.StatusInternalServerError, fmt.Sprintf("failed to get delivery request id %d: %s", req.DeliveryRequestID, err))
-		return
-	}
-	if op.TenantID != dr.SourceTenantID {
-		Fail(c, http.StatusBadRequest, fmt.Sprintf("operation %d belongs to tenant %d, not the source tenant of DR %d", op.ID, op.TenantID, req.DeliveryRequestID))
-		return
-	}
-	var sourceTenant db.CpiTenant
-	if err := h.db.First(&sourceTenant, dr.SourceTenantID).Error; err != nil {
-		Fail(c, http.StatusInternalServerError, fmt.Sprintf("failed to get source tenant %d: %s", dr.SourceTenantID, err))
-		return
-	}
-	op.TransportRequestNumber = req.TransportRequestNumber
-	_, err := h.svc.TrExist(&op, &sourceTenant)
-	if err != nil {
-		Fail(c, http.StatusInternalServerError, err.Error())
-		return
-	}
-	OKMsg(c, nil, "valid TR: "+req.TransportRequestNumber)
-}
-
 // CancelDrRequest is the request body for canceling a delivery request
 type CancelDrRequest struct {
 	DeliveryRequestID uint   `json:"deliveryRequestID"`

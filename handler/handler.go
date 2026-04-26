@@ -179,7 +179,6 @@ func (h *Handler) SetupRoutes(v1 *gin.RouterGroup, v2 *gin.RouterGroup, requireS
 		drOperate.POST("/deliveryRequest/deleteOps", h.HandleDeleteOps)
 		drOperate.POST("/deliveryRequest/insertOps", h.HandleInsertOps)
 		drOperate.PUT("/deliveryRequest/updateOps", h.HandleUpdateOps)
-		drOperate.POST("/deliveryRequest/checkTr", h.HandleCheckTr)
 		drOperate.POST("/deliveryRequest/requestApproval", h.HandleRequestApproval)
 		drOperate.POST("/deliveryRequest/approve", h.HandleApproveDeliveryRequest)
 		drOperate.POST("/deliveryRequest/cancel", h.HandleCancelDr)

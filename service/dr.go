@@ -362,11 +362,12 @@ func (s *Service) InsertTenantOps(ctx context.Context, drID uint, ops []db.Artif
 		return nil, fmt.Errorf("failed to insert artifact tenant operations: %s", err)
 	}
 
-	// Generate TRs synchronously for new source-tenant ops.
+	// Generate TRs synchronously for source-tenant ops that don't already have a TR.
+	// Ops with a pre-populated TR were already validated by TrExist above — skip CAS.
 	// All DB writes and SSE broadcast are handled inside GenerateTransportRequest.
 	newOpIDs := make([]uint, 0, len(ops))
 	for i := range ops {
-		if ops[i].TenantID == sourceTenant.ID {
+		if ops[i].TenantID == sourceTenant.ID && ops[i].TransportRequestNumber == "" {
 			newOpIDs = append(newOpIDs, ops[i].ID)
 		}
 	}
