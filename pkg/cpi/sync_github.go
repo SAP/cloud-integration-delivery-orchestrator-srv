@@ -138,7 +138,7 @@ func (c *CpiClient) PublishToGithubRelease(ctx context.Context, artifactId, arti
 	release, _, err := githubClient.Repositories.CreateRelease(ctx, "MaCo-MMT", Cpi_Base_Repo, &github.RepositoryRelease{
 		TagName:         github.String(fmt.Sprintf("%s-v%s", artifactId, artifactVersion)),
 		Name:            github.String(fmt.Sprintf("%s v%s", artifactId, artifactVersion)),
-		Body:            github.String(fmt.Sprintf("Artifact %s:%s\nUploaded by MMT DevOps", artifactId, artifactVersion)),
+		Body:            github.String(fmt.Sprintf("Artifact %s:%s\nUploaded by CPI Delivery", artifactId, artifactVersion)),
 		Draft:           github.Bool(false),
 		Prerelease:      github.Bool(false),
 		TargetCommitish: github.String(branch), // or the branch you want to target
