@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"mmt-delivery/db"
-	"mmt-delivery/pkg/env"
 	"mmt-delivery/pkg/lifecycle"
 	"strings"
 	"time"
@@ -227,9 +226,10 @@ func (s *Service) DeleteTenantOps(drID uint, opIDs []uint) error {
 		if err := s.DB.First(&op, id).Error; err != nil {
 			errOps[id] = fmt.Errorf("failed to find artifact tenant operation %d. Op may not exists: %s", id, err)
 		}
-		// check state before delete
-		if op.RequestState != lifecycle.RequestPending {
+		// check state before delete: allow PENDING and TR_FAILED (no TR created yet)
+		if op.RequestState != lifecycle.RequestPending && op.RequestState != lifecycle.RequestTrFailed {
 			errOps[id] = fmt.Errorf("cannot delete artifact tenant operation %d in state %s. Can disable delivery", id, op.RequestState)
+			continue
 		}
 		if err := s.DB.Delete(&db.ArtifactTenantOperation{}, id).Error; err != nil {
 			errOps[id] = fmt.Errorf("failed to delete artifact operation %d: %s", id, err)
@@ -362,9 +362,9 @@ func (s *Service) InsertTenantOps(ctx context.Context, drID uint, ops []db.Artif
 		return nil, fmt.Errorf("failed to insert artifact tenant operations: %s", err)
 	}
 
-	// Generate TRs synchronously for source-tenant ops that don't already have a TR.
+	// Fire-and-forget TR generation for source-tenant ops without a pre-populated TR.
 	// Ops with a pre-populated TR were already validated by TrExist above — skip CAS.
-	// All DB writes and SSE broadcast are handled inside GenerateTransportRequest.
+	// GenerateTransportRequest writes TR state and broadcasts via SSE when done.
 	newOpIDs := make([]uint, 0, len(ops))
 	for i := range ops {
 		if ops[i].TenantID == sourceTenant.ID && ops[i].TransportRequestNumber == "" {
@@ -372,17 +372,9 @@ func (s *Service) InsertTenantOps(ctx context.Context, drID uint, ops []db.Artif
 		}
 	}
 	if len(newOpIDs) > 0 {
-		if _, _, fatalErr := s.GenerateTransportRequest(context.WithoutCancel(ctx), sourceTenant.ID, drID, newOpIDs); fatalErr != nil {
-			return nil, fatalErr
-		}
-		// Reload all ops from DB to carry the final TR state.
-		allIDs := make([]uint, len(ops))
-		for i, op := range ops {
-			allIDs[i] = op.ID
-		}
-		if err := s.DB.Where("id IN ?", allIDs).Find(&ops).Error; err != nil {
-			env.Logger().Warnw("InsertTenantOps: failed to reload ops after TR generation", "error", err)
-		}
+		go func() {
+			s.GenerateTransportRequest(context.Background(), sourceTenant.ID, drID, newOpIDs)
+		}()
 	}
 
 	return ops, nil

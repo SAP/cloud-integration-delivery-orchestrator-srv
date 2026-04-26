@@ -10,21 +10,12 @@ import (
 
 	"mmt-delivery/consts"
 	"mmt-delivery/db"
-	"mmt-delivery/pkg/cas"
 	"mmt-delivery/pkg/cpi"
 	"mmt-delivery/pkg/lifecycle"
 
 	"golang.org/x/sync/errgroup"
 	"gorm.io/gorm"
 )
-
-// casArtifactEntry holds the minimal CAS-catalog fields needed for version compare.
-type casArtifactEntry struct {
-	TechID  string
-	Name    string
-	Version string
-	Type    string
-}
 
 // versionCompareCooldown is the minimum interval between triggers for the same rule.
 const versionCompareCooldown = 5 * time.Minute
@@ -137,27 +128,22 @@ func (s *Service) collectVersionSnapshot(rule db.DeliveryRule) {
 			})
 	}
 
-	// Get CAS client for source tenant and fetch package catalog
-	sourceCAS, err := s.CAS(ctx, rule.SourceTenantID)
+	// Get CPI client for source tenant and fetch package list via PIR
+	sourceTenant := rule.SourceTenant
+	sourceCPI, err := s.CPI(ctx, sourceTenant.PirApiDestinationName)
 	if err != nil {
-		completeWithError(fmt.Sprintf("failed to get source tenant CAS client: %s", err))
+		completeWithError(fmt.Sprintf("failed to get source tenant CPI client: %s", err))
 		return
 	}
-	catalog, err := sourceCAS.ListCloudIntegrationResources(ctx, nil)
+	packages, err := sourceCPI.GetPackages(ctx)
 	if err != nil {
-		completeWithError(fmt.Sprintf("failed to list content resources from source tenant: %s", err))
+		completeWithError(fmt.Sprintf("failed to list packages from source tenant via PIR: %s", err))
 		return
-	}
-	var packages []cas.CatalogContentResource
-	for _, r := range catalog {
-		if r.SubType == "package" {
-			packages = append(packages, r)
-		}
 	}
 
 	// Apply global included packages whitelist filter
 	if includeSet := s.loadIncludedPackageFilter(); includeSet != nil {
-		var filtered []cas.CatalogContentResource
+		var filtered []cpi.CPIPackage
 		for _, pkg := range packages {
 			if includeSet[pkg.ID] {
 				filtered = append(filtered, pkg)
@@ -254,7 +240,7 @@ func (s *Service) fetchRuntimeIndex(ctx context.Context, tenants []db.CpiTenant)
 
 // collectAllPackageSnapshots fetches design-time artifacts per package across all tenants in parallel.
 // Individual package failures are logged as warnings and skipped.
-func (s *Service) collectAllPackageSnapshots(ctx context.Context, packages []cas.CatalogContentResource, tenants []db.CpiTenant, runtimeIndex map[uint]map[string]cpi.RuntimeArtifact) []db.PackageSnapshot {
+func (s *Service) collectAllPackageSnapshots(ctx context.Context, packages []cpi.CPIPackage, tenants []db.CpiTenant, runtimeIndex map[uint]map[string]cpi.RuntimeArtifact) []db.PackageSnapshot {
 	var pkgSnapshots []db.PackageSnapshot
 	var pkgMu sync.Mutex
 	pkgGroup, pkgCtx := errgroup.WithContext(ctx)
@@ -289,10 +275,10 @@ func (s *Service) collectPackageSnapshot(
 	runtimeIndex map[uint]map[string]cpi.RuntimeArtifact,
 ) (db.PackageSnapshot, error) {
 
-	// For each tenant, fetch design-time artifacts for this package
+	// For each tenant, fetch design-time artifacts for this package via PIR
 	type tenantArtifacts struct {
 		tenantID  uint
-		artifacts []casArtifactEntry
+		artifacts []PackageArtifact
 		err       error
 	}
 
@@ -302,17 +288,16 @@ func (s *Service) collectPackageSnapshot(
 	for i, tenant := range tenants {
 		i, tenant := i, tenant
 		g.Go(func() error {
-			casClient, err := s.CAS(gctx, tenant.ID)
+			cpiClient, err := s.CPI(gctx, tenant.PirApiDestinationName)
 			if err != nil {
 				results[i] = tenantArtifacts{tenantID: tenant.ID, err: err}
 				return nil // error tolerance: don't fail entire group
 			}
-			tenantCatalog, err := casClient.ListCloudIntegrationResources(gctx, []string{packageID})
+			arts, err := GetPackageArtifacts(gctx, cpiClient, packageID)
 			if err != nil {
 				results[i] = tenantArtifacts{tenantID: tenant.ID, err: err}
 				return nil
 			}
-			arts := casArtifactsFromCatalog(tenantCatalog, packageID)
 			results[i] = tenantArtifacts{tenantID: tenant.ID, artifacts: arts}
 			return nil
 		})
@@ -330,7 +315,7 @@ func (s *Service) collectPackageSnapshot(
 				artifactMap[art.TechID] = &db.ArtifactSnapshot{
 					ID:       art.TechID,
 					Name:     art.Name,
-					Type:     string(art.Type),
+					Type:     art.Type,
 					Versions: make(map[uint]db.ArtifactVersionInfo),
 				}
 				artifactOrder = append(artifactOrder, art.TechID)
@@ -602,20 +587,14 @@ func (s *Service) AdhocVersionCompare(ctx context.Context, tenantIDs []uint) (*V
 	tenants = ordered
 	sourceTenantID := tenants[0].ID
 
-	// 3. Get source CAS client and fetch package catalog
-	sourceCAS, err := s.CAS(ctx, tenants[0].ID)
+	// 3. Get source CPI client and fetch package list via PIR
+	sourceCPI, err := s.CPI(ctx, tenants[0].PirApiDestinationName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get source CAS client: %w", err)
+		return nil, fmt.Errorf("failed to get source CPI client: %w", err)
 	}
-	catalog, err := sourceCAS.ListCloudIntegrationResources(ctx, nil)
+	packages, err := sourceCPI.GetPackages(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list content resources: %w", err)
-	}
-	var packages []cas.CatalogContentResource
-	for _, r := range catalog {
-		if r.SubType == "package" {
-			packages = append(packages, r)
-		}
+		return nil, fmt.Errorf("failed to list packages from source tenant via PIR: %w", err)
 	}
 	// No included packages filter for adhoc (compare all)
 
@@ -1252,25 +1231,6 @@ func computeMismatchCounts(data db.SnapshotData) (matched, mismatched, total int
 		}
 	}
 	return
-}
-
-// casArtifactsFromCatalog extracts artifacts for a specific package from a CAS catalog response.
-func casArtifactsFromCatalog(catalog []cas.CatalogContentResource, packageID string) []casArtifactEntry {
-	for _, res := range catalog {
-		if res.SubType == "package" && res.ID == packageID {
-			arts := make([]casArtifactEntry, 0, len(res.Components))
-			for _, comp := range res.Components {
-				arts = append(arts, casArtifactEntry{
-					TechID:  comp.Name,
-					Name:    comp.Name,
-					Version: comp.Version,
-					Type:    comp.Type,
-				})
-			}
-			return arts
-		}
-	}
-	return nil
 }
 
 // ParsePackageIDs splits a comma-separated string into a slice of package IDs.

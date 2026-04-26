@@ -178,22 +178,29 @@ func (s *Service) ensureCasGUIDs(ctx context.Context, casClient CasService, ops 
 // succeeded and failed are per-op results; callers must inspect both —
 // succeeded TRs are already persisted and must not be re-created.
 func (s *Service) GenerateTransportRequest(ctx context.Context, tenantID, deliveryRequestID uint, artifactOperationIDs []uint) (map[uint]*TransportRequest, map[uint]error, error) {
-	// ── 0. Reset TR_FAILED ops to TR_GENERATING so the frontend sees the in-progress state.
-	//    This covers both the InsertOps path and the manual retry (GenerateTR) path.
+	// ── 0. Set all target ops to TR_GENERATING unconditionally.
+	//    Covers both the InsertOps path (NOT_REQUESTED) and the manual retry path (TR_FAILED).
 	if dbErr := s.DB.WithContext(ctx).Model(&db.ArtifactTenantOperation{}).
-		Where("id IN ? AND request_state = ?", artifactOperationIDs, lifecycle.RequestTrFailed).
+		Where("id IN ?", artifactOperationIDs).
 		Updates(map[string]any{
 			"request_state": lifecycle.RequestTrGenerating,
 			"tr_error":      "",
 		}).Error; dbErr != nil {
-		env.Logger().Warnw("GenerateTransportRequest: failed to reset TR_FAILED ops to TR_GENERATING", "error", dbErr)
+		env.Logger().Warnw("GenerateTransportRequest: failed to set ops to TR_GENERATING", "error", dbErr)
 	}
 
-	// fatalf handles pre-op fatal errors: restores any ops we moved to TR_GENERATING back
-	// to TR_FAILED, broadcasts the state change via SSE, and returns the error to the caller.
+	// fatalf handles pre-op fatal errors: writes a DR-level Condition for observability,
+	// resets all TR_GENERATING ops to TR_FAILED, broadcasts via SSE, and returns the error.
 	fatalf := func(err error) (map[uint]*TransportRequest, map[uint]error, error) {
+		now := time.Now()
+		_ = s.BatchInsertConditions([]db.Condition{{
+			DeliveryRequestID: deliveryRequestID,
+			State:             lifecycle.CondError,
+			Message:           fmt.Sprintf("TR generation failed: %s", err.Error()),
+			Timestamp:         now,
+		}})
 		if dbErr := s.DB.WithContext(ctx).Model(&db.ArtifactTenantOperation{}).
-			Where("id IN ? AND request_state = ?", artifactOperationIDs, lifecycle.RequestTrGenerating).
+			Where("id IN ?", artifactOperationIDs).
 			Updates(map[string]any{
 				"request_state": lifecycle.RequestTrFailed,
 				"tr_error":      err.Error(),
@@ -214,6 +221,10 @@ func (s *Service) GenerateTransportRequest(ctx context.Context, tenantID, delive
 	var dr db.DeliveryRequest
 	if err := s.DB.WithContext(ctx).First(&dr, deliveryRequestID).Error; err != nil {
 		return fatalf(fmt.Errorf("GenerateTransportRequest: load delivery request %d: %w", deliveryRequestID, err))
+	}
+	requester := dr.CreatedBy
+	if email, err := s.GetUserEmail(ctx, dr.CreatedBy); err == nil {
+		requester = email
 	}
 
 	// ── 3. Load ArtifactTenantOperations ─────────────────────────────────────
@@ -253,7 +264,7 @@ func (s *Service) GenerateTransportRequest(ctx context.Context, tenantID, delive
 
 	for _, op := range ops {
 		go func() {
-			tr, err := s.exportOneTR(ctx, casClient, &tenant, &dr, op)
+			tr, err := s.exportOneTR(ctx, casClient, &tenant, &dr, op, requester)
 			resultCh <- opResult{opID: op.ID, tr: tr, err: err}
 		}()
 	}
@@ -307,6 +318,7 @@ func (s *Service) exportOneTR(
 	tenant *db.CpiTenant,
 	dr *db.DeliveryRequest,
 	op db.ArtifactTenantOperation,
+	requester string,
 ) (*TransportRequest, error) {
 	techID := op.ArtifactTechID
 	if techID == "" {
@@ -344,7 +356,7 @@ func (s *Service) exportOneTR(
 		},
 	}
 
-	description := fmt.Sprintf("DR#%d - %s %s - Requested by: %s", dr.ID, op.ArtifactName, op.ArtifactVersion, dr.CreatedBy)
+	description := fmt.Sprintf("DR#%d - %s %s - Requested by: %s", dr.ID, op.ArtifactName, op.ArtifactVersion, requester)
 
 	exportReq := cas.ExportRequest{
 		ID:                   fmt.Sprintf("%d", op.ID),

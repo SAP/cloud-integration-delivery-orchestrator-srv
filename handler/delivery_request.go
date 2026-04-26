@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -430,9 +431,10 @@ func (h *Handler) HandleGenTR(ctx *gin.Context) {
 	}
 	succeededOut := make(map[string]trResult, len(succeeded))
 	for opID, tr := range succeeded {
+		decodedURL, _ := url.PathUnescape(tr.URL)
 		succeededOut[fmt.Sprintf("%d", opID)] = trResult{
 			TransportRequestID:  tr.ID,
-			TransportRequestURL: tr.URL,
+			TransportRequestURL: decodedURL,
 		}
 	}
 	failedOut := make(map[string]string, len(failed))
