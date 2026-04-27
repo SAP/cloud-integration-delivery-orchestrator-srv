@@ -158,7 +158,7 @@ func (h *Handler) HandleCreateDRFromMismatch(ctx *gin.Context) {
 	}
 
 	user := service.UserID(ctx)
-	resp, err := h.svc.CreateDRFromMismatch(uint(id), req, user)
+	resp, err := h.svc.CreateDRFromMismatch(ctx.Request.Context(), uint(id), req, user)
 	if err != nil {
 		errMsg := err.Error()
 		switch {

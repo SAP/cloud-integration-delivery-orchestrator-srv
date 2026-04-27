@@ -120,6 +120,10 @@ func (s *Service) BatchDeployTenantOps(drID uint, opIDs []uint, targetTenantID u
 	// pre-check before deploy
 	for i := range ops {
 		op := &ops[i]
+		if op.DeployState == lifecycle.DeployDisabled {
+			// skip deploy silently — caller requested SkipDeploy for this artifact
+			continue
+		}
 		if op.DeployState != lifecycle.DeployQueued && op.DeployState != lifecycle.DeployFailed { // deploy should be QUEUED. i.e.,
 			errOps[op.ID] = fmt.Errorf("artifact operation %d is not in QUEUED/FAILED state for deploy, current state: %s", op.ID, op.DeployState)
 			continue

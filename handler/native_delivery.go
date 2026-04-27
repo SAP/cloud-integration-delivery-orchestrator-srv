@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"mmt-delivery/consts"
+
 	"mmt-delivery/db"
 
 	"github.com/gin-gonic/gin"
@@ -42,8 +44,8 @@ func (h *Handler) NativeDeliver(ctx *gin.Context) {
 	for _, artifact := range deliverRequest.Artifacts {
 		var packageID, modifiedBy, modifiedAt string
 
-		switch artifact.ArtifactType {
-		case "ScriptCollection":
+		switch consts.ArtifactType(artifact.ArtifactType) {
+		case consts.Artifact_Type_Sc:
 			scItem, err := srcClient.GetDesignTimeScriptCollection(ctx, artifact.ArtifactID, artifact.ArtifactVersion)
 			if err != nil {
 				Fail(ctx, 500, "Failed to get script collection:"+err.Error())
@@ -52,7 +54,7 @@ func (h *Handler) NativeDeliver(ctx *gin.Context) {
 			packageID = scItem.PackageID
 			modifiedBy, modifiedAt = scItem.ModifiedBy, scItem.ModifiedAt
 
-		case "IntegrationFlow":
+		case consts.Artifact_Type_Iflow:
 			iflowItem, err := srcClient.GetDesignTimeIflow(ctx, artifact.ArtifactID, artifact.ArtifactVersion)
 			if err != nil {
 				Fail(ctx, 500, "Failed to get integration flow:"+err.Error())

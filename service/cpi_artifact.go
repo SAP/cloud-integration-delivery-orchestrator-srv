@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	"mmt-delivery/consts"
 	"mmt-delivery/pkg/cpi"
 )
 
@@ -19,11 +20,6 @@ type PackageArtifact struct {
 	ModifiedAt  string
 	Type        string
 }
-
-const (
-	ArtifactTypeIFlow            = "Integration Flow"
-	ArtifactTypeScriptCollection = "Script Collection"
-)
 
 // GetPackageArtifacts returns all design-time artifacts (IFlows + ScriptCollections) for a package,
 // fetching both types in parallel.
@@ -60,7 +56,7 @@ func GetPackageArtifacts(ctx context.Context, client IntegrationService, package
 			Name: f.Name, Description: f.Description,
 			CreatedBy: f.CreatedBy, CreatedAt: f.CreatedAt,
 			ModifiedBy: f.ModifiedBy, ModifiedAt: f.ModifiedAt,
-			Type: ArtifactTypeIFlow,
+			Type: string(consts.Artifact_Type_Iflow),
 		})
 	}
 	for _, sc := range scs {
@@ -69,7 +65,7 @@ func GetPackageArtifacts(ctx context.Context, client IntegrationService, package
 			Name: sc.Name, Description: sc.Description,
 			CreatedBy: sc.CreatedBy, CreatedAt: sc.CreatedAt,
 			ModifiedBy: sc.ModifiedBy, ModifiedAt: sc.ModifiedAt,
-			Type: ArtifactTypeScriptCollection,
+			Type: string(consts.Artifact_Type_Sc),
 		})
 	}
 	return artifacts, nil

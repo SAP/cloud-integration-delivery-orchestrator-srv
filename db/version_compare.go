@@ -38,7 +38,7 @@ type PackageSnapshot struct {
 type ArtifactSnapshot struct {
 	ID       string                       `json:"id"`
 	Name     string                       `json:"name"`
-	Type     string                       `json:"type"`     // "Integration Flow" | "Script Collection"
+	Type     string                       `json:"type"`     // consts.Artifact_Type_Iflow | consts.Artifact_Type_Sc
 	Versions map[uint]ArtifactVersionInfo `json:"versions"` // key = tenant ID (includes source tenant)
 }
 

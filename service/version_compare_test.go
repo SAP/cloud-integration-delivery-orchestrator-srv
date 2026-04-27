@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -250,7 +251,7 @@ func setupQueryTestData(t *testing.T) (ruleID uint, sourceTenantID uint, compare
 					PackageID: "pkg1",
 					Artifacts: []db.ArtifactSnapshot{
 						{
-							ID: "iflow1", Name: "IFlow One", Type: "Integration Flow",
+							ID: "iflow1", Name: "IFlow One", Type: string(consts.Artifact_Type_Iflow),
 							Versions: map[uint]db.ArtifactVersionInfo{
 								source.ID:  {DesignTimeVersion: "1.0.5", RuntimeVersion: "1.0.5", RuntimeStatus: "STARTED"},
 								target1.ID: {DesignTimeVersion: "1.0.5", RuntimeVersion: "1.0.5", RuntimeStatus: "STARTED"},
@@ -258,7 +259,7 @@ func setupQueryTestData(t *testing.T) (ruleID uint, sourceTenantID uint, compare
 							},
 						},
 						{
-							ID: "sc1", Name: "Script One", Type: "Script Collection",
+							ID: "sc1", Name: "Script One", Type: string(consts.Artifact_Type_Sc),
 							Versions: map[uint]db.ArtifactVersionInfo{
 								source.ID:  {DesignTimeVersion: "2.0.0", RuntimeVersion: "2.0.0", RuntimeStatus: "STARTED"},
 								target1.ID: {DesignTimeVersion: "2.0.0", RuntimeVersion: "2.0.0", RuntimeStatus: "STARTED"},
@@ -271,7 +272,7 @@ func setupQueryTestData(t *testing.T) (ruleID uint, sourceTenantID uint, compare
 					PackageID: "pkg2",
 					Artifacts: []db.ArtifactSnapshot{
 						{
-							ID: "iflow2", Name: "IFlow Two", Type: "Integration Flow",
+							ID: "iflow2", Name: "IFlow Two", Type: string(consts.Artifact_Type_Iflow),
 							Versions: map[uint]db.ArtifactVersionInfo{
 								source.ID:  {DesignTimeVersion: "active", RuntimeVersion: "3.0.0", RuntimeStatus: "STARTED"},
 								target1.ID: {DesignTimeVersion: "3.0.0", RuntimeVersion: "3.0.0", RuntimeStatus: "STARTED"},
@@ -938,7 +939,7 @@ func TestCollectVersionSnapshot_PartialTenantFailure(t *testing.T) {
 		source.PirApiDestinationName: {
 			packages: []cpi.CPIPackage{{ID: "pkg1"}},
 			iflows: map[string][]cpi.IflowItem{
-				"pkg1": {{ArtifactCommonItem: cpi.ArtifactCommonItem{ID: "iflow1", Name: "IFlow", Version: "1.0", PackageID: "pkg1"}}},
+				"pkg1": {{ArtifactCommonItem: cpi.ArtifactCommonItem{ID: "iflow1", Name: "Integration Flow", Version: "1.0", PackageID: "pkg1"}}},
 			},
 			runtimeArts: []cpi.RuntimeArtifact{{ID: "iflow1", Version: "1.0", Status: consts.Artifact_Rt_Started}},
 		},
@@ -1439,7 +1440,7 @@ func setupPreviewTestData(t *testing.T) (ruleID uint, snapshotCompletedAt time.T
 					Artifacts: []db.ArtifactSnapshot{
 						{
 							// Includable: version matches pattern, not draft, not duplicate
-							ID: "iflow-ok", Name: "IFlow OK", Type: "Integration Flow",
+							ID: "iflow-ok", Name: "IFlow OK", Type: string(consts.Artifact_Type_Iflow),
 							Versions: map[uint]db.ArtifactVersionInfo{
 								source.ID: {DesignTimeVersion: "1.0.5"},
 								target.ID: {DesignTimeVersion: "1.0.4"}, // mismatch
@@ -1447,7 +1448,7 @@ func setupPreviewTestData(t *testing.T) (ruleID uint, snapshotCompletedAt time.T
 						},
 						{
 							// Draft: source has "active" DT version
-							ID: "iflow-draft", Name: "IFlow Draft", Type: "Integration Flow",
+							ID: "iflow-draft", Name: "IFlow Draft", Type: string(consts.Artifact_Type_Iflow),
 							Versions: map[uint]db.ArtifactVersionInfo{
 								source.ID: {DesignTimeVersion: "active"},
 								target.ID: {DesignTimeVersion: "1.0.0"},
@@ -1455,7 +1456,7 @@ func setupPreviewTestData(t *testing.T) (ruleID uint, snapshotCompletedAt time.T
 						},
 						{
 							// VersionPattern mismatch: version 2.1.0 doesn't match 1.0.*
-							ID: "iflow-badver", Name: "IFlow BadVer", Type: "Integration Flow",
+							ID: "iflow-badver", Name: "IFlow BadVer", Type: string(consts.Artifact_Type_Iflow),
 							Versions: map[uint]db.ArtifactVersionInfo{
 								source.ID: {DesignTimeVersion: "2.1.0"},
 								target.ID: {DesignTimeVersion: "1.0.0"},
@@ -1463,7 +1464,7 @@ func setupPreviewTestData(t *testing.T) (ruleID uint, snapshotCompletedAt time.T
 						},
 						{
 							// Fully matched — should NOT appear in preview
-							ID: "iflow-matched", Name: "IFlow Matched", Type: "Integration Flow",
+							ID: "iflow-matched", Name: "IFlow Matched", Type: string(consts.Artifact_Type_Iflow),
 							Versions: map[uint]db.ArtifactVersionInfo{
 								source.ID: {DesignTimeVersion: "1.0.5"},
 								target.ID: {DesignTimeVersion: "1.0.5"}, // no mismatch
@@ -1476,7 +1477,7 @@ func setupPreviewTestData(t *testing.T) (ruleID uint, snapshotCompletedAt time.T
 					Artifacts: []db.ArtifactSnapshot{
 						{
 							// Target absent from snapshot → mismatch (Preview treats missing as mismatch)
-							ID: "iflow-missing-tgt", Name: "IFlow Missing Target", Type: "Integration Flow",
+							ID: "iflow-missing-tgt", Name: "IFlow Missing Target", Type: string(consts.Artifact_Type_Iflow),
 							Versions: map[uint]db.ArtifactVersionInfo{
 								source.ID: {DesignTimeVersion: "1.0.1"},
 								// target not present in map
@@ -1598,7 +1599,7 @@ func TestPreviewDR_DuplicateDetection(t *testing.T) {
 					PackageID: "pkg1",
 					Artifacts: []db.ArtifactSnapshot{
 						{
-							ID: "iflow-dup", Name: "IFlow Dup", Type: "Integration Flow",
+							ID: "iflow-dup", Name: "IFlow Dup", Type: string(consts.Artifact_Type_Iflow),
 							Versions: map[uint]db.ArtifactVersionInfo{
 								source.ID: {DesignTimeVersion: "1.0.5"},
 								target.ID: {DesignTimeVersion: "1.0.4"},
@@ -1686,7 +1687,7 @@ func TestPreviewDR_NoMismatch(t *testing.T) {
 					PackageID: "pkg1",
 					Artifacts: []db.ArtifactSnapshot{
 						{
-							ID: "iflow-all-match", Name: "All Match", Type: "Integration Flow",
+							ID: "iflow-all-match", Name: "All Match", Type: string(consts.Artifact_Type_Iflow),
 							Versions: map[uint]db.ArtifactVersionInfo{
 								source.ID: {DesignTimeVersion: "1.0.0"},
 								target.ID: {DesignTimeVersion: "1.0.0"},
@@ -1755,14 +1756,14 @@ func setupCreateTestData(t *testing.T) (ruleID uint, snapshotID uint, snapshotCo
 					PackageID: "pkg1",
 					Artifacts: []db.ArtifactSnapshot{
 						{
-							ID: "cre-iflow-1", Name: "Create IFlow 1", Type: "Integration Flow",
+							ID: "cre-iflow-1", Name: "Create IFlow 1", Type: string(consts.Artifact_Type_Iflow),
 							Versions: map[uint]db.ArtifactVersionInfo{
 								source.ID: {DesignTimeVersion: "1.0.5"},
 								target.ID: {DesignTimeVersion: "1.0.4"},
 							},
 						},
 						{
-							ID: "cre-iflow-2", Name: "Create IFlow 2", Type: "Integration Flow",
+							ID: "cre-iflow-2", Name: "Create IFlow 2", Type: string(consts.Artifact_Type_Iflow),
 							Versions: map[uint]db.ArtifactVersionInfo{
 								source.ID: {DesignTimeVersion: "1.0.3"},
 								target.ID: {DesignTimeVersion: "1.0.2"},
@@ -1795,7 +1796,7 @@ func TestCreateDR_Basic(t *testing.T) {
 		},
 	}
 
-	resp, err := svc.CreateDRFromMismatch(ruleID, req, "test-user")
+	resp, err := svc.CreateDRFromMismatch(context.Background(), ruleID, req, "test-user")
 	if err != nil {
 		t.Fatalf("CreateDRFromMismatch failed: %v", err)
 	}
@@ -1843,7 +1844,7 @@ func TestCreateDR_SnapshotStale(t *testing.T) {
 		},
 	}
 
-	_, err := svc.CreateDRFromMismatch(ruleID, req, "test-user")
+	_, err := svc.CreateDRFromMismatch(context.Background(), ruleID, req, "test-user")
 	if err == nil {
 		t.Fatal("CreateDRFromMismatch with stale snapshot should fail")
 	}
@@ -1860,7 +1861,7 @@ func TestCreateDR_EmptyArtifactKeys(t *testing.T) {
 		ArtifactKeys:        []ArtifactKey{}, // empty
 	}
 
-	_, err := svc.CreateDRFromMismatch(ruleID, req, "test-user")
+	_, err := svc.CreateDRFromMismatch(context.Background(), ruleID, req, "test-user")
 	if err == nil {
 		t.Fatal("CreateDRFromMismatch with empty artifactKeys should fail")
 	}
@@ -1891,7 +1892,7 @@ func TestCreateDR_JiraRequired(t *testing.T) {
 					PackageID: "pkg1",
 					Artifacts: []db.ArtifactSnapshot{
 						{
-							ID: "jira-iflow", Name: "Jira IFlow", Type: "Integration Flow",
+							ID: "jira-iflow", Name: "Jira IFlow", Type: string(consts.Artifact_Type_Iflow),
 							Versions: map[uint]db.ArtifactVersionInfo{
 								source.ID: {DesignTimeVersion: "1.0.1"},
 								target.ID: {DesignTimeVersion: "1.0.0"},
@@ -1912,7 +1913,7 @@ func TestCreateDR_JiraRequired(t *testing.T) {
 		JiraLink:            "",
 		ArtifactKeys:        []ArtifactKey{{ArtifactID: "jira-iflow", PackageID: "pkg1"}},
 	}
-	_, err := svc.CreateDRFromMismatch(rule.ID, req, "test-user")
+	_, err := svc.CreateDRFromMismatch(context.Background(), rule.ID, req, "test-user")
 	if err == nil {
 		t.Fatal("CreateDRFromMismatch without JIRA when required should fail")
 	}
@@ -1924,7 +1925,7 @@ func TestCreateDR_JiraRequired(t *testing.T) {
 	svc2 := newTestService(factory)
 
 	req.JiraLink = "https://jira.example.com/PROJ-123"
-	resp, err := svc2.CreateDRFromMismatch(rule.ID, req, "test-user")
+	resp, err := svc2.CreateDRFromMismatch(context.Background(), rule.ID, req, "test-user")
 	if err != nil {
 		t.Fatalf("CreateDRFromMismatch with JIRA should succeed: %v", err)
 	}
@@ -1950,7 +1951,7 @@ func TestCreateDR_SnapshotFKSet(t *testing.T) {
 		},
 	}
 
-	resp, err := svc.CreateDRFromMismatch(ruleID, req, "test-user")
+	resp, err := svc.CreateDRFromMismatch(context.Background(), ruleID, req, "test-user")
 	if err != nil {
 		t.Fatalf("CreateDRFromMismatch failed: %v", err)
 	}
@@ -1993,7 +1994,7 @@ func TestCreateDR_DuplicateIncluded(t *testing.T) {
 					PackageID: "pkg1",
 					Artifacts: []db.ArtifactSnapshot{
 						{
-							ID: "dup-allowed-iflow", Name: "Dup Allowed", Type: "Integration Flow",
+							ID: "dup-allowed-iflow", Name: "Dup Allowed", Type: string(consts.Artifact_Type_Iflow),
 							Versions: map[uint]db.ArtifactVersionInfo{
 								source.ID: {DesignTimeVersion: "1.0.7"},
 								target.ID: {DesignTimeVersion: "1.0.6"},
@@ -2048,7 +2049,7 @@ func TestCreateDR_DuplicateIncluded(t *testing.T) {
 		SnapshotCompletedAt: now,
 		ArtifactKeys:        []ArtifactKey{{ArtifactID: "dup-allowed-iflow", PackageID: "pkg1"}},
 	}
-	resp, err := svc2.CreateDRFromMismatch(rule.ID, req, "test-user")
+	resp, err := svc2.CreateDRFromMismatch(context.Background(), rule.ID, req, "test-user")
 	if err != nil {
 		t.Fatalf("CreateDRFromMismatch with duplicate selection should succeed: %v", err)
 	}
@@ -2092,7 +2093,7 @@ func TestCreateDR_VersionDowngradeSkip(t *testing.T) {
 					Artifacts: []db.ArtifactSnapshot{
 						{
 							// This artifact has source version LOWER than target → downgrade
-							ID: "dg-iflow", Name: "Downgrade IFlow", Type: "Integration Flow",
+							ID: "dg-iflow", Name: "Downgrade IFlow", Type: string(consts.Artifact_Type_Iflow),
 							Versions: map[uint]db.ArtifactVersionInfo{
 								source.ID: {DesignTimeVersion: "1.0.1"},
 								target.ID: {DesignTimeVersion: "1.0.5"}, // target is higher
@@ -2100,7 +2101,7 @@ func TestCreateDR_VersionDowngradeSkip(t *testing.T) {
 						},
 						{
 							// This artifact is fine (source higher than target)
-							ID: "ok-iflow", Name: "OK IFlow", Type: "Integration Flow",
+							ID: "ok-iflow", Name: "OK IFlow", Type: string(consts.Artifact_Type_Iflow),
 							Versions: map[uint]db.ArtifactVersionInfo{
 								source.ID: {DesignTimeVersion: "1.0.9"},
 								target.ID: {DesignTimeVersion: "1.0.8"},
@@ -2140,21 +2141,17 @@ func TestCreateDR_VersionDowngradeSkip(t *testing.T) {
 		},
 	}
 
-	resp, err := svc.CreateDRFromMismatch(rule.ID, req, "test-user")
-	if err != nil {
-		t.Fatalf("CreateDRFromMismatch should succeed with partial errors: %v", err)
+	resp, err := svc.CreateDRFromMismatch(context.Background(), rule.ID, req, "test-user")
+	// InsertTenantOps strict check: if any selected artifact would downgrade, the whole batch is rejected.
+	// The caller must remove the downgrade artifact and retry — no partial creation.
+	if err == nil {
+		t.Fatal("CreateDRFromMismatch should fail when a selected artifact would cause a downgrade")
 	}
-	tc.trackDR(resp.DeliveryRequest.ID)
-
-	// dg-iflow should be skipped (downgrade), ok-iflow should succeed
-	if resp.Summary.Created != 1 {
-		t.Errorf("Created: got %d, want 1", resp.Summary.Created)
+	if resp.DeliveryRequest.ID != 0 {
+		tc.trackDR(resp.DeliveryRequest.ID)
 	}
-	if len(resp.Summary.Errors) != 1 {
-		t.Errorf("Errors: got %d, want 1", len(resp.Summary.Errors))
-	}
-	if len(resp.Summary.Errors) > 0 && resp.Summary.Errors[0].ArtifactID != "dg-iflow" {
-		t.Errorf("Error artifact: got %q, want %q", resp.Summary.Errors[0].ArtifactID, "dg-iflow")
+	if !strings.Contains(err.Error(), "downgrade") {
+		t.Errorf("error should mention downgrade, got: %v", err)
 	}
 }
 
@@ -2175,7 +2172,7 @@ func TestCreateDR_AutoGeneratedName(t *testing.T) {
 		},
 	}
 
-	resp, err := svc.CreateDRFromMismatch(ruleID, req, "test-user")
+	resp, err := svc.CreateDRFromMismatch(context.Background(), ruleID, req, "test-user")
 	if err != nil {
 		t.Fatalf("CreateDRFromMismatch failed: %v", err)
 	}
@@ -2208,7 +2205,7 @@ func TestCreateDR_SkipDeploy(t *testing.T) {
 		},
 	}
 
-	resp, err := svc.CreateDRFromMismatch(ruleID, req, "test-user")
+	resp, err := svc.CreateDRFromMismatch(context.Background(), ruleID, req, "test-user")
 	if err != nil {
 		t.Fatalf("CreateDRFromMismatch with SkipDeploy failed: %v", err)
 	}

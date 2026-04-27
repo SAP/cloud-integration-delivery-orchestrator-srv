@@ -1011,7 +1011,7 @@ func (s *Service) PreviewDRFromMismatch(ruleID uint) (PreviewDRResponse, error) 
 //
 // It validates snapshot staleness, runs version downgrade checks (with tolerance),
 // and only creates the DR if at least one artifact passes all checks.
-func (s *Service) CreateDRFromMismatch(ruleID uint, req CreateDRFromMismatchRequest, user string) (CreateDRFromMismatchResponse, error) {
+func (s *Service) CreateDRFromMismatch(ctx context.Context, ruleID uint, req CreateDRFromMismatchRequest, user string) (CreateDRFromMismatchResponse, error) {
 	// 1. Load delivery rule
 	rule, err := s.GetDeliveryRuleWithAcc(ruleID)
 	if err != nil {
@@ -1103,48 +1103,17 @@ func (s *Service) CreateDRFromMismatch(ruleID uint, req CreateDRFromMismatchRequ
 
 		// Build the operation struct
 		op := db.ArtifactTenantOperation{
-			TenantID:        rule.SourceTenantID,
-			ArtifactTechID:  art.ID,
-			ArtifactVersion: sourceVI.DesignTimeVersion,
-			ArtifactName:    art.Name,
-			ArtifactType:    consts.ArtifactType(art.Type),
-			PackageID:       item.pkg,
-			TransportRequestNumber: "", // empty — to be filled later
+			TenantID:               rule.SourceTenantID,
+			ArtifactTechID:         art.ID,
+			ArtifactVersion:        sourceVI.DesignTimeVersion,
+			ArtifactName:           art.Name,
+			ArtifactType:           consts.ArtifactType(art.Type),
+			PackageID:              item.pkg,
+			TransportRequestNumber: "", // empty — to be filled later by TR generation
+			SkipDeploy:             item.skipDeploy,
 		}
 
 		// Artifact tech ID comes from the version snapshot (already correct) — no PIR lookup needed.
-
-		// Version downgrade check (tolerant — skip this artifact, don't block others)
-		downgradeErr := false
-		for i := range rule.IncludedTenants {
-			tenant := &rule.IncludedTenants[i]
-			if tenant.ID == rule.SourceTenantID {
-				continue
-			}
-			if err := s.checkVersionDowngradeInTenant(&op, tenant); err != nil {
-				skipErrors = append(skipErrors, MismatchSkipError{
-					ArtifactID: art.ID,
-					PackageID:  item.pkg,
-					Reason:     err.Error(),
-				})
-				downgradeErr = true
-				break
-			}
-		}
-		if downgradeErr {
-			continue
-		}
-
-		// Set initial lifecycle states
-		op.SkipDeploy = item.skipDeploy
-		op.ImportState = lifecycle.ImportNotStarted
-		op.RequestState = lifecycle.RequestPending
-		op.CreatedBy = user
-		if op.SkipDeploy {
-			op.DeployState = lifecycle.DeployDisabled
-		} else {
-			op.DeployState = lifecycle.DeployNotStarted
-		}
 
 		validOps = append(validOps, op)
 	}
@@ -1171,30 +1140,36 @@ func (s *Service) CreateDRFromMismatch(ruleID uint, req CreateDRFromMismatchRequ
 		CreatedBy:                user,
 		UpdatedBy:                user,
 	}
-	if err := s.DB.Create(&dr).Error; err != nil {
+	if err := s.CreateDeliveryRequest(&dr); err != nil {
 		return CreateDRFromMismatchResponse{}, fmt.Errorf("failed to create delivery request: %w", err)
 	}
 
-	// 11. Set DeliveryRequestID on all ops and batch create
-	for i := range validOps {
-		validOps[i].DeliveryRequestID = dr.ID
-	}
-	if err := s.DB.Create(&validOps).Error; err != nil {
+	// 11. Insert ops via InsertTenantOps — handles lifecycle states, DeliveryRuleCheck (incl. downgrade), and fires TR generation goroutine
+	createdOps, err := s.InsertTenantOps(ctx, dr.ID, validOps, user)
+	if err != nil {
 		return CreateDRFromMismatchResponse{}, fmt.Errorf("failed to create artifact tenant operations: %w", err)
 	}
 
-	// 12. Reload DR with all associations for the response
-	drLoaded, err := s.QueryDrWithAssociations(dr.ID)
-	if err != nil {
-		return CreateDRFromMismatchResponse{}, fmt.Errorf("failed to reload created delivery request: %w", err)
+	// 12. Build response from in-memory data — avoids a DB reload that would race with the TR generation goroutine
+	var sourceTenant db.CpiTenant
+	for _, t := range rule.IncludedTenants {
+		if t.ID == rule.SourceTenantID {
+			sourceTenant = t
+			break
+		}
 	}
+	for i := range createdOps {
+		createdOps[i].Tenant = sourceTenant
+	}
+	dr.ArtifactTenantOperations = createdOps
+	dr.SourceTenant = sourceTenant
+	dr.DeliveryRule = rule
 
-	s.publishCounts()
 	return CreateDRFromMismatchResponse{
-		DeliveryRequest: *drLoaded,
+		DeliveryRequest: dr,
 		Summary: CreateDRFromMismatchSummary{
 			Requested: len(req.ArtifactKeys),
-			Created:   len(validOps),
+			Created:   len(createdOps),
 			Errors:    skipErrors,
 		},
 	}, nil

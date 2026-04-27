@@ -66,7 +66,7 @@ type CatalogContentResource struct {
 type CatalogComponent struct {
 	ID         string `json:"id"`      // artifact GUID
 	Name       string `json:"name"`    // artifact display name — matches Artifact.Name in our DB
-	Type       string `json:"type"`    // "IFlow" | "ScriptCollection" | "OData Service" | "IntegrationAdapter" | …
+	Type       string `json:"type"`    // "Integration Flow" | "Script Collection" | "OData Service" | "Integration Adapter" | …
 	Version    string `json:"version"` // current version in CAS
 	Exportable bool   `json:"exportable"`
 }
@@ -115,7 +115,7 @@ type MtaDescriptorSpecific struct {
 type ContentResourceComponent struct {
 	ID                   string `json:"id"`                   // artifact GUID from catalog
 	Name                 string `json:"name"`                 // artifact tech ID / display name
-	Type                 string `json:"type"`                 // "IFlow" | "ScriptCollection" | …
+	Type                 string `json:"type"`                 // "Integration Flow" | "Script Collection" | …
 	Version              string `json:"version"`              // version from ArtifactTenantOperation
 	Selected             bool   `json:"selected"`             // fixed true
 	Enabled              bool   `json:"enabled"`              // fixed true

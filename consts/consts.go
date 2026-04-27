@@ -36,10 +36,10 @@ const (
 )
 
 const (
-	Artifact_Type_Iflow ArtifactType = "IFlow"
-	Artifact_Type_Sc    ArtifactType = "ScriptCollection"
-	Artifact_Type_Odata ArtifactType = "OData Service"
-	Artifact_Type_Adapter ArtifactType = "IntegrationAdapter"
+	Artifact_Type_Iflow   ArtifactType = "Integration Flow"
+	Artifact_Type_Sc      ArtifactType = "Script Collection"
+	Artifact_Type_Odata   ArtifactType = "OData Service"
+	Artifact_Type_Adapter ArtifactType = "Integration Adapter"
 )
 
 const (
@@ -54,9 +54,9 @@ const (
 
 // HTTP request timeout constants — used by pkg/tms, pkg/cpi, pkg/xsuaa
 const (
-	DefaultRequestTimeout = 30 * time.Second // GET 请求（轻量）
+	DefaultRequestTimeout = 30 * time.Second  // GET 请求（轻量）
 	LongRequestTimeout    = 120 * time.Second // GET 请求（大数据量，如日志、文件下载）
-	ImportTimeout         = 60 * time.Second // POST/DELETE 请求（Import、Deploy、Upload、Undeploy）
+	ImportTimeout         = 60 * time.Second  // POST/DELETE 请求（Import、Deploy、Upload、Undeploy）
 )
 
 // --- Version Compare ---

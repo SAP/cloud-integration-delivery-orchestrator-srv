@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"mmt-delivery/consts"
 	"mmt-delivery/db"
 	"mmt-delivery/pkg/cas"
 	"mmt-delivery/pkg/lifecycle"
@@ -61,7 +62,7 @@ func makeCatalog(pkgID, artifactDisplayName string) []cas.CatalogContentResource
 				{
 					ID:         artifactDisplayName + "-comp-guid",
 					Name:       artifactDisplayName,
-					Type:       "IFlow",
+					Type:       string(consts.Artifact_Type_Iflow),
 					Version:    "1.0.0",
 					Exportable: true,
 				},

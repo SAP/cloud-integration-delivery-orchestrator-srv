@@ -92,7 +92,7 @@ func TestVersionCompareSnapshot_JSONRoundTrip(t *testing.T) {
 					{
 						ID:   "iflow_001",
 						Name: "My IFlow",
-						Type: "Integration Flow",
+						Type: string(consts.Artifact_Type_Iflow),
 						Versions: map[uint]ArtifactVersionInfo{
 							1: {
 								DesignTimeVersion: "1.0.5",
@@ -169,8 +169,8 @@ func TestVersionCompareSnapshot_JSONRoundTrip(t *testing.T) {
 	if art.Name != "My IFlow" {
 		t.Errorf("Artifact.Name: got %q, want %q", art.Name, "My IFlow")
 	}
-	if art.Type != "Integration Flow" {
-		t.Errorf("Artifact.Type: got %q, want %q", art.Type, "Integration Flow")
+	if art.Type != string(consts.Artifact_Type_Iflow) {
+		t.Errorf("Artifact.Type: got %q, want %q", art.Type, string(consts.Artifact_Type_Iflow))
 	}
 	if len(art.Versions) != 3 {
 		t.Fatalf("Artifact.Versions length: got %d, want 3", len(art.Versions))
@@ -457,7 +457,7 @@ func TestVersionCompareSnapshot_DataOverwriteOnRetrigger(t *testing.T) {
 					{
 						ID:   "art1",
 						Name: "Artifact 1",
-						Type: "Integration Flow",
+						Type: string(consts.Artifact_Type_Iflow),
 						Versions: map[uint]ArtifactVersionInfo{
 							1: {DesignTimeVersion: "1.0.0", RuntimeVersion: "1.0.0", RuntimeStatus: "STARTED"},
 						},
@@ -507,7 +507,7 @@ func TestVersionCompareSnapshot_DataOverwriteOnRetrigger(t *testing.T) {
 					{
 						ID:   "art2",
 						Name: "Artifact 2",
-						Type: "Script Collection",
+						Type: string(consts.Artifact_Type_Sc),
 						Versions: map[uint]ArtifactVersionInfo{
 							1: {DesignTimeVersion: "2.0.0", RuntimeVersion: "2.0.0", RuntimeStatus: "STARTED"},
 							2: {DesignTimeVersion: "1.9.0", RuntimeVersion: "1.9.0", RuntimeStatus: "ERROR"},
@@ -551,8 +551,8 @@ func TestVersionCompareSnapshot_DataOverwriteOnRetrigger(t *testing.T) {
 	if art.ID != "art2" {
 		t.Errorf("Artifact.ID: got %q, want %q", art.ID, "art2")
 	}
-	if art.Type != "Script Collection" {
-		t.Errorf("Artifact.Type: got %q, want %q", art.Type, "Script Collection")
+	if art.Type != string(consts.Artifact_Type_Sc) {
+		t.Errorf("Artifact.Type: got %q, want %q", art.Type, string(consts.Artifact_Type_Sc))
 	}
 	v2, ok := art.Versions[2]
 	if !ok {
@@ -584,7 +584,7 @@ func TestVersionCompareSnapshot_LargePayload(t *testing.T) {
 			artifacts[a] = ArtifactSnapshot{
 				ID:       fmt.Sprintf("art_%d_%d", p, a),
 				Name:     fmt.Sprintf("Artifact %d-%d", p, a),
-				Type:     "Integration Flow",
+				Type:     string(consts.Artifact_Type_Iflow),
 				Versions: versions,
 			}
 		}
