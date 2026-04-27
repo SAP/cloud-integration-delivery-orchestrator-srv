@@ -323,6 +323,8 @@ func (s *Service) collectPackageSnapshot(
 
 			versionInfo := db.ArtifactVersionInfo{
 				DesignTimeVersion: art.Version,
+				ModifiedBy:        art.ModifiedBy,
+				ModifiedAt:        art.ModifiedAt,
 			}
 
 			// Enrich with runtime info
