@@ -328,10 +328,13 @@ func (c *CasClient) GetActivities(ctx context.Context, requestor string, top int
 	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
 	defer cancel()
 
-	fullURL := fmt.Sprintf("%s/v1/activities?filters=requestor eq '%s'", c.ApiURL, requestor)
+	fullURL := fmt.Sprintf("%s/v1/activities", c.ApiURL)
+	params := url.Values{}
+	params.Set("filters", fmt.Sprintf("requestor eq '%s'", requestor))
 	if top > 0 {
-		fullURL = fmt.Sprintf("%s&top=%d", fullURL, top)
+		params.Set("top", fmt.Sprintf("%d", top))
 	}
+	fullURL += "?" + params.Encode()
 	req := &env.HttpRequest{ApiURL: fullURL, Method: http.MethodGet}
 
 	body, statusCode, err := c.Do(childCtx, req)
