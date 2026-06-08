@@ -19,7 +19,6 @@ func TestTransitionLifecycle_ValidTransitions(t *testing.T) {
 	}{
 		// DRAFT edges
 		{"draft→configured via cf_identity_configured", lifecycle.TenantDraft, EventCfIdentityConfigured, lifecycle.TenantConfigured},
-		{"draft→readying via bootstrap_started", lifecycle.TenantDraft, EventBootstrapStarted, lifecycle.TenantReadying},
 
 		// CONFIGURED edges
 		{"configured→readying via bootstrap_started", lifecycle.TenantConfigured, EventBootstrapStarted, lifecycle.TenantReadying},
@@ -75,6 +74,9 @@ func TestTransitionLifecycle_InvalidTransitions(t *testing.T) {
 		from  lifecycle.TenantLifecycleState
 		event LifecycleEvent
 	}{
+		// DRAFT cannot skip CF identity validation
+		{"draft rejects bootstrap_started", lifecycle.TenantDraft, EventBootstrapStarted},
+
 		// DRAFT cannot receive bootstrap outcome events
 		{"draft rejects bootstrap_finished", lifecycle.TenantDraft, EventBootstrapFinished},
 		{"draft rejects bootstrap_failed", lifecycle.TenantDraft, EventBootstrapFailed},
@@ -103,9 +105,9 @@ func TestTransitionLifecycle_InvalidTransitions(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			// Use a unique CfOrg per case to avoid the composite unique index on (cf_api_endpoint, cf_org).
 			tenant := db.CpiTenant{
-				Name:          c.name,
+				Name:           c.name,
 				LifecycleState: c.from,
-				CfOrg:         fmt.Sprintf("inv-org-%d", i),
+				CfOrg:          fmt.Sprintf("inv-org-%d", i),
 			}
 			if err := testDB.Create(&tenant).Error; err != nil {
 				t.Fatalf("seed tenant: %v", err)

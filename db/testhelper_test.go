@@ -16,6 +16,7 @@ var testDB *gorm.DB
 
 func TestMain(m *testing.M) {
 	var dialector gorm.Dialector
+	usingSQLite := false
 
 	if uri := os.Getenv("LOCAL_POSTGRES_URI"); uri != "" {
 		conn, err := sql.Open("pgx", uri)
@@ -26,7 +27,8 @@ func TestMain(m *testing.M) {
 		dialector = postgres.New(postgres.Config{Conn: conn})
 		fmt.Fprintln(os.Stderr, "INFO: using PostgreSQL for tests")
 	} else {
-		dialector = sqlite.Open("file::memory:?cache=shared")
+		usingSQLite = true
+		dialector = sqlite.Open("file::memory:?cache=shared&_busy_timeout=5000")
 		fmt.Fprintln(os.Stderr, "INFO: using SQLite (in-memory) for tests")
 	}
 
@@ -37,6 +39,19 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		fmt.Printf("FATAL: failed to initialize gorm: %v\n", err)
 		os.Exit(1)
+	}
+
+	sqlDB, err := testDB.DB()
+	if err != nil {
+		fmt.Printf("FATAL: failed to get sql.DB: %v\n", err)
+		os.Exit(1)
+	}
+	if usingSQLite {
+		sqlDB.SetMaxOpenConns(1)
+		if _, err := sqlDB.Exec("PRAGMA busy_timeout = 5000"); err != nil {
+			fmt.Printf("FATAL: failed to set sqlite busy_timeout: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
 	if err := testDB.AutoMigrate(&VersionCompareSnapshot{}, &VersionCompareIncludedPackage{}); err != nil {

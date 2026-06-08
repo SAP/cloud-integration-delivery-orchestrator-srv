@@ -31,6 +31,7 @@ func setupTRTest(t *testing.T) trTestSetup {
 	tenant := seedTenant(t, tc, "tr-src-"+suffix)
 	tenant.LifecycleState = lifecycle.TenantReady
 	tenant.TmsNodeRegistrationStatus = lifecycle.PrereqReady
+	tenant.TmsSourceNodeID = tenant.ID + 1000
 	tenant.TmsSourceNodeName = "source-node-" + suffix
 	if err := testDB.Save(&tenant).Error; err != nil {
 		t.Fatalf("save tenant: %v", err)
@@ -72,10 +73,10 @@ func makeCatalog(pkgID, artifactDisplayName string) []cas.CatalogContentResource
 }
 
 // makeFinishedCAS returns a mockCasClient pre-configured for a single FINISHED export.
-// artifactDisplayName must match the ArtifactName used in the seedOp call.
-func makeFinishedCAS(artifactDisplayName, trID string) *mockCasClient {
+// pkgID and artifactDisplayName must match the seeded operation so ensureCasGUIDs can resolve it.
+func makeFinishedCAS(pkgID, artifactDisplayName, trID string) *mockCasClient {
 	return &mockCasClient{
-		catalog: makeCatalog("pkg-"+artifactDisplayName, artifactDisplayName),
+		catalog: makeCatalog(pkgID, artifactDisplayName),
 		exportResp: &cas.ExportResponse{
 			ProcessID: "proc-" + artifactDisplayName,
 			State:     "INITIAL",
@@ -98,16 +99,18 @@ func makeFinishedCAS(artifactDisplayName, trID string) *mockCasClient {
 func TestGenerateTransportRequest_AllSucceed(t *testing.T) {
 	s := setupTRTest(t)
 	suffix := t.Name()
+	pkgID := "pkg-iflow-" + suffix
 
 	op := seedOp(t, db.ArtifactTenantOperation{
 		DeliveryRequestID: s.dr.ID,
 		ArtifactTechID:    "iflow-" + suffix,
 		ArtifactVersion:   "1.0.0",
 		ArtifactName:      "Test IFlow",
+		PackageID:         pkgID,
 		TenantID:          s.tenant.ID,
 	})
 
-	casMock := makeFinishedCAS("Test IFlow", "TR-0001")
+	casMock := makeFinishedCAS(pkgID, "Test IFlow", "TR-0001")
 	svc := newTestService(nil, testServiceOpts{cas: casMock})
 
 	succeeded, failed, fatalErr := svc.GenerateTransportRequest(
@@ -144,6 +147,8 @@ func TestGenerateTransportRequest_AllSucceed(t *testing.T) {
 func TestGenerateTransportRequest_AllSucceed_MultipleOps(t *testing.T) {
 	s := setupTRTest(t)
 	suffix := t.Name()
+	pkgID1 := "pkg-iflow-" + suffix
+	pkgID2 := "pkg-iflow2-" + suffix
 
 	// Two artifacts → two ops → two TRs.
 	op1 := seedOp(t, db.ArtifactTenantOperation{
@@ -151,6 +156,7 @@ func TestGenerateTransportRequest_AllSucceed_MultipleOps(t *testing.T) {
 		ArtifactTechID:    "iflow-" + suffix,
 		ArtifactVersion:   "1.0.0",
 		ArtifactName:      "Test IFlow",
+		PackageID:         pkgID1,
 		TenantID:          s.tenant.ID,
 	})
 	op2 := seedOp(t, db.ArtifactTenantOperation{
@@ -158,13 +164,14 @@ func TestGenerateTransportRequest_AllSucceed_MultipleOps(t *testing.T) {
 		ArtifactTechID:    "iflow2-" + suffix,
 		ArtifactVersion:   "2.0.0",
 		ArtifactName:      "Test IFlow 2",
+		PackageID:         pkgID2,
 		TenantID:          s.tenant.ID,
 	})
 
 	// Catalog must contain both artifacts, keyed by display name.
 	catalog := append(
-		makeCatalog("pkg-iflow-"+suffix, "Test IFlow"),
-		makeCatalog("pkg-iflow2-"+suffix, "Test IFlow 2")...,
+		makeCatalog(pkgID1, "Test IFlow"),
+		makeCatalog(pkgID2, "Test IFlow 2")...,
 	)
 	// Both ops share the same export process ID suffix — the mock returns a single
 	// pollStatus/opConfig for all calls, so both will FINISH with TR-MULTI.
@@ -225,6 +232,7 @@ func TestGenerateTransportRequest_AllFail_ArtifactNotInCatalog(t *testing.T) {
 		ArtifactTechID:    "iflow-" + suffix,
 		ArtifactVersion:   "1.0.0",
 		ArtifactName:      "Test IFlow",
+		PackageID:         "pkg-iflow-" + suffix,
 		TenantID:          s.tenant.ID,
 	})
 
@@ -265,6 +273,8 @@ func TestGenerateTransportRequest_AllFail_ArtifactNotInCatalog(t *testing.T) {
 func TestGenerateTransportRequest_PartialSuccess(t *testing.T) {
 	s := setupTRTest(t)
 	suffix := t.Name()
+	pkgID1 := "pkg-iflow-" + suffix
+	pkgID2 := "pkg-iflow2-" + suffix
 
 	art2TechID := "iflow2-" + suffix
 
@@ -273,6 +283,7 @@ func TestGenerateTransportRequest_PartialSuccess(t *testing.T) {
 		ArtifactTechID:    "iflow-" + suffix,
 		ArtifactVersion:   "1.0.0",
 		ArtifactName:      "Test IFlow",
+		PackageID:         pkgID1,
 		TenantID:          s.tenant.ID,
 	})
 	opFail := seedOp(t, db.ArtifactTenantOperation{
@@ -280,6 +291,7 @@ func TestGenerateTransportRequest_PartialSuccess(t *testing.T) {
 		ArtifactTechID:    art2TechID,
 		ArtifactVersion:   "1.0.0",
 		ArtifactName:      "Second IFlow",
+		PackageID:         pkgID2,
 		TenantID:          s.tenant.ID,
 	})
 
@@ -301,8 +313,8 @@ func TestGenerateTransportRequest_PartialSuccess(t *testing.T) {
 	testDB.First(&opFail, opFail.ID)
 
 	catalog := append(
-		makeCatalog("pkg-iflow-"+suffix, "Test IFlow"),
-		makeCatalog("pkg-iflow2-"+suffix, "Second IFlow")...,
+		makeCatalog(pkgID1, "Test IFlow"),
+		makeCatalog(pkgID2, "Second IFlow")...,
 	)
 	// To get partial success we need the two ops to diverge. Since the mock returns
 	// the same response for all calls, we instead pre-populate both ops' GUIDs and
@@ -379,7 +391,9 @@ func TestGenerateTransportRequest_TmsNodeNotReady(t *testing.T) {
 	tenant := seedTenant(t, tc, "tr-tmsnotready-"+suffix)
 	tenant.LifecycleState = lifecycle.TenantReady
 	// TmsNodeRegistrationStatus left at zero value (not ready).
-	testDB.Save(&tenant)
+	if err := testDB.Save(&tenant).Error; err != nil {
+		t.Fatalf("save tenant: %v", err)
+	}
 
 	dr := seedDeliveryRequest(t, tc, db.DeliveryRequest{
 		SourceTenantID:  tenant.ID,
@@ -394,6 +408,41 @@ func TestGenerateTransportRequest_TmsNodeNotReady(t *testing.T) {
 	)
 	if fatalErr == nil {
 		t.Fatal("expected fatal error when TMS node not ready, got nil")
+	}
+}
+
+func TestGenerateTransportRequest_MissingTmsSourceNodeInfo(t *testing.T) {
+	suffix := t.Name()
+	tc := newTestCleanup(t)
+
+	tenant := seedTenant(t, tc, "tr-missingnode-"+suffix)
+	tenant.LifecycleState = lifecycle.TenantReady
+	tenant.TmsNodeRegistrationStatus = lifecycle.PrereqReady
+	if err := testDB.Save(&tenant).Error; err != nil {
+		t.Fatalf("save tenant: %v", err)
+	}
+
+	dr := seedDeliveryRequest(t, tc, db.DeliveryRequest{
+		SourceTenantID:  tenant.ID,
+		AggregateStatus: lifecycle.AggPending,
+		CreatedBy:       "test",
+		UpdatedBy:       "test",
+	})
+	op := seedOp(t, db.ArtifactTenantOperation{
+		DeliveryRequestID: dr.ID,
+		ArtifactTechID:    "iflow-" + suffix,
+		ArtifactVersion:   "1.0.0",
+		ArtifactName:      "Test IFlow",
+		PackageID:         "pkg-iflow-" + suffix,
+		TenantID:          tenant.ID,
+	})
+
+	svc := newTestService(nil)
+	_, _, fatalErr := svc.GenerateTransportRequest(
+		context.Background(), tenant.ID, dr.ID, []uint{op.ID},
+	)
+	if fatalErr == nil {
+		t.Fatal("expected fatal error when TMS source node info is missing, got nil")
 	}
 }
 
@@ -417,17 +466,19 @@ func TestGenerateTransportRequest_NoMatchingOps(t *testing.T) {
 func TestExportOneTR_PollFailed(t *testing.T) {
 	s := setupTRTest(t)
 	suffix := t.Name()
+	pkgID := "pkg-iflow-" + suffix
 
 	op := seedOp(t, db.ArtifactTenantOperation{
 		DeliveryRequestID: s.dr.ID,
 		ArtifactTechID:    "iflow-" + suffix,
 		ArtifactVersion:   "1.0.0",
 		ArtifactName:      "Test IFlow",
+		PackageID:         pkgID,
 		TenantID:          s.tenant.ID,
 	})
 
 	casMock := &mockCasClient{
-		catalog:    makeCatalog("pkg-iflow-"+suffix, "Test IFlow"),
+		catalog:    makeCatalog(pkgID, "Test IFlow"),
 		exportResp: &cas.ExportResponse{ProcessID: "proc-fail", State: "INITIAL"},
 		pollStatus: &cas.OperationStatus{ProcessID: "proc-fail", State: "FAILED"},
 	}
@@ -455,19 +506,21 @@ func TestExportOneTR_PollFailed(t *testing.T) {
 func TestExportOneTR_ContextCancellation(t *testing.T) {
 	s := setupTRTest(t)
 	suffix := t.Name()
+	pkgID := "pkg-iflow-" + suffix
 
 	op := seedOp(t, db.ArtifactTenantOperation{
 		DeliveryRequestID: s.dr.ID,
 		ArtifactTechID:    "iflow-" + suffix,
 		ArtifactVersion:   "1.0.0",
 		ArtifactName:      "Test IFlow",
+		PackageID:         pkgID,
 		TenantID:          s.tenant.ID,
 	})
 
 	// Poll always returns a non-terminal state so the loop would run indefinitely.
 	// We cancel the context instead.
 	casMock := &mockCasClient{
-		catalog:    makeCatalog("pkg-iflow-"+suffix, "Test IFlow"),
+		catalog:    makeCatalog(pkgID, "Test IFlow"),
 		exportResp: &cas.ExportResponse{ProcessID: "proc-running", State: "INITIAL"},
 		pollStatus: &cas.OperationStatus{ProcessID: "proc-running", State: "RUNNING"},
 	}
@@ -497,17 +550,19 @@ func TestExportOneTR_ContextCancellation(t *testing.T) {
 func TestExportOneTR_MissingTransportRequestID(t *testing.T) {
 	s := setupTRTest(t)
 	suffix := t.Name()
+	pkgID := "pkg-iflow-" + suffix
 
 	op := seedOp(t, db.ArtifactTenantOperation{
 		DeliveryRequestID: s.dr.ID,
 		ArtifactTechID:    "iflow-" + suffix,
 		ArtifactVersion:   "1.0.0",
 		ArtifactName:      "Test IFlow",
+		PackageID:         pkgID,
 		TenantID:          s.tenant.ID,
 	})
 
 	casMock := &mockCasClient{
-		catalog:    makeCatalog("pkg-iflow-"+suffix, "Test IFlow"),
+		catalog:    makeCatalog(pkgID, "Test IFlow"),
 		exportResp: &cas.ExportResponse{ProcessID: "proc-notr", State: "INITIAL"},
 		pollStatus: &cas.OperationStatus{ProcessID: "proc-notr", State: "FINISHED"},
 		opConfig:   &cas.OperationConfig{TransportRequestID: ""}, // empty — invalid
@@ -542,6 +597,7 @@ func TestGenerateTransportRequest_CatalogError(t *testing.T) {
 		ArtifactTechID:    "iflow-" + suffix,
 		ArtifactVersion:   "1.0.0",
 		ArtifactName:      "Test IFlow",
+		PackageID:         "pkg-iflow-" + suffix,
 		TenantID:          s.tenant.ID,
 	})
 

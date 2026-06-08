@@ -25,6 +25,7 @@ var testDB *gorm.DB
 
 func TestMain(m *testing.M) {
 	var dialector gorm.Dialector
+	usingSQLite := false
 
 	if uri := os.Getenv("LOCAL_POSTGRES_URI"); uri != "" {
 		conn, err := sql.Open("pgx", uri)
@@ -35,7 +36,8 @@ func TestMain(m *testing.M) {
 		dialector = postgres.New(postgres.Config{Conn: conn})
 		fmt.Fprintln(os.Stderr, "INFO: using PostgreSQL for tests")
 	} else {
-		dialector = sqlite.Open("file::memory:?cache=shared")
+		usingSQLite = true
+		dialector = sqlite.Open("file::memory:?cache=shared&_busy_timeout=5000")
 		fmt.Fprintln(os.Stderr, "INFO: using SQLite (in-memory) for tests")
 	}
 
@@ -48,8 +50,25 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
+	sqlDB, err := testDB.DB()
+	if err != nil {
+		fmt.Printf("FATAL: failed to get sql.DB: %v\n", err)
+		os.Exit(1)
+	}
+	if usingSQLite {
+		// Coverage-instrumented tests make concurrent writes more likely to overlap.
+		// Keep SQLite on a single shared connection and wait briefly on locks so
+		// async service tests remain stable without changing production behavior.
+		sqlDB.SetMaxOpenConns(1)
+		if _, err := sqlDB.Exec("PRAGMA busy_timeout = 5000"); err != nil {
+			fmt.Printf("FATAL: failed to set sqlite busy_timeout: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
 	if err := testDB.AutoMigrate(
 		&db.CpiTenant{},
+		&db.CentralTmsContext{},
 		&db.DeliveryRule{},
 		&db.VersionCompareSnapshot{},
 		&db.VersionCompareIncludedPackage{},
@@ -244,13 +263,87 @@ func (m *mockCPIClientWithDesignTime) GetDesignTimeScriptCollection(ctx context.
 	return cpi.ScriptCollectionItem{}, fmt.Errorf("script collection %s not found", scID)
 }
 
+type mockRuntimeCPI struct {
+	mockCPIClient
+	deployErrs  map[string]error
+	runtimeByID map[string]cpi.RuntimeArtifact
+	runtimeErrs map[string]error
+}
+
+func (m *mockRuntimeCPI) DeployArtifact(ctx context.Context, artifactID, artifactVersion string, artifactType consts.ArtifactType) (string, error) {
+	if m.deployErrs != nil {
+		if err, ok := m.deployErrs[artifactID]; ok {
+			return "", err
+		}
+	}
+	return "task-" + artifactID, nil
+}
+
+func (m *mockRuntimeCPI) RuntimeArtifact(ctx context.Context, artifactID string) (cpi.RuntimeArtifact, error) {
+	if m.runtimeErrs != nil {
+		if err, ok := m.runtimeErrs[artifactID]; ok {
+			return cpi.RuntimeArtifact{}, err
+		}
+	}
+	if m.runtimeByID != nil {
+		if rt, ok := m.runtimeByID[artifactID]; ok {
+			return rt, nil
+		}
+	}
+	return cpi.RuntimeArtifact{}, fmt.Errorf("runtime artifact %s not found", artifactID)
+}
+
+type mockStatusTMS struct {
+	mockTMSClient
+	warnLogs map[string][]string
+	errLogs  map[string][]string
+}
+
+func tmsLogKey(trNumber string, nodeID uint) string {
+	return fmt.Sprintf("%s:%d", trNumber, nodeID)
+}
+
+func (m *mockStatusTMS) ErrLogsInTransportLog(ctx context.Context, trNumber string, nodeID uint) ([]string, error) {
+	if m.errLogs != nil {
+		if logs, ok := m.errLogs[tmsLogKey(trNumber, nodeID)]; ok {
+			return logs, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *mockStatusTMS) WarnLogsInTransportLog(ctx context.Context, trNumber string, nodeID uint) ([]string, error) {
+	if m.warnLogs != nil {
+		if logs, ok := m.warnLogs[tmsLogKey(trNumber, nodeID)]; ok {
+			return logs, nil
+		}
+	}
+	return nil, nil
+}
+
+func waitFor(t *testing.T, description string, fn func() error) {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		if err := fn(); err == nil {
+			return
+		} else {
+			lastErr = err
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s: %v", description, lastErr)
+}
+
 // --- Seed Helpers ---
 
 // seedTenant creates a CpiTenant in the test DB, tracks it for cleanup, and returns it.
 func seedTenant(t *testing.T, tc *testCleanup, name string) db.CpiTenant {
 	t.Helper()
 	tenant := db.CpiTenant{
-		Name:                 name,
+		Name:                  name,
 		PirApiDestinationName: name, // use tenant name as destination key for mock dispatch
 		// CfApiEndpoint and CfOrg must be unique across active tenants (B1 fix).
 		// Use the tenant name as a stable, distinct placeholder.
