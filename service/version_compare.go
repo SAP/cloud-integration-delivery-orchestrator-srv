@@ -818,6 +818,8 @@ type PreviewDRArtifact struct {
 	PackageID     string          `json:"packageID"`
 	Type          string          `json:"type"`
 	SourceVersion string          `json:"sourceVersion"`
+	ModifiedBy    string          `json:"modifiedBy,omitempty"`
+	ModifiedAt    string          `json:"modifiedAt,omitempty"`
 	Category      string          `json:"category"` // "includable" | "draft" | "versionPattern" | "duplicate"
 	Reason        string          `json:"reason,omitempty"`
 	ExistingDR    *ExistingDRInfo `json:"existingDR,omitempty"`
@@ -969,6 +971,8 @@ func (s *Service) PreviewDRFromMismatch(ruleID uint) (PreviewDRResponse, error) 
 				PackageID:     pkg.PackageID,
 				Type:          art.Type,
 				SourceVersion: sourceVI.DesignTimeVersion,
+				ModifiedBy:    sourceVI.ModifiedBy,
+				ModifiedAt:    sourceVI.ModifiedAt,
 			}
 
 			// Classify (mutually exclusive, priority order)
