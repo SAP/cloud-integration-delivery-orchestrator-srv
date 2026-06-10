@@ -102,15 +102,39 @@ func (h *Handler) UpdateDr(c *gin.Context) {
 
 // List all DeliveryRequests
 func (h *Handler) GetAllDr(c *gin.Context) {
-	var drList []db.DeliveryRequest
-	if err := h.db.
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
+
+	query := h.db.
 		Preload("SourceTenant").
 		Preload("DeliveryRule").
+		Order("updated_at DESC")
+
+	var total int64
+	query.Model(&db.DeliveryRequest{}).Count(&total)
+
+	var drList []db.DeliveryRequest
+	if err := query.
+		Offset((page - 1) * pageSize).
+		Limit(pageSize).
 		Find(&drList).Error; err != nil {
 		Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	OK(c, drList)
+	c.JSON(http.StatusOK, gin.H{
+		"data": gin.H{
+			"items":    drList,
+			"total":    total,
+			"page":     page,
+			"pageSize": pageSize,
+		},
+	})
 }
 
 func (h *Handler) DeliveryRequestCounts(ctx *gin.Context) {
