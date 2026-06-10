@@ -158,6 +158,8 @@ func (h *Handler) SetupRoutes(v1 *gin.RouterGroup, v2 *gin.RouterGroup, requireS
 		drRead.GET("/deliveryRequest", h.GetAllDr)
 		drRead.GET("/deliveryRequest/:id", h.GetDeliveryRequest)
 		drRead.GET("/deliveryRequest/counts", h.DeliveryRequestCounts)
+		drRead.GET("/operations/history", h.GetOperationsHistory)
+		drRead.GET("/operations/history/filters", h.GetOperationsHistoryFilters)
 	}
 
 	// --- DeliveryRequest.Write ---
