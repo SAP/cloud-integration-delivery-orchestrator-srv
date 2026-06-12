@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strconv"
 
 	"mmt-delivery/service"
 
@@ -32,4 +33,19 @@ func (h *Handler) GetOperationsHistoryFilters(c *gin.Context) {
 		return
 	}
 	OK(c, resp)
+}
+
+// GetOperationConditions returns the condition timeline for a specific operation.
+func (h *Handler) GetOperationConditions(c *gin.Context) {
+	opID, err := strconv.ParseUint(c.Param("opId"), 10, 64)
+	if err != nil {
+		Fail(c, http.StatusBadRequest, "invalid operation ID")
+		return
+	}
+	conditions, err := h.svc.GetOperationConditions(uint(opID))
+	if err != nil {
+		Fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	OK(c, conditions)
 }

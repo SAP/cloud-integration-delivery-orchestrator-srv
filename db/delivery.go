@@ -143,7 +143,6 @@ type Condition struct {
 	DeliveryRequestID         uint
 	ArtifactTenantOperationID uint
 
-	State     lifecycle.ConditionState
-	Message   string
-	Timestamp time.Time
+	State   lifecycle.ConditionState
+	Message string
 }

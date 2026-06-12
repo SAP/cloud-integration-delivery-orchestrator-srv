@@ -12,22 +12,23 @@ import (
 
 // OperationsHistoryFilter holds all query parameters for the operations history endpoint.
 type OperationsHistoryFilter struct {
-	TenantIDs      []uint   `form:"tenantId"`
-	ArtifactName   string   `form:"artifactName"`
-	ArtifactTypes  []string `form:"artifactType"`
-	PackageID      string   `form:"packageId"`
-	RequestStates  []string `form:"requestState"`
-	ImportStates   []string `form:"importState"`
-	DeployStates   []string `form:"deployState"`
-	DeliveryRuleID *uint    `form:"deliveryRuleId"`
-	CreatedBy      string   `form:"createdBy"`
-	DateFrom       string   `form:"dateFrom"`
-	DateTo         string   `form:"dateTo"`
-	HasError       *bool    `form:"hasError"`
-	SortBy         string   `form:"sortBy"`
-	SortDir        string   `form:"sortDir"`
-	Page           int      `form:"page"`
-	PageSize       int      `form:"pageSize"`
+	TenantIDs           []uint   `form:"tenantId"`
+	ArtifactName        string   `form:"artifactName"`
+	ArtifactTypes       []string `form:"artifactType"`
+	PackageID           string   `form:"packageId"`
+	RequestStates       []string `form:"requestState"`
+	ImportStates        []string `form:"importState"`
+	DeployStates        []string `form:"deployState"`
+	DeliveryRuleID      *uint    `form:"deliveryRuleId"`
+	DeliveryRequestName string   `form:"deliveryRequestName"`
+	CreatedBy           string   `form:"createdBy"`
+	DateFrom            string   `form:"dateFrom"`
+	DateTo              string   `form:"dateTo"`
+	HasError            *bool    `form:"hasError"`
+	SortBy              string   `form:"sortBy"`
+	SortDir             string   `form:"sortDir"`
+	Page                int      `form:"page"`
+	PageSize            int      `form:"pageSize"`
 }
 
 // OperationsHistoryItem is a single row in the history response.
@@ -50,6 +51,7 @@ type OperationsHistoryItem struct {
 	SkipDeploy             bool      `json:"skipDeploy"`
 	LastError              string    `json:"lastError"`
 	CreatedBy              string    `json:"createdBy"`
+	UpdatedBy              string    `json:"updatedBy"`
 	CreatedAt              time.Time `json:"createdAt"`
 	UpdatedAt              time.Time `json:"updatedAt"`
 }
@@ -107,6 +109,9 @@ func (s *Service) QueryOperationsHistory(filter OperationsHistoryFilter) (Operat
 	}
 	if filter.DeliveryRuleID != nil {
 		query = query.Where("delivery_requests.delivery_rule_id = ?", *filter.DeliveryRuleID)
+	}
+	if filter.DeliveryRequestName != "" {
+		query = query.Where("delivery_requests.name ILIKE ?", "%"+filter.DeliveryRequestName+"%")
 	}
 	if filter.CreatedBy != "" {
 		query = query.Where("artifact_tenant_operations.created_by = ?", filter.CreatedBy)
@@ -185,6 +190,7 @@ func (s *Service) QueryOperationsHistory(filter OperationsHistoryFilter) (Operat
 			SkipDeploy:             r.SkipDeploy,
 			LastError:              r.LastError,
 			CreatedBy:              r.CreatedBy,
+			UpdatedBy:              r.UpdatedBy,
 			CreatedAt:              r.CreatedAt,
 			UpdatedAt:              r.UpdatedAt,
 		})
@@ -262,4 +268,16 @@ func normalizePagination(page, pageSize int) (int, int) {
 		pageSize = 20
 	}
 	return page, pageSize
+}
+
+// GetOperationConditions returns the condition timeline for a specific operation.
+func (s *Service) GetOperationConditions(opID uint) ([]db.Condition, error) {
+	var conditions []db.Condition
+	if err := s.DB.
+		Where("artifact_tenant_operation_id = ?", opID).
+		Order("created_at DESC").
+		Find(&conditions).Error; err != nil {
+		return nil, fmt.Errorf("failed to query conditions for op %d: %w", opID, err)
+	}
+	return conditions, nil
 }
