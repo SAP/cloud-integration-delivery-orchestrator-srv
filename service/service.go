@@ -101,16 +101,16 @@ func NewDefaultNotifier(resolver *cf.DestinationServiceClient, database *gorm.DB
 }
 
 func (n *defaultNotifier) smtpDest() string {
-	cfg, err := db.GetIntegrationConfig(n.database, "smtp")
-	if err != nil || !cfg.Enabled {
+	var cfg db.IntegrationConfig
+	if err := n.database.Where("type = ?", "smtp").First(&cfg).Error; err != nil || !cfg.Enabled {
 		return ""
 	}
 	return cfg.DestinationName
 }
 
 func (n *defaultNotifier) jiraDest() string {
-	cfg, err := db.GetIntegrationConfig(n.database, "jira")
-	if err != nil || !cfg.Enabled {
+	var cfg db.IntegrationConfig
+	if err := n.database.Where("type = ?", "jira").First(&cfg).Error; err != nil || !cfg.Enabled {
 		return ""
 	}
 	return cfg.DestinationName

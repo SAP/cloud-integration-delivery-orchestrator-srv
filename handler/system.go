@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"net/http"
 
-	"mmt-delivery/db"
-
 	"github.com/gin-gonic/gin"
 )
 
@@ -13,7 +11,7 @@ import (
 
 // GetIntegrations returns all integration configs.
 func (h *Handler) GetIntegrations(ctx *gin.Context) {
-	configs, err := db.GetAllIntegrationConfigs(h.db)
+	configs, err := h.svc.GetAllIntegrationConfigs()
 	if err != nil {
 		Fail(ctx, 500, fmt.Sprintf("failed to get integration configs: %s", err))
 		return
@@ -35,7 +33,7 @@ func (h *Handler) UpdateIntegration(ctx *gin.Context) {
 		return
 	}
 
-	config, err := db.UpdateIntegrationConfig(h.db, integrationType, req.DestinationName, req.Enabled, req.Description)
+	config, err := h.svc.UpdateIntegrationConfig(integrationType, req.DestinationName, req.Enabled, req.Description)
 	if err != nil {
 		Fail(ctx, 500, fmt.Sprintf("failed to update integration '%s': %s", integrationType, err))
 		return
@@ -111,7 +109,7 @@ func (h *Handler) CheckConnectivityIntegrations(ctx *gin.Context) {
 // GET /api/v1/system/connectivity/integration/:type
 func (h *Handler) TestIntegration(ctx *gin.Context) {
 	integrationType := ctx.Param("type")
-	config, err := db.GetIntegrationConfig(h.db, integrationType)
+	config, err := h.svc.GetIntegrationConfig(integrationType)
 	if err != nil {
 		Fail(ctx, 404, fmt.Sprintf("integration '%s' not found", integrationType))
 		return

@@ -8,8 +8,6 @@ import (
 
 	"mmt-delivery/consts"
 
-	"mmt-delivery/db"
-
 	"github.com/gin-gonic/gin"
 )
 
@@ -69,7 +67,7 @@ func (h *Handler) NativeDeliver(ctx *gin.Context) {
 			return
 		}
 
-		githubConfig, err := db.GetIntegrationConfig(h.db, "github")
+		githubConfig, err := h.svc.GetIntegrationConfig("github")
 		if err != nil {
 			h.logger.Warnf("failed to read github integration config, skipping sync: %s", err)
 		} else if githubConfig.Enabled {
