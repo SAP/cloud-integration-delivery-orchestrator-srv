@@ -57,6 +57,8 @@ func Connect() (*gorm.DB, error) {
 		&IntegrationConfig{},
 		// RFC 013: subaccount-centric CpiTenant + bootstrap state machine
 		&CentralTmsContext{}, &TenantBootstrapJob{},
+		// RFC 017: connectivity check result caching
+		&ConnectivityCheckResult{},
 	); err != nil {
 		return nil, fmt.Errorf("failed to migrate: %w", err)
 	}

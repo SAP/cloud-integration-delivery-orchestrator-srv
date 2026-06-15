@@ -222,7 +222,14 @@ func (h *Handler) SetupRoutes(v1 *gin.RouterGroup, v2 *gin.RouterGroup, requireS
 	{
 		system.GET("/integrations", h.GetIntegrations)
 		system.PUT("/integrations/:type", h.UpdateIntegration)
-		system.GET("/connectivity", h.CheckConnectivity)
+		system.GET("/database/info", h.GetDatabaseInfo)
+		system.GET("/connectivity/database", h.CheckConnectivityDatabase)
+		system.GET("/connectivity/tms", h.CheckConnectivityTMS)
+		system.GET("/connectivity/tenants", h.CheckConnectivityTenants)
+		system.GET("/connectivity/integrations", h.CheckConnectivityIntegrations)
+		system.GET("/connectivity/integration/:type", h.TestIntegration)
+		system.POST("/connectivity/all", h.CheckConnectivity)
+		system.GET("/connectivity/last", h.GetLastConnectivity)
 	}
 
 	// --- v2 API (DeliveryRequest.Operate) ---

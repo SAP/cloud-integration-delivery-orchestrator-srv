@@ -2,10 +2,9 @@ package handler
 
 import (
 	"fmt"
-	"time"
+	"net/http"
 
 	"mmt-delivery/db"
-	"mmt-delivery/pkg/env"
 
 	"github.com/gin-gonic/gin"
 )
@@ -13,7 +12,6 @@ import (
 // --- Integration Config CRUD ---
 
 // GetIntegrations returns all integration configs.
-// GET /api/v1/system/integrations
 func (h *Handler) GetIntegrations(ctx *gin.Context) {
 	configs, err := db.GetAllIntegrationConfigs(h.db)
 	if err != nil {
@@ -24,7 +22,6 @@ func (h *Handler) GetIntegrations(ctx *gin.Context) {
 }
 
 // UpdateIntegration updates DestinationName, Enabled, and Description for a given integration type.
-// PUT /api/v1/system/integrations/:type
 func (h *Handler) UpdateIntegration(ctx *gin.Context) {
 	integrationType := ctx.Param("type")
 
@@ -44,114 +41,103 @@ func (h *Handler) UpdateIntegration(ctx *gin.Context) {
 		return
 	}
 
-	// Invalidate resolver cache for this destination so next access fetches fresh data
 	h.destSvc.Invalidate(req.DestinationName)
-
 	OK(ctx, config)
+}
+
+// --- Database Info ---
+
+func (h *Handler) GetDatabaseInfo(ctx *gin.Context) {
+	sqlDB, err := h.db.DB()
+	if err != nil {
+		OK(ctx, gin.H{"host": "", "port": "", "dbName": "", "status": "error"})
+		return
+	}
+
+	info := gin.H{"status": "ok"}
+	if err := sqlDB.Ping(); err != nil {
+		info["status"] = "error"
+	}
+
+	var dbName, host, port string
+	row := sqlDB.QueryRow("SELECT current_database(), inet_server_addr()::text, inet_server_port()::text")
+	if err := row.Scan(&dbName, &host, &port); err == nil {
+		info["host"] = host
+		info["port"] = port
+		info["dbName"] = dbName
+	}
+
+	OK(ctx, info)
 }
 
 // --- System Connectivity Check ---
 
-type ConnectivityStatus struct {
-	Name    string `json:"name"`
-	Type    string `json:"type"`
-	Status  string `json:"status"`
-	Message string `json:"message,omitempty"`
+// GET /api/v1/system/connectivity/database
+func (h *Handler) CheckConnectivityDatabase(ctx *gin.Context) {
+	result := h.svc.CheckDatabase()
+	if err := h.svc.PersistConnectivityResult(result); err != nil {
+		h.logger.Errorf("failed to persist connectivity result: %s", err)
+	}
+	OK(ctx, result)
 }
 
-type ConnectivityReport struct {
-	CheckedAt time.Time            `json:"checkedAt"`
-	Results   []ConnectivityStatus `json:"results"`
+// GET /api/v1/system/connectivity/tms
+func (h *Handler) CheckConnectivityTMS(ctx *gin.Context) {
+	result := h.svc.CheckTMS(ctx.Request.Context())
+	if err := h.svc.PersistConnectivityResult(result); err != nil {
+		h.logger.Errorf("failed to persist connectivity result: %s", err)
+	}
+	OK(ctx, result)
 }
 
-// CheckConnectivity verifies connectivity to all external dependencies.
-// GET /api/v1/system/connectivity
+// GET /api/v1/system/connectivity/tenants
+func (h *Handler) CheckConnectivityTenants(ctx *gin.Context) {
+	results := h.svc.CheckTenants(ctx.Request.Context())
+	if err := h.svc.PersistConnectivityResults(results); err != nil {
+		h.logger.Errorf("failed to persist connectivity results: %s", err)
+	}
+	OK(ctx, results)
+}
+
+// GET /api/v1/system/connectivity/integrations
+func (h *Handler) CheckConnectivityIntegrations(ctx *gin.Context) {
+	results := h.svc.CheckAllIntegrations(ctx.Request.Context())
+	if err := h.svc.PersistConnectivityResults(results); err != nil {
+		h.logger.Errorf("failed to persist connectivity results: %s", err)
+	}
+	OK(ctx, results)
+}
+
+// GET /api/v1/system/connectivity/integration/:type
+func (h *Handler) TestIntegration(ctx *gin.Context) {
+	integrationType := ctx.Param("type")
+	config, err := db.GetIntegrationConfig(h.db, integrationType)
+	if err != nil {
+		Fail(ctx, 404, fmt.Sprintf("integration '%s' not found", integrationType))
+		return
+	}
+	result := h.svc.CheckIntegration(ctx.Request.Context(), *config)
+	if err := h.svc.PersistConnectivityResult(result); err != nil {
+		h.logger.Errorf("failed to persist connectivity result: %s", err)
+	}
+	OK(ctx, result)
+}
+
+// POST /api/v1/system/connectivity/all
 func (h *Handler) CheckConnectivity(ctx *gin.Context) {
-	var results []ConnectivityStatus
-	checkCtx := ctx.Request.Context()
+	report := h.svc.CheckAll(ctx.Request.Context())
+	if err := h.svc.PersistConnectivityResults(report.Results); err != nil {
+		h.logger.Errorf("failed to persist connectivity results: %s", err)
+	}
+	OK(ctx, report)
+}
 
-	// 1. Database
-	sqlDB, err := h.db.DB()
+// GET /api/v1/system/connectivity/last
+func (h *Handler) GetLastConnectivity(ctx *gin.Context) {
+	report, err := h.svc.GetLastConnectivityReport()
 	if err != nil {
-		results = append(results, ConnectivityStatus{Name: "Database", Type: "database", Status: "error", Message: err.Error()})
-	} else if err := sqlDB.Ping(); err != nil {
-		results = append(results, ConnectivityStatus{Name: "Database", Type: "database", Status: "error", Message: err.Error()})
-	} else {
-		results = append(results, ConnectivityStatus{Name: "Database", Type: "database", Status: "ok"})
+		Fail(ctx, http.StatusNotFound, err.Error())
+		return
 	}
-
-	// 2. TMS
-	tmsClient, err := h.svc.TmsSvc(checkCtx)
-	if err != nil {
-		results = append(results, ConnectivityStatus{Name: "TMS", Type: "tms", Status: "error", Message: err.Error()})
-	} else if _, err = tmsClient.GetNodes(checkCtx); err != nil {
-		results = append(results, ConnectivityStatus{Name: "TMS", Type: "tms", Status: "error", Message: err.Error()})
-	} else {
-		results = append(results, ConnectivityStatus{Name: "TMS", Type: "tms", Status: "ok"})
-		// Update LastValidatedAt on successful TMS connectivity check.
-		now := time.Now()
-		h.db.Model(&db.CentralTmsContext{}).Where("1 = 1").Update("last_validated_at", now)
-	}
-
-	// 3. CPI Tenants — resolve destination then verify OAuth2 token can be obtained
-	var tenants []db.CpiTenant
-	h.db.Find(&tenants)
-	for _, t := range tenants {
-		destName := t.PirApiDestinationName
-		if destName == "" {
-			results = append(results, ConnectivityStatus{
-				Name: t.Name, Type: "cpi_tenant", Status: "error",
-				Message: "no CPI destination configured (PirApiDestinationName is empty — bootstrap required)",
-			})
-			continue
-		}
-		dest, err := h.destSvc.GetDestination(checkCtx, destName)
-		if err != nil {
-			results = append(results, ConnectivityStatus{
-				Name: t.Name, Type: "cpi_tenant", Status: "error",
-				Message: fmt.Sprintf("destination '%s' not found: %s", destName, err),
-			})
-			continue
-		}
-		// Verify credentials by attempting OAuth2 token acquisition
-		if _, err := env.NewClient(checkCtx, dest.ClientId, dest.ClientSecret, dest.TokenServiceURL, dest.URL); err != nil {
-			results = append(results, ConnectivityStatus{
-				Name: t.Name, Type: "cpi_tenant", Status: "error",
-				Message: fmt.Sprintf("destination '%s' found but token fetch failed: %s", destName, err),
-			})
-		} else {
-			results = append(results, ConnectivityStatus{
-				Name: t.Name, Type: "cpi_tenant", Status: "ok",
-				Message: fmt.Sprintf("destination '%s' resolved and authenticated", destName),
-			})
-		}
-	}
-
-	// 4. Singleton integrations — check enabled ones
-	configs, _ := db.GetAllIntegrationConfigs(h.db)
-	for _, cfg := range configs {
-		if !cfg.Enabled {
-			results = append(results, ConnectivityStatus{
-				Name: cfg.Type, Type: "integration", Status: "disabled",
-			})
-			continue
-		}
-		_, err := h.destSvc.GetDestination(checkCtx, cfg.DestinationName)
-		if err != nil {
-			results = append(results, ConnectivityStatus{
-				Name: cfg.Type, Type: "integration", Status: "error",
-				Message: fmt.Sprintf("destination '%s': %s", cfg.DestinationName, err),
-			})
-		} else {
-			results = append(results, ConnectivityStatus{
-				Name: cfg.Type, Type: "integration", Status: "ok",
-				Message: fmt.Sprintf("destination '%s' resolved", cfg.DestinationName),
-			})
-		}
-	}
-
-	OK(ctx, ConnectivityReport{
-		CheckedAt: time.Now(),
-		Results:   results,
-	})
+	OK(ctx, report)
 }
