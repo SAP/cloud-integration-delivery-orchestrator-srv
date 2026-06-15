@@ -427,7 +427,7 @@ func (t *TmsClient) ErrLogsInTransportLog(ctx context.Context, trNumber string, 
 	for _, trLog := range transportLogResp.Logs {
 		for _, entity := range trLog.Entities {
 			for _, msg := range entity.Messages {
-				if msg.Severity == "F" {
+				if msg.Severity == "F" || msg.Severity == "E" {
 					errLogs = append(errLogs, fmt.Sprintf("Transport Request %s failed in Node %d: %s", trNumber, nodeID, msg.Message))
 				}
 			}
