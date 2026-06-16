@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"mmt-delivery/consts"
 	"mmt-delivery/db"
@@ -10,6 +11,41 @@ import (
 	"regexp"
 	"strings"
 )
+
+// drSnapshot captures the state of a DR at a point in time for change detection.
+type drSnapshot struct {
+	Exists bool
+	Status lifecycle.AggregateStatus
+	OpsKey string // serialized ops state for equality check
+}
+
+func (s *Service) captureDrSnapshot(drID uint) drSnapshot {
+	var dr db.DeliveryRequest
+	if err := s.DB.First(&dr, drID).Error; err != nil {
+		return drSnapshot{Exists: false}
+	}
+
+	var ops []db.ArtifactTenantOperation
+	s.DB.Where("delivery_request_id = ?", drID).Order("id ASC").Find(&ops)
+
+	// Build a lightweight key for equality check (not sent over the wire)
+	type opKey struct {
+		ID     uint
+		Import lifecycle.ImportState
+		Deploy lifecycle.DeployState
+	}
+	keys := make([]opKey, 0, len(ops))
+	for _, op := range ops {
+		keys = append(keys, opKey{op.ID, op.ImportState, op.DeployState})
+	}
+	keyBytes, _ := json.Marshal(keys)
+
+	return drSnapshot{
+		Exists: true,
+		Status: dr.AggregateStatus,
+		OpsKey: string(keyBytes),
+	}
+}
 
 func (s *Service) DetermineOverallStatus(drID uint) error {
 	dr, err := s.QueryDrWithAssociations(drID)
@@ -60,20 +96,16 @@ func (s *Service) SyncDeliveryStatus(deliveryRequestID uint, user string) error 
 
 	before := s.captureDrSnapshot(deliveryRequestID)
 
-	// Defers execute LIFO: event-publish runs last (registered first),
+	// Defers execute LIFO: notification runs last (registered first),
 	// DetermineOverallStatus runs first (registered last), ensuring the
-	// snapshot captured in the publish defer reflects the final aggregate status.
+	// snapshot captured in the notify defer reflects the final aggregate status.
 	defer func() {
 		after := s.captureDrSnapshot(deliveryRequestID)
 		if !before.Exists || !after.Exists {
 			return
 		}
-		if !sameOps(before.Ops, after.Ops) {
-			s.publishDrOps(deliveryRequestID, after.Ops)
-		}
-		if before.Status != after.Status {
-			s.publishDrStatus(deliveryRequestID, before.Status, after.Status)
-			s.publishCounts()
+		if before.OpsKey != after.OpsKey || before.Status != after.Status {
+			s.NotifyDrUpdated(deliveryRequestID)
 		}
 	}()
 	defer s.DetermineOverallStatus(deliveryRequestID)

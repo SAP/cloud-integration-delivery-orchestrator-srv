@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"net/http"
+
 	"mmt-delivery/pkg/cf"
 	"mmt-delivery/pkg/cpi"
 	"mmt-delivery/pkg/xsuaa"
@@ -9,18 +11,19 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
+	"github.com/coder/websocket"
 )
 
 // Handler holds all injected dependencies for the HTTP handler layer.
 // All gin handler functions are methods on this struct.
 type Handler struct {
-	svc      *service.Service
-	db       *gorm.DB
-	logger   *zap.SugaredLogger
-	cpi      *cpi.Manager
-	xsuaa    *xsuaa.UaaClient
-	destSvc  *cf.DestinationServiceClient
-	eventBus *service.EventBus
+	svc    *service.Service
+	db     *gorm.DB
+	logger *zap.SugaredLogger
+	cpi    *cpi.Manager
+	xsuaa  *xsuaa.UaaClient
+	destSvc *cf.DestinationServiceClient
+	hub    *service.WSHub
 }
 
 type StatusCount struct {
@@ -57,17 +60,37 @@ func NewHandler(
 	cpiManager *cpi.Manager,
 	xsuaaClient *xsuaa.UaaClient,
 	destSvc *cf.DestinationServiceClient,
-	eventBus *service.EventBus,
+	hub *service.WSHub,
 ) *Handler {
 	return &Handler{
-		svc:      svc,
-		db:       db,
-		logger:   logger,
-		cpi:      cpiManager,
-		xsuaa:    xsuaaClient,
-		destSvc:  destSvc,
-		eventBus: eventBus,
+		svc:     svc,
+		db:      db,
+		logger:  logger,
+		cpi:     cpiManager,
+		xsuaa:   xsuaaClient,
+		destSvc: destSvc,
+		hub:     hub,
 	}
+}
+
+// HandleWebSocket upgrades the HTTP connection to WebSocket and manages the lifecycle.
+func (h *Handler) HandleWebSocket(c *gin.Context) {
+	if h.hub == nil {
+		Fail(c, http.StatusServiceUnavailable, "WebSocket hub is not available")
+		return
+	}
+
+	conn, err := websocket.Accept(c.Writer, c.Request, &websocket.AcceptOptions{
+		InsecureSkipVerify: true, // Origin check is handled by SAP Approuter; backend skips it
+	})
+	if err != nil {
+		h.logger.Warnf("WebSocket accept failed: %s", err)
+		return
+	}
+
+	wsConn := h.hub.NewConn(conn)
+	go wsConn.ReadPump()
+	wsConn.WritePump() // blocks until connection closes
 }
 
 // SetupRoutes registers all API routes on the given router group.
@@ -77,7 +100,7 @@ func (h *Handler) SetupRoutes(v1 *gin.RouterGroup, v2 *gin.RouterGroup, requireS
 	// --- No scope required (any authenticated user) ---
 	v1.GET("/currentUser/scopes", h.GetCurrentUserScopes)
 
-	// --- Integration.Read — CPI artifacts, TMS, Destinations, SSE ---
+	// --- Integration.Read — CPI artifacts, TMS, Destinations, WebSocket ---
 	integrationRead := v1.Group("")
 	integrationRead.Use(requireScope("Integration.Read"))
 	{
@@ -88,7 +111,7 @@ func (h *Handler) SetupRoutes(v1 *gin.RouterGroup, v2 *gin.RouterGroup, requireS
 		integrationRead.GET("/tms/trs", h.GetTranportRequestsHandler)
 		integrationRead.GET("/tms/routes", h.GetRoutesHandler)
 		integrationRead.GET("/destinations", h.GetDestinationsHandler)
-		integrationRead.GET("/events", h.SSEHandler)
+		integrationRead.GET("/ws", h.HandleWebSocket)
 	}
 
 	// --- CpiTenant.Read ---

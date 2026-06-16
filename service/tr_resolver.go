@@ -190,7 +190,7 @@ func (s *Service) GenerateTransportRequest(ctx context.Context, tenantID, delive
 	}
 
 	// fatalf handles pre-op fatal errors: writes a DR-level Condition for observability,
-	// resets all TR_GENERATING ops to TR_FAILED, broadcasts via SSE, and returns the error.
+	// resets all TR_GENERATING ops to TR_FAILED, notifies via WebSocket, and returns the error.
 	fatalf := func(err error) (map[uint]*TransportRequest, map[uint]error, error) {
 		_ = s.BatchInsertConditions([]db.Condition{{
 			DeliveryRequestID: deliveryRequestID,
@@ -205,7 +205,7 @@ func (s *Service) GenerateTransportRequest(ctx context.Context, tenantID, delive
 			}).Error; dbErr != nil {
 			env.Logger().Warnw("GenerateTransportRequest: failed to reset TR_GENERATING ops on fatal error", "error", dbErr)
 		}
-		s.publishDrOps(deliveryRequestID, s.snapshotOps(deliveryRequestID))
+		s.NotifyDrUpdated(deliveryRequestID)
 		return nil, nil, err
 	}
 
@@ -303,7 +303,7 @@ func (s *Service) GenerateTransportRequest(ctx context.Context, tenantID, delive
 		succeeded[r.opID] = r.tr
 	}
 
-	s.publishDrOps(deliveryRequestID, s.snapshotOps(deliveryRequestID))
+	s.NotifyDrUpdated(deliveryRequestID)
 	return succeeded, failed, nil
 }
 

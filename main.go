@@ -22,8 +22,6 @@ import (
 	"github.com/lestrrat-go/jwx/jwk"
 )
 
-var enableSSE = false
-
 func main() {
 	// --- Explicit initialization (no more init() side effects) ---
 	if err := env.Init(); err != nil {
@@ -56,10 +54,8 @@ func main() {
 
 	tmsSvc := service.NewTmsFactory(database, resolver)
 
-	var eventBus *service.EventBus
-	if enableSSE {
-		eventBus = service.NewEventBus()
-	}
+	// --- WebSocket Hub (always active) ---
+	hub := service.NewWSHub(env.Logger())
 
 	// --- Build service with all injected dependencies ---
 	svc := &service.Service{
@@ -74,9 +70,13 @@ func main() {
 		},
 		GetUserEmail: xsuaa.GetUserEmail,
 		Notifier:     service.NewDefaultNotifier(resolver, database),
-		EventBus:     eventBus,
+		Hub:          hub,
+		SyncTracker:  service.NewSyncTracker(),
 		ProviderDest: resolver,
 	}
+
+	// Recover sync goroutines for DRs that were active before restart
+	svc.RecoverActiveSyncs()
 
 	// --- Build handler with all injected dependencies ---
 	h := handler.NewHandler(
@@ -86,14 +86,8 @@ func main() {
 		cpiManager,
 		xsuaaClient,
 		resolver,
-		eventBus,
+		hub,
 	)
-
-	// Background sync and SSE are coupled: auto-sync only makes sense when
-	// real-time push is available; otherwise users trigger sync manually.
-	if enableSSE {
-		svc.StartBackgroundSync(ctx, 15*time.Second)
-	}
 
 	// --- Setup Gin router ---
 	router := gin.New()

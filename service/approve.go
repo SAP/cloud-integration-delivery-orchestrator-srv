@@ -71,8 +71,7 @@ func (s *Service) RequestApproval(drID uint, currentUserID string, approvers []s
 	}
 
 	if dr.AggregateStatus != lifecycle.AggWaitingApprove {
-		s.publishDrStatus(drID, dr.AggregateStatus, lifecycle.AggWaitingApprove)
-		s.publishCounts()
+		s.NotifyDrUpdated(drID)
 	}
 	return nil
 }
@@ -128,12 +127,7 @@ func (s *Service) Approve(drID uint, approverID string) (*db.DeliveryRequest, er
 	}
 
 	if dr.AggregateStatus != lifecycle.AggAwaitingImport {
-		s.publishDrStatus(drID, dr.AggregateStatus, lifecycle.AggAwaitingImport)
-		s.publishCounts()
-	}
-	// sync import/deploy state after approval
-	if err := s.SyncDeliveryStatus(drID, approverID); err != nil {
-		return nil, err
+		s.NotifyDrUpdated(drID)
 	}
 	approverEmail, err := s.GetUserEmail(context.Background(), approverID)
 	if err != nil {

@@ -17,7 +17,6 @@ func (s *Service) CreateDeliveryRequest(dr *db.DeliveryRequest) error {
 	if err := s.DB.Create(dr).Error; err != nil {
 		return fmt.Errorf("failed to create delivery request: %s", err)
 	}
-	s.publishCounts()
 	return nil
 }
 
@@ -25,7 +24,6 @@ func (s *Service) DeleteDeliveryRequest(id uint) error {
 	if err := s.DB.Delete(&db.DeliveryRequest{}, id).Error; err != nil {
 		return fmt.Errorf("failed to delete delivery request %d: %s", id, err)
 	}
-	s.publishCounts()
 	return nil
 }
 
@@ -242,7 +240,7 @@ func (s *Service) DeleteTenantOps(drID uint, opIDs []uint) error {
 		return errors.New(errMsg)
 	}
 	if drID != 0 {
-		s.publishDrOps(drID, s.snapshotOps(drID))
+		s.NotifyDrUpdated(drID)
 	}
 	return nil
 }
@@ -301,7 +299,7 @@ func (s *Service) InsertTenantOps(ctx context.Context, drID uint, ops []db.Artif
 
 	// Fire-and-forget TR generation for source-tenant ops without a pre-populated TR.
 	// Ops with a pre-populated TR were already validated by TrExist above — skip CAS.
-	// GenerateTransportRequest writes TR state and broadcasts via SSE when done.
+	// GenerateTransportRequest writes TR state and notifies via WebSocket when done.
 	newOpIDs := make([]uint, 0, len(ops))
 	for i := range ops {
 		if ops[i].TenantID == sourceTenant.ID && ops[i].TransportRequestNumber == "" {
@@ -314,6 +312,7 @@ func (s *Service) InsertTenantOps(ctx context.Context, drID uint, ops []db.Artif
 		}()
 	}
 
+	s.NotifyDrUpdated(drID)
 	return ops, nil
 }
 
@@ -381,7 +380,7 @@ func (s *Service) UpdateTenantOps(drID uint, updateItems []OpUpdateItem, user st
 		}
 		return nil, errors.New(errMsg)
 	}
-	s.publishDrOps(drID, s.snapshotOps(drID))
+	s.NotifyDrUpdated(drID)
 	return result, nil
 }
 

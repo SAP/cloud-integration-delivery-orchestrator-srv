@@ -79,7 +79,8 @@ type Service struct {
 	CAS          CasFactory
 	GetUserEmail func(ctx context.Context, userID string) (string, error)
 	Notifier     Notifier
-	EventBus     *EventBus
+	Hub         *WSHub       // WebSocket hub for per-DR event push; nil-safe (no-op when nil)
+	SyncTracker *SyncTracker // manages per-DR sync goroutines; nil-safe (no-op when nil)
 	ProviderDest *cf.DestinationServiceClient // provider-side Destination Service; used by bootstrap to write per-tenant CPIDELIVERY_* destinations
 
 	// drSyncLocks prevents concurrent SyncDeliveryStatus calls for the same DR.

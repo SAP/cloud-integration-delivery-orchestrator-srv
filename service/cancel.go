@@ -23,11 +23,13 @@ var cancellableStatuses = map[lifecycle.AggregateStatus]bool{
 func (s *Service) CancelDeliveryRequest(drID uint, userID string, reason string) error {
 	before := s.captureDrSnapshot(drID)
 
-	// 1. Sync status first to get latest state from TMS/CPI
+	// 1. Best-effort sync to get latest state from TMS/CPI.
+	// Ignored errors: "not approved yet" (PENDING/WAITING_APPROVAL are cancellable without sync),
+	// "already in progress" (tracker is running — proceed with DB state as-is).
+	// cancellableStatuses guard at step 3 is the authoritative safety check.
 	if err := s.SyncDeliveryStatus(drID, userID); err != nil {
-		// Ignore "not approved yet" error - PENDING/WAITING_APPROVAL are cancellable
-		// For these statuses, no operations have started yet, so DB status is accurate
-		if !strings.Contains(err.Error(), "has not been approved yet") {
+		if !strings.Contains(err.Error(), "has not been approved yet") &&
+			!strings.Contains(err.Error(), "already in progress") {
 			return fmt.Errorf("failed to sync delivery status before cancel: %s", err.Error())
 		}
 	}
@@ -52,9 +54,8 @@ func (s *Service) CancelDeliveryRequest(drID uint, userID string, reason string)
 	}
 
 	after := s.captureDrSnapshot(drID)
-	if before.Exists && after.Exists && before.Status != after.Status {
-		s.publishDrStatus(drID, before.Status, after.Status)
-		s.publishCounts()
+	if before.Exists && after.Exists && (before.Status != after.Status || before.OpsKey != after.OpsKey) {
+		s.NotifyDrUpdated(drID)
 	}
 
 	// 5. Create cancellation condition

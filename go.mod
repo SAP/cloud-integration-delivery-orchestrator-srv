@@ -7,6 +7,7 @@ toolchain go1.24.6
 require (
 	github.com/cloudfoundry-community/go-cfenv v1.18.0
 	github.com/cloudfoundry/go-cfclient/v3 v3.0.0-alpha.20
+	github.com/coder/websocket v1.8.15
 	github.com/gin-contrib/zap v1.1.3
 	github.com/gin-gonic/gin v1.10.0
 	github.com/go-git/go-git/v5 v5.16.2

@@ -61,7 +61,7 @@ func (s *Service) BatchImportTenantOps(drID uint, opIDs []uint, targetTenantID u
 	if err != nil {
 		return false, err
 	}
-	s.publishDrOps(drID, s.snapshotOps(drID))
+	s.NotifyDrUpdated(drID)
 
 	// trigger async import in goroutine to avoid blocking
 	go func(drID uint, targetNodeID uint, targetTenantName string, trs []uint, ops []db.ArtifactTenantOperation, user string) {
@@ -76,7 +76,7 @@ func (s *Service) BatchImportTenantOps(drID uint, opIDs []uint, targetTenantID u
 				ops[i].ImportState = lifecycle.ImportFailed
 			}
 			_ = s.batchUpdateOps(ops)
-			s.publishDrOps(drID, s.snapshotOps(drID))
+			s.NotifyDrUpdated(drID)
 
 			condition := db.Condition{
 				DeliveryRequestID: drID,
@@ -99,6 +99,9 @@ func (s *Service) BatchImportTenantOps(drID uint, opIDs []uint, targetTenantID u
 			Message:           fmt.Sprintf("batch import triggered in tenant %s (node %d) by %s. Action ID: %d.\nArtifacts:\n%s", targetTenantName, targetNodeID, userEmail, actionID, strings.Join(artifactList, "\n")),
 		}
 		s.BatchInsertConditions([]db.Condition{condition})
+
+		// TMS is now processing — start polling to track import progress
+		s.StartDRSync(drID)
 	}(drID, targetNodeID, targetTenant.Name, trs, ops, userID)
 
 	return true, nil
@@ -149,7 +152,7 @@ func (s *Service) BatchDeployTenantOps(drID uint, opIDs []uint, targetTenantID u
 	if err != nil {
 		return false, err
 	}
-	s.publishDrOps(drID, s.snapshotOps(drID))
+	s.NotifyDrUpdated(drID)
 
 	// trigger async deploy in goroutine to avoid blocking
 	go func(drID uint, tenant *db.CpiTenant, ops []db.ArtifactTenantOperation, user string) {
@@ -181,7 +184,7 @@ func (s *Service) BatchDeployTenantOps(drID uint, opIDs []uint, targetTenantID u
 		// update failed ops state to DeployFailed in database
 		if len(failedOps) > 0 {
 			_ = s.batchUpdateOps(failedOps)
-			s.publishDrOps(drID, s.snapshotOps(drID))
+			s.NotifyDrUpdated(drID)
 		}
 
 		// record conditions based on results
@@ -212,6 +215,9 @@ func (s *Service) BatchDeployTenantOps(drID uint, opIDs []uint, targetTenantID u
 			}
 			s.BatchInsertConditions([]db.Condition{condition})
 		}
+
+		// CPI is now processing — start polling to track deploy progress
+		s.StartDRSync(drID)
 	}(drID, tenant, validOps, userID)
 
 	return true, nil

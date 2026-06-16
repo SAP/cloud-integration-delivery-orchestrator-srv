@@ -97,6 +97,7 @@ func (h *Handler) UpdateDr(c *gin.Context) {
 		Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
+	h.svc.NotifyDrUpdated(existing.ID)
 	OK(c, dr)
 }
 
