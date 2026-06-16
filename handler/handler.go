@@ -53,6 +53,17 @@ func FailErrors(c *gin.Context, status int, message string, errors any) {
 	c.AbortWithStatusJSON(status, gin.H{"message": message, "errors": errors})
 }
 
+// FailCode sends an error response with a machine-readable code + human message.
+// The "code" field allows the frontend to classify errors without parsing strings.
+func FailCode(c *gin.Context, status int, code, message string) {
+	c.AbortWithStatusJSON(status, gin.H{"code": code, "message": message})
+}
+
+// FailCodeErrors sends an error response with code + message + structured error details.
+func FailCodeErrors(c *gin.Context, status int, code, message string, errors any) {
+	c.AbortWithStatusJSON(status, gin.H{"code": code, "message": message, "errors": errors})
+}
+
 func NewHandler(
 	svc *service.Service,
 	db *gorm.DB,

@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"mmt-delivery/pkg/errcode"
 )
 
 // --- Integration Config CRUD ---
@@ -13,7 +14,7 @@ import (
 func (h *Handler) GetIntegrations(ctx *gin.Context) {
 	configs, err := h.svc.GetAllIntegrationConfigs()
 	if err != nil {
-		Fail(ctx, 500, fmt.Sprintf("failed to get integration configs: %s", err))
+		FailCode(ctx, 500, errcode.Internal, fmt.Sprintf("failed to get integration configs: %s", err))
 		return
 	}
 	OK(ctx, configs)
@@ -29,13 +30,13 @@ func (h *Handler) UpdateIntegration(ctx *gin.Context) {
 		Description     string `json:"description"`
 	}
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		Fail(ctx, 400, fmt.Sprintf("invalid request body: %s", err))
+		FailCode(ctx, 400, errcode.InvalidInput, fmt.Sprintf("invalid request body: %s", err))
 		return
 	}
 
 	config, err := h.svc.UpdateIntegrationConfig(integrationType, req.DestinationName, req.Enabled, req.Description)
 	if err != nil {
-		Fail(ctx, 500, fmt.Sprintf("failed to update integration '%s': %s", integrationType, err))
+		FailCode(ctx, 500, errcode.Internal, fmt.Sprintf("failed to update integration '%s': %s", integrationType, err))
 		return
 	}
 
@@ -111,7 +112,7 @@ func (h *Handler) TestIntegration(ctx *gin.Context) {
 	integrationType := ctx.Param("type")
 	config, err := h.svc.GetIntegrationConfig(integrationType)
 	if err != nil {
-		Fail(ctx, 404, fmt.Sprintf("integration '%s' not found", integrationType))
+		FailCode(ctx, 404, errcode.NotFound, fmt.Sprintf("integration '%s' not found", integrationType))
 		return
 	}
 	result := h.svc.CheckIntegration(ctx.Request.Context(), *config)
@@ -134,7 +135,7 @@ func (h *Handler) CheckConnectivity(ctx *gin.Context) {
 func (h *Handler) GetLastConnectivity(ctx *gin.Context) {
 	report, err := h.svc.GetLastConnectivityReport()
 	if err != nil {
-		Fail(ctx, http.StatusNotFound, err.Error())
+		FailCode(ctx, http.StatusNotFound, errcode.NotFound, err.Error())
 		return
 	}
 	OK(ctx, report)

@@ -3,6 +3,7 @@ package handler
 import (
 	"github.com/gin-gonic/gin"
 	"mmt-delivery/pkg/cf"
+	"mmt-delivery/pkg/errcode"
 )
 
 // CfNamedResource is a minimal org or space representation returned to the UI.
@@ -55,11 +56,11 @@ func (h *Handler) ListCfOrgs(ctx *gin.Context) {
 
 	orgs, err := cfClient.ListOrgs(ctx.Request.Context())
 	if err != nil {
-		status := 502
 		if code := cf.HTTPStatusCode(err); code == 401 || code == 403 {
-			status = 400
+			FailCode(ctx, 400, errcode.InvalidInput, "CF org list failed: "+err.Error())
+		} else {
+			FailCode(ctx, 502, errcode.UpstreamUnavailable, "CF org list failed: "+err.Error())
 		}
-		Fail(ctx, status, "CF org list failed: "+err.Error())
 		return
 	}
 
@@ -93,11 +94,11 @@ func (h *Handler) ListCfSpaces(ctx *gin.Context) {
 
 	spaces, err := cfClient.ListSpaces(ctx.Request.Context(), body.OrgGUID)
 	if err != nil {
-		status := 502
 		if code := cf.HTTPStatusCode(err); code == 401 || code == 403 {
-			status = 400
+			FailCode(ctx, 400, errcode.InvalidInput, "CF space list failed: "+err.Error())
+		} else {
+			FailCode(ctx, 502, errcode.UpstreamUnavailable, "CF space list failed: "+err.Error())
 		}
-		Fail(ctx, status, "CF space list failed: "+err.Error())
 		return
 	}
 
