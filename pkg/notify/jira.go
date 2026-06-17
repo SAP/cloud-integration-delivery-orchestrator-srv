@@ -89,6 +89,9 @@ func NewJiraClient(resolver *cf.DestinationServiceClient, destName string) (*Jir
 	if err != nil {
 		return nil, fmt.Errorf("failed to get JIRA destination '%s': %s", destName, err)
 	}
+	if dest == nil {
+		return nil, fmt.Errorf("JIRA destination '%s' not found", destName)
+	}
 
 	return &JiraClient{
 		baseURL:    dest.URL,
