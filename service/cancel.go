@@ -70,17 +70,7 @@ func (s *Service) CancelDeliveryRequest(drID uint, userID string, reason string)
 	})
 
 	// 6. Send JIRA notification if configured (async)
-	if dr.JiraLink != "" {
-		go func(jiraLink string, drID uint, message string) {
-			issueKey := s.extractJiraIssueKey(jiraLink)
-			if issueKey == "" {
-				return
-			}
-			if err := s.Notifier.AddDeliveryComment(issueKey, drID, message, "Canceled"); err != nil {
-				s.Logger.Errorf("Failed to add JIRA comment for cancellation: %s", err)
-			}
-		}(dr.JiraLink, drID, conditionMsg)
-	}
+	s.PostJiraComment(dr.JiraLink, drID, conditionMsg, "Canceled")
 
 	// 7. Send email notification to related users (async)
 	go func() {

@@ -148,6 +148,11 @@ func (s *Service) syncDeployState(deliveryRequestID uint, user string) []db.Cond
 			},
 		}
 	}
+
+	// Pre-load JiraLink once for JIRA notifications (avoids repeated DB queries per op)
+	var dr db.DeliveryRequest
+	s.DB.Select("jira_link").First(&dr, deliveryRequestID)
+
 	for i := range ops {
 		op := &ops[i]
 		if op.DeployState != lifecycle.DeployInProgress {
@@ -217,14 +222,16 @@ func (s *Service) syncDeployState(deliveryRequestID uint, user string) []db.Cond
 				Message:                   fmt.Sprintf("artifact %s (version %s) deploy failed in tenant %s. please check in CPI tenant %s", op.ArtifactTechID, op.ArtifactVersion, op.Tenant.Name, op.Tenant.PirApiDestinationName),
 			})
 		}
-		// if deployed, save to condition
+		// if deployed, save to condition and notify JIRA
 		if state == lifecycle.DeployComplete {
+			conditionMsg := fmt.Sprintf("artifact %s (version %s), deployed in %s. deployed by: %s, at: %s", op.ArtifactTechID, op.ArtifactVersion, op.Tenant.Name, rt.DeployedBy, rt.DeployedOn)
 			conditions = append(conditions, db.Condition{
 				DeliveryRequestID:         deliveryRequestID,
 				ArtifactTenantOperationID: op.ID,
 				State:                     lifecycle.CondSuccess,
-				Message:                   fmt.Sprintf("artifact %s (version %s), deployed in %s. deployed by: %s, at: %s", op.ArtifactTechID, op.ArtifactVersion, op.Tenant.Name, rt.DeployedBy, rt.DeployedOn),
+				Message:                   conditionMsg,
 			})
+			s.PostJiraComment(dr.JiraLink, deliveryRequestID, conditionMsg, "Deployed")
 		}
 	}
 	return conditions
@@ -401,18 +408,7 @@ func (s *Service) syncImportState(deliveryRequestID uint, user string) []db.Cond
 				})
 
 				// Send notification to JIRA if configured (same as SUCCEEDED; WARNING is still a successful import)
-				if dr.JiraLink != "" {
-					go func(jiraLink string, drID uint, message string) {
-						issueKey := s.extractJiraIssueKey(jiraLink)
-						if issueKey == "" {
-							s.Logger.Warnf("Failed to extract JIRA issue key from link: %s", jiraLink)
-							return
-						}
-						if err := s.Notifier.AddDeliveryComment(issueKey, drID, message, "Imported"); err != nil {
-							s.Logger.Errorf("Failed to add JIRA comment for import success: %s", err)
-						}
-					}(dr.JiraLink, deliveryRequestID, conditionMsg)
-				}
+				s.PostJiraComment(dr.JiraLink, deliveryRequestID, conditionMsg, "Imported")
 
 				// TMS WARNING: import counts as complete but persist severity-W log lines as CondWarn
 				if strings.EqualFold(nState.Status, "WARNING") {
@@ -470,4 +466,26 @@ func (s *Service) extractJiraIssueKey(jiraURL string) string {
 
 	s.Logger.Warn("Failed to extract JIRA issue key from URL: %s", jiraURL)
 	return ""
+}
+
+// PostJiraComment sends a JIRA comment for a delivery request asynchronously.
+// Preconditions checked (all must pass, otherwise silently skips):
+//   - DR has a non-empty JiraLink
+//   - JiraLink can be parsed to extract issue key
+//   - JIRA integration is enabled and destination is configured
+//
+// Safe to call from any goroutine — fires and forgets.
+func (s *Service) PostJiraComment(jiraLink string, drID uint, message string, status string) {
+	if jiraLink == "" {
+		return
+	}
+	issueKey := s.extractJiraIssueKey(jiraLink)
+	if issueKey == "" {
+		return
+	}
+	go func() {
+		if err := s.Notifier.AddDeliveryComment(issueKey, drID, message, status); err != nil {
+			s.Logger.Errorf("Failed to post JIRA comment (DR #%d, status=%s): %s", drID, status, err)
+		}
+	}()
 }
