@@ -2,24 +2,23 @@ package main
 
 import (
 	"context"
-	"crypto/rsa"
 	"fmt"
 	"strings"
 	"time"
 
 	"mmt-delivery/db"
 	"mmt-delivery/handler"
+	"mmt-delivery/pkg/auth"
 	"mmt-delivery/pkg/cas"
 	"mmt-delivery/pkg/cf"
 	"mmt-delivery/pkg/cpi"
 	"mmt-delivery/pkg/env"
 	"mmt-delivery/pkg/xsuaa"
 	"mmt-delivery/service"
+	"mmt-delivery/web"
 
 	ginzap "github.com/gin-contrib/zap"
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
-	"github.com/lestrrat-go/jwx/jwk"
 )
 
 func main() {
@@ -51,7 +50,6 @@ func main() {
 
 	cpiManager := cpi.NewManager(resolver)
 	casManager := cas.NewManager(database, resolver)
-
 	tmsSvc := service.NewTmsFactory(database, resolver)
 
 	// --- WebSocket Hub (always active) ---
@@ -79,80 +77,52 @@ func main() {
 	svc.RecoverActiveSyncs()
 
 	// --- Build handler with all injected dependencies ---
-	h := handler.NewHandler(
-		svc,
-		database,
-		env.Logger(),
-		cpiManager,
-		xsuaaClient,
-		resolver,
-		hub,
-	)
+	h := handler.NewHandler(svc, database, env.Logger(), cpiManager, xsuaaClient, resolver, hub)
+
+	// --- OAuth2 setup ---
+	oauthCfg, err := auth.LoadOAuthConfigFromEnv()
+	if err != nil {
+		panic("failed to load OAuth config: " + err.Error())
+	}
+
+	sessions := auth.NewSessionStore("__cpi_sid", 12*time.Hour)
+	oauthHandler := auth.NewOAuthHandler(oauthCfg, sessions, env.Logger())
 
 	// --- Setup Gin router ---
 	router := gin.New()
 	router.Use(ginzap.Ginzap(logger, time.RFC3339, true))
 	router.Use(ginzap.RecoveryWithZap(logger, true))
-	router.Use(AuthMiddleware())
 
-	v1Group := router.Group("/api/v1")
-	v2Group := router.Group("/api/v2")
+	// --- Public routes (no auth) ---
+	router.GET("/auth/login", oauthHandler.LoginHandler)
+	router.GET("/login/callback", oauthHandler.CallbackHandler)
 
-	h.SetupRoutes(v1Group, v2Group, RequireScope)
+	// --- Session-required routes ---
+	sessionGroup := router.Group("")
+	sessionGroup.Use(auth.SessionMiddleware(sessions, "/auth/login", env.Logger()))
+	{
+		sessionGroup.GET("/user-api/currentUser", handler.HandleCurrentUser(sessions, oauthCfg.UserInfoURL()))
+		sessionGroup.GET("/logout", handler.HandleLogout(sessions, oauthCfg.LogoutURL()))
+	}
+
+	// --- API routes (session OR Bearer token + scope) ---
+	apiGroup := router.Group("")
+	apiGroup.Use(auth.Middleware(sessions, env.Logger()))
+	{
+		v1Group := apiGroup.Group("/api/v1")
+		v2Group := apiGroup.Group("/api/v2")
+		h.SetupRoutes(v1Group, v2Group, RequireScope)
+	}
+
+	// --- Static files (SPA fallback) — requires session (same as Approuter) ---
+	handler.SetupStaticRoutes(router, web.DistFS, sessions, "/auth/login")
 
 	if err := router.Run(":8080"); err != nil {
 		panic(err)
 	}
 }
 
-func keyFromJKU(jku string, kid string) (*rsa.PublicKey, error) {
-	set, err := jwk.Fetch(context.Background(), jku)
-	if err != nil {
-		return nil, err
-	}
-	key, ok := set.LookupKeyID(kid)
-	if !ok {
-		return nil, fmt.Errorf("kid %s not found in JWKS", kid)
-	}
-	var rsaPubKey rsa.PublicKey
-	if err := key.Raw(&rsaPubKey); err != nil {
-		return nil, err
-	}
-	return &rsaPubKey, nil
-}
-
-func AuthMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		auth := c.GetHeader("Authorization")
-		tokenStr := strings.TrimPrefix(auth, "Bearer ")
-		token, err := jwt.ParseWithClaims(tokenStr, &db.UaaClaims{}, func(t *jwt.Token) (any, error) {
-			jku, _ := t.Header["jku"].(string)
-			kid, _ := t.Header["kid"].(string)
-			if jku == "" || kid == "" {
-				return nil, fmt.Errorf("missing jku or kid in header")
-			}
-			return keyFromJKU(jku, kid)
-		})
-		if err != nil || !token.Valid {
-			c.AbortWithStatusJSON(403, gin.H{"message": "invalid token: " + err.Error()})
-			return
-		}
-		claims := token.Claims.(*db.UaaClaims)
-
-		// Check token expiration
-		if claims.ExpiresAt != nil && claims.ExpiresAt.Before(time.Now()) {
-			c.AbortWithStatusJSON(401, gin.H{"message": "token has expired"})
-			return
-		}
-
-		c.Set("user_name", claims.UserName)
-		c.Set("scope", claims.Scope)
-		c.Set("origin", claims.Origin)
-		c.Set("uaa_claim", *claims)
-		c.Next()
-	}
-}
-
+// RequireScope checks that the authenticated user has the required scope suffix.
 func RequireScope(requiredScope string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		claims, exists := c.Get("uaa_claim")

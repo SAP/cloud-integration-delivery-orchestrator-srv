@@ -38,7 +38,7 @@ func NewClient(ctx context.Context) (*UaaClient, error) {
 		return globalClient, nil
 	}
 
-	v := env.UaaCredential()
+	v := env.ApiUaaCredential()
 	client, err := env.NewClient(ctx, v.Clientid, v.Clientsecret, v.AuthUrl, v.ApiUrl)
 	if err != nil {
 		return nil, err
