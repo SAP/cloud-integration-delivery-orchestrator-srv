@@ -21,6 +21,11 @@ func (h *Handler) HandleUaaUserEmailSearch(c *gin.Context) {
 
 func (h *Handler) HandleUaaUserIDSearch(c *gin.Context) {
 	uid := c.Param("id")
+	// Synthetic user IDs (e.g. background sync) are not real UAA users
+	if uid == "system" {
+		OK(c, gin.H{"userName": "system", "email": "System"})
+		return
+	}
 	userInfo, err := h.xsuaa.UserInfo(c, uid)
 	if err != nil {
 		Fail(c, 500, err.Error())
