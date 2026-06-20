@@ -3,6 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httputil"
+	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -114,8 +118,37 @@ func main() {
 		h.SetupRoutes(v1Group, v2Group, RequireScope)
 	}
 
-	// --- Static files (SPA fallback) — requires session (same as Approuter) ---
-	handler.SetupStaticRoutes(router, web.DistFS, sessions, "/auth/login")
+	// --- Static files / Dev proxy ---
+	if viteURL := os.Getenv("VITE_DEV_URL"); viteURL != "" {
+		// Development: reverse-proxy to Vite dev server (preserves HMR).
+		// Session check ensures unauthenticated users get redirected to XSUAA
+		// via top-level navigation (same as production).
+		target, err := url.Parse(viteURL)
+		if err != nil {
+			panic("invalid VITE_DEV_URL: " + err.Error())
+		}
+		proxy := httputil.NewSingleHostReverseProxy(target)
+		proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+			http.Error(w, "Vite dev server unreachable: "+err.Error(), 502)
+		}
+		router.NoRoute(func(c *gin.Context) {
+			// Check session before proxying (same as production static serving)
+			cookie, err := c.Cookie(sessions.CookieName())
+			if err != nil || cookie == "" {
+				c.Redirect(302, "/auth/login?redirect="+url.QueryEscape(c.Request.URL.Path))
+				return
+			}
+			if _, ok := sessions.Get(cookie); !ok {
+				c.Redirect(302, "/auth/login?redirect="+url.QueryEscape(c.Request.URL.Path))
+				return
+			}
+			proxy.ServeHTTP(c.Writer, c.Request)
+		})
+		env.Logger().Infof("DEV MODE: proxying static files to Vite at %s", viteURL)
+	} else {
+		// Production: serve embedded static files
+		handler.SetupStaticRoutes(router, web.DistFS, sessions, "/auth/login")
+	}
 
 	if err := router.Run(":8080"); err != nil {
 		panic(err)
