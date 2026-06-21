@@ -224,7 +224,7 @@ func (c *CpiClient) GetPackageIflows(ctx context.Context, packageID string) ([]I
 		Method: http.MethodGet,
 		ApiURL: fullURL,
 	}
-	respBodyContent, _, errReq := c.Do(childCtx, &request)
+	respBodyContent, statusCode, errReq := c.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
 			logger().Errorf("GetPackageIflows request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
@@ -232,11 +232,23 @@ func (c *CpiClient) GetPackageIflows(ctx context.Context, packageID string) ([]I
 		logger().Errorf("Error when getting response content, the error message is %s", errReq)
 		return []IflowItem{}, errReq
 	}
+	if statusCode != 200 {
+		bodyPreview := string(*respBodyContent)
+		if len(bodyPreview) > 500 {
+			bodyPreview = bodyPreview[:500]
+		}
+		logger().Errorf("[DEBUG] GetPackageIflows non-200 response for package %q: status=%d, url=%s, body=%s", packageID, statusCode, fullURL, bodyPreview)
+		return []IflowItem{}, fmt.Errorf("CPI API returned status %d for package %q", statusCode, packageID)
+	}
 	var iflowsResp PackageIflowsResp
 	jsonUnmarshalError := json.Unmarshal(*respBodyContent, &iflowsResp)
 
 	if jsonUnmarshalError != nil {
-		logger().Errorf("Error when unmarshal from json, error message %s\n", jsonUnmarshalError)
+		bodyPreview := string(*respBodyContent)
+		if len(bodyPreview) > 500 {
+			bodyPreview = bodyPreview[:500]
+		}
+		logger().Errorf("[DEBUG] GetPackageIflows JSON unmarshal failed for package %q: err=%s, body=%s", packageID, jsonUnmarshalError, bodyPreview)
 		return []IflowItem{}, jsonUnmarshalError
 	}
 
@@ -458,7 +470,7 @@ func (c *CpiClient) GetPackageScriptcollections(ctx context.Context, packageID s
 		Method: http.MethodGet,
 		ApiURL: fullURL,
 	}
-	respBodyContent, _, errReq := c.Do(childCtx, &request)
+	respBodyContent, statusCode, errReq := c.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
 			logger().Errorf("GetPackageScriptcollections request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
@@ -466,11 +478,23 @@ func (c *CpiClient) GetPackageScriptcollections(ctx context.Context, packageID s
 		logger().Errorf("Error when getting response content, the error message is %s", errReq)
 		return []ScriptCollectionItem{}, errReq
 	}
+	if statusCode != 200 {
+		bodyPreview := string(*respBodyContent)
+		if len(bodyPreview) > 500 {
+			bodyPreview = bodyPreview[:500]
+		}
+		logger().Errorf("[DEBUG] GetPackageScriptcollections non-200 response for package %q: status=%d, url=%s, body=%s", packageID, statusCode, fullURL, bodyPreview)
+		return []ScriptCollectionItem{}, fmt.Errorf("CPI API returned status %d for package %q", statusCode, packageID)
+	}
 	var scriptCollectionsResp ScriptCollectionsResp
 	jsonUnmarshalError := json.Unmarshal(*respBodyContent, &scriptCollectionsResp)
 
 	if jsonUnmarshalError != nil {
-		logger().Errorf("Error when unmarshal from json, error message %s\n", jsonUnmarshalError)
+		bodyPreview := string(*respBodyContent)
+		if len(bodyPreview) > 500 {
+			bodyPreview = bodyPreview[:500]
+		}
+		logger().Errorf("[DEBUG] GetPackageScriptcollections JSON unmarshal failed for package %q: err=%s, body=%s", packageID, jsonUnmarshalError, bodyPreview)
 		return []ScriptCollectionItem{}, jsonUnmarshalError
 	}
 
