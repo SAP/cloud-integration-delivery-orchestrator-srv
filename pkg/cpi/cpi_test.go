@@ -21,6 +21,7 @@ func createTestClient(apiURL string) *CpiClient {
 			ApiURL:      apiURL,
 			TokenExp:    time.Now().Add(24 * time.Hour),
 		},
+		sem: make(chan struct{}, maxConcurrentRequests),
 	}
 }
 

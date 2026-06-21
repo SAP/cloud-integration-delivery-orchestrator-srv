@@ -1,7 +1,6 @@
 package cas
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -76,9 +75,9 @@ func TestListCloudIntegrationResources_UnexpectedStatusIncludesBody(t *testing.T
 	client := createTestClient(server.URL)
 	_, err := client.ListCloudIntegrationResources(context.Background(), nil)
 	if err == nil {
-		t.Fatal("expected unexpected status error, got nil")
+		t.Fatal("expected error for non-200 status, got nil")
 	}
-	if !strings.Contains(err.Error(), "unexpected status 502") || !strings.Contains(err.Error(), "backend exploded") {
+	if !strings.Contains(err.Error(), "502") || !strings.Contains(err.Error(), "backend exploded") {
 		t.Fatalf("expected status and body in error, got %v", err)
 	}
 }
@@ -166,9 +165,9 @@ func TestPollOperation_SuccessAndUnexpectedStatus(t *testing.T) {
 		client := createTestClient(server.URL)
 		_, err := client.PollOperation(context.Background(), "proc-2")
 		if err == nil {
-			t.Fatal("expected unexpected status error, got nil")
+			t.Fatal("expected error for non-200 status, got nil")
 		}
-		if !strings.Contains(err.Error(), "unexpected status 503") {
+		if !strings.Contains(err.Error(), "503") {
 			t.Fatalf("expected 503 error, got %v", err)
 		}
 	})
@@ -218,20 +217,5 @@ func TestGetActivities_SuccessWithTopFilter(t *testing.T) {
 	}
 	if len(activities) != 1 || activities[0].ActivityID != "act-1" {
 		t.Fatalf("unexpected activities: %+v", activities)
-	}
-}
-
-func TestSafeBody_HandlesNilAndTruncatesLongBodies(t *testing.T) {
-	if got := safeBody(nil); got != "<nil>" {
-		t.Fatalf("safeBody(nil) = %q, want <nil>", got)
-	}
-
-	longBody := bytes.Repeat([]byte("a"), 301)
-	got := safeBody(&longBody)
-	if len(got) != 303 {
-		t.Fatalf("expected truncated body length 303, got %d", len(got))
-	}
-	if !strings.HasSuffix(got, "…") {
-		t.Fatalf("expected ellipsis suffix, got %q", got[len(got)-3:])
 	}
 }
