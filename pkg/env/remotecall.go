@@ -103,6 +103,7 @@ func (c *HttpClient) fetchToken(ctx context.Context) error {
 // Do executes an HTTP request with the given context and returns the response body.
 // Before each request it proactively refreshes the token if it is expired or within 30 s of expiry.
 // On 401 (e.g. clock skew), it refreshes the token once and retries.
+// On 429 (rate limit), it waits and retries up to 2 times with exponential backoff.
 // Non-2xx responses are returned as *HttpResponseError.
 func (c *HttpClient) Do(ctx context.Context, request *HttpRequest) ([]byte, error) {
 	c.mu.Lock()
@@ -125,6 +126,21 @@ func (c *HttpClient) Do(ctx context.Context, request *HttpRequest) ([]byte, erro
 		if err := c.fetchToken(ctx); err != nil {
 			logger.Errorf("Error when refreshing token: %s", err)
 			return nil, err
+		}
+		body, statusCode, err = c.doRequest(ctx, request)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// 429: retry with backoff (max 2 retries, 1s then 2s)
+	for attempt := 0; statusCode == 429 && attempt < 2; attempt++ {
+		wait := time.Duration(attempt+1) * time.Second
+		logger.Warnf("Rate limited (429) from %s, retrying in %v (attempt %d/2)", request.ApiURL, wait, attempt+1)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(wait):
 		}
 		body, statusCode, err = c.doRequest(ctx, request)
 		if err != nil {

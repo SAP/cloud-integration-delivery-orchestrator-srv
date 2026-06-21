@@ -47,7 +47,11 @@ type PackagesResponse struct {
 
 type CpiClient struct {
 	*env.HttpClient
+	sem chan struct{} // limits concurrent requests to this CPI tenant
 }
+
+// maxConcurrentRequests limits parallel outgoing requests per CPI tenant to avoid 429.
+const maxConcurrentRequests = 5
 
 func NewClient(ctx context.Context, destinationName string, resolver *cf.DestinationServiceClient) (*CpiClient, error) {
 	cpiDest, err := resolver.GetDestination(ctx, destinationName)
@@ -65,7 +69,18 @@ func NewClient(ctx context.Context, destinationName string, resolver *cf.Destina
 	}
 	apiUrl := base + "/api/v1"
 	client, err := env.NewClient(ctx, cpiDest.ClientId, cpiDest.ClientSecret, cpiDest.TokenServiceURL, apiUrl)
-	return &CpiClient{client}, err
+	return &CpiClient{HttpClient: client, sem: make(chan struct{}, maxConcurrentRequests)}, err
+}
+
+// Do wraps HttpClient.Do with per-tenant concurrency limiting.
+func (c *CpiClient) Do(ctx context.Context, request *env.HttpRequest) ([]byte, error) {
+	select {
+	case c.sem <- struct{}{}:
+		defer func() { <-c.sem }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return c.HttpClient.Do(ctx, request)
 }
 
 func (c *CpiClient) GetPackages(ctx context.Context) ([]CPIPackage, error) {

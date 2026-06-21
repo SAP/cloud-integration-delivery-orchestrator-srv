@@ -28,20 +28,17 @@ type BatchPackageResult struct {
 	Error     string            `json:"error,omitempty"`
 }
 
-// GetPackageArtifactsBatch fetches artifacts for multiple packages with concurrency control.
+// GetPackageArtifactsBatch fetches artifacts for multiple packages concurrently.
+// Concurrency is bounded by the CPI client's built-in semaphore.
 // Failed packages are reported in the result (partial success) rather than aborting the whole operation.
-func GetPackageArtifactsBatch(ctx context.Context, client IntegrationService, packageIDs []string, maxConcurrency int) []BatchPackageResult {
+func GetPackageArtifactsBatch(ctx context.Context, client IntegrationService, packageIDs []string) []BatchPackageResult {
 	results := make([]BatchPackageResult, len(packageIDs))
-	sem := make(chan struct{}, maxConcurrency)
 	var wg sync.WaitGroup
 
 	for i, pkgID := range packageIDs {
 		wg.Add(1)
 		go func(idx int, pid string) {
 			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
 			arts, err := GetPackageArtifacts(ctx, client, pid)
 			if err != nil {
 				results[idx] = BatchPackageResult{PackageID: pid, Error: err.Error()}

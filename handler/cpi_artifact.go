@@ -92,7 +92,6 @@ func (h *Handler) GetDestinationsHandler(ctx *gin.Context) {
 
 // GetPackageArtifactsHandler returns all design-time artifacts (IFlows + ScriptCollections)
 // for one or more packages, merged into a result list per package.
-// Concurrency is limited to avoid CPI API rate limiting (429).
 // Partial success: failed packages are reported with error messages rather than aborting.
 //
 // GET /api/v1/tenant/packages/artifacts?tenant=<tenantID>&packages=<pkg1,pkg2,...>
@@ -114,8 +113,7 @@ func (h *Handler) GetPackageArtifactsHandler(ctx *gin.Context) {
 		return
 	}
 
-	const maxConcurrency = 3
-	results := service.GetPackageArtifactsBatch(ctx, cpiClient, packageIDs, maxConcurrency)
+	results := service.GetPackageArtifactsBatch(ctx, cpiClient, packageIDs)
 	OK(ctx, results)
 }
 
