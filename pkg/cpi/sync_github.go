@@ -90,7 +90,7 @@ func (c *CpiClient) DownloadArtifact(ctx context.Context, artifactId, artifactVe
 		Method: http.MethodGet,
 		ApiURL: fullURL,
 	}
-	artifactContent, _, err := c.Do(childCtx, &request) // zip content
+	artifactContent, err := c.Do(childCtx, &request) // zip content
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			logger().Errorf("DownloadArtifact request timeout after %v: %s", consts.LongRequestTimeout, fullURL)
@@ -110,7 +110,7 @@ func (c *CpiClient) DownloadArtifact(ctx context.Context, artifactId, artifactVe
 	}
 	defer artifactFile.Close()
 
-	if _, err := artifactFile.Write(*artifactContent); err != nil {
+	if _, err := artifactFile.Write(artifactContent); err != nil {
 		return fmt.Errorf("failed to write artifact content to file %s: %w", artifactFilePath, err)
 	}
 
@@ -197,14 +197,14 @@ func (c *CpiClient) UploadArtifact(ctx context.Context, artifactId string, artif
 		ApiURL:      fmt.Sprintf("%s/IntegrationDesigntimeArtifacts", c.ApiURL),
 		RequestBody: bytes.NewBuffer(requestBody),
 	}
-	response, _, err := c.Do(childCtx, &request)
+	response, err := c.Do(childCtx, &request)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			logger().Errorf("UploadArtifact request timeout after %v: %s/IntegrationDesigntimeArtifacts", consts.ImportTimeout, c.ApiURL)
 		}
 		return fmt.Errorf("error while uploading artifact: %s", err)
 	}
-	logger().Infof("Artifact %s:%s uploaded successfully, response: %s", artifactId, artifactVersion, string(*response))
+	logger().Infof("Artifact %s:%s uploaded successfully, response: %s", artifactId, artifactVersion, string(response))
 	return nil
 }
 

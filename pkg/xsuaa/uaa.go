@@ -71,7 +71,7 @@ func (uaa *UaaClient) UserInfo(ctx context.Context, userID string) (*db.UserInfo
 		ApiURL: fullUrl,
 		Method: http.MethodGet,
 	}
-	body, _, err := uaa.Do(childCtx, &request)
+	body, err := uaa.Do(childCtx, &request)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			logger().Errorf("UserInfo request timeout after %v: %s", consts.DefaultRequestTimeout, fullUrl)
@@ -80,7 +80,7 @@ func (uaa *UaaClient) UserInfo(ctx context.Context, userID string) (*db.UserInfo
 		return nil, err
 	}
 	var resource Resource
-	if err := json.Unmarshal(*body, &resource); err != nil {
+	if err := json.Unmarshal(body, &resource); err != nil {
 		logger().Errorf("Error when unmarshal uaa user response, %s", err)
 		return nil, err
 	}
@@ -122,7 +122,7 @@ func (uaa *UaaClient) SearchByEmail(ctx context.Context, email string, curUserOr
 		Method: http.MethodGet,
 	}
 
-	respBodyContent, _, err := uaa.Do(childCtx, &request)
+	respBodyContent, err := uaa.Do(childCtx, &request)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			logger().Errorf("SearchByEmail request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
@@ -131,7 +131,7 @@ func (uaa *UaaClient) SearchByEmail(ctx context.Context, email string, curUserOr
 		return []db.UserInfo{}, err
 	}
 	var document Document
-	if err := json.Unmarshal(*respBodyContent, &document); err != nil {
+	if err := json.Unmarshal(respBodyContent, &document); err != nil {
 		logger().Errorf("Error when unmarshal uaa users response, %s", err)
 		return []db.UserInfo{}, err
 	}

@@ -203,18 +203,15 @@ func (c *CasClient) ListCloudIntegrationResources(ctx context.Context, packageID
 	fullURL += "?" + params.Encode()
 	req := &env.HttpRequest{ApiURL: fullURL, Method: http.MethodGet}
 
-	body, statusCode, err := c.Do(childCtx, req)
+	body, err := c.Do(childCtx, req)
 	if err != nil {
 		return nil, fmt.Errorf("ListCloudIntegrationResources: %w", err)
-	}
-	if statusCode != http.StatusOK {
-		return nil, fmt.Errorf("ListCloudIntegrationResources: unexpected status %d: %s", statusCode, safeBody(body))
 	}
 
 	var resp struct {
 		ContentResources []CatalogContentResource `json:"contentResources"`
 	}
-	if err := json.Unmarshal(*body, &resp); err != nil {
+	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, fmt.Errorf("ListCloudIntegrationResources: unmarshal: %w", err)
 	}
 
@@ -253,20 +250,17 @@ func (c *CasClient) TriggerExport(ctx context.Context, req ExportRequest) (*Expo
 		RequestBody: bytes.NewBuffer(payload),
 	}
 
-	body, statusCode, err := c.Do(childCtx, httpReq)
+	body, err := c.Do(childCtx, httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("TriggerExport: %w", err)
 	}
-	if statusCode != http.StatusOK && statusCode != http.StatusAccepted {
-		return nil, fmt.Errorf("TriggerExport: unexpected status %d: %s", statusCode, safeBody(body))
-	}
 
 	var resp ExportResponse
-	if err := json.Unmarshal(*body, &resp); err != nil {
+	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, fmt.Errorf("TriggerExport: unmarshal: %w", err)
 	}
 	if resp.ProcessID == "" {
-		return nil, fmt.Errorf("TriggerExport: response missing processId: %s", safeBody(body))
+		return nil, fmt.Errorf("TriggerExport: response missing processId: %s", string(body))
 	}
 	logger().Infow("CAS export triggered", "processId", resp.ProcessID, "activityId", resp.ActivityID)
 	return &resp, nil
@@ -281,16 +275,13 @@ func (c *CasClient) PollOperation(ctx context.Context, processID string) (*Opera
 	fullURL := fmt.Sprintf("%s/v1/operations/%s?messages=true", c.ApiURL, processID)
 	req := &env.HttpRequest{ApiURL: fullURL, Method: http.MethodGet}
 
-	body, statusCode, err := c.Do(childCtx, req)
+	body, err := c.Do(childCtx, req)
 	if err != nil {
 		return nil, fmt.Errorf("PollOperation(%s): %w", processID, err)
 	}
-	if statusCode != http.StatusOK {
-		return nil, fmt.Errorf("PollOperation(%s): unexpected status %d: %s", processID, statusCode, safeBody(body))
-	}
 
 	var status OperationStatus
-	if err := json.Unmarshal(*body, &status); err != nil {
+	if err := json.Unmarshal(body, &status); err != nil {
 		return nil, fmt.Errorf("PollOperation(%s): unmarshal: %w", processID, err)
 	}
 	return &status, nil
@@ -306,16 +297,13 @@ func (c *CasClient) GetOperationConfig(ctx context.Context, processID string) (*
 	fullURL := fmt.Sprintf("%s/v1/operations/%s/config?logs=true", c.ApiURL, processID)
 	req := &env.HttpRequest{ApiURL: fullURL, Method: http.MethodGet}
 
-	body, statusCode, err := c.Do(childCtx, req)
+	body, err := c.Do(childCtx, req)
 	if err != nil {
 		return nil, fmt.Errorf("GetOperationConfig(%s): %w", processID, err)
 	}
-	if statusCode != http.StatusOK {
-		return nil, fmt.Errorf("GetOperationConfig(%s): unexpected status %d: %s", processID, statusCode, safeBody(body))
-	}
 
 	var cfg OperationConfig
-	if err := json.Unmarshal(*body, &cfg); err != nil {
+	if err := json.Unmarshal(body, &cfg); err != nil {
 		return nil, fmt.Errorf("GetOperationConfig(%s): unmarshal: %w", processID, err)
 	}
 	return &cfg, nil
@@ -337,31 +325,16 @@ func (c *CasClient) GetActivities(ctx context.Context, requestor string, top int
 	fullURL += "?" + params.Encode()
 	req := &env.HttpRequest{ApiURL: fullURL, Method: http.MethodGet}
 
-	body, statusCode, err := c.Do(childCtx, req)
+	body, err := c.Do(childCtx, req)
 	if err != nil {
 		return nil, fmt.Errorf("GetActivities: %w", err)
-	}
-	if statusCode != http.StatusOK {
-		return nil, fmt.Errorf("GetActivities: unexpected status %d: %s", statusCode, safeBody(body))
 	}
 
 	var resp struct {
 		Activities []Activity `json:"activities"`
 	}
-	if err := json.Unmarshal(*body, &resp); err != nil {
+	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, fmt.Errorf("GetActivities: unmarshal: %w", err)
 	}
 	return resp.Activities, nil
-}
-
-// safeBody converts a response body pointer to a truncated string for error messages.
-func safeBody(b *[]byte) string {
-	if b == nil {
-		return "<nil>"
-	}
-	s := string(*b)
-	if len(s) > 300 {
-		return s[:300] + "…"
-	}
-	return s
 }
