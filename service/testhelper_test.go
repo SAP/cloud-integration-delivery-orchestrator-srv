@@ -487,20 +487,24 @@ func (m *mockNotifier) AddDeliveryComment(issueKey string, drID uint, message st
 
 // mockCasClient implements CasService for testing.
 type mockCasClient struct {
-	catalog     []cas.CatalogContentResource
-	catalogErr  error
-	exportResp  *cas.ExportResponse
-	exportErr   error
-	pollStatus  *cas.OperationStatus
-	pollErr     error
-	opConfig    *cas.OperationConfig
-	opConfigErr error
+	catalog        []cas.CatalogContentResource
+	catalogErr     error
+	exportResp     *cas.ExportResponse
+	exportErr      error
+	pollStatus     *cas.OperationStatus
+	pollErr        error
+	opConfig       *cas.OperationConfig
+	opConfigErr    error
+	panicOnExport  bool // if true, TriggerExport panics instead of returning
 }
 
 func (m *mockCasClient) ListCloudIntegrationResources(_ context.Context, _ []string) ([]cas.CatalogContentResource, error) {
 	return m.catalog, m.catalogErr
 }
 func (m *mockCasClient) TriggerExport(_ context.Context, _ cas.ExportRequest) (*cas.ExportResponse, error) {
+	if m.panicOnExport {
+		panic("simulated CAS client panic")
+	}
 	return m.exportResp, m.exportErr
 }
 func (m *mockCasClient) PollOperation(_ context.Context, _ string) (*cas.OperationStatus, error) {

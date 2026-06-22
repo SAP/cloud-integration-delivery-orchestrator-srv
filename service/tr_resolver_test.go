@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"mmt-delivery/consts"
@@ -611,5 +612,67 @@ func TestGenerateTransportRequest_CatalogError(t *testing.T) {
 	)
 	if fatalErr == nil {
 		t.Fatal("expected fatal error on catalog failure, got nil")
+	}
+}
+
+// =============================================================================
+// P2 — Panic recovery: goroutine panic does not deadlock, op marked TR_FAILED
+// =============================================================================
+
+func TestGenerateTransportRequest_PanicRecovery(t *testing.T) {
+	s := setupTRTest(t)
+	suffix := t.Name()
+	pkgID := "pkg-iflow-" + suffix
+
+	op := seedOp(t, db.ArtifactTenantOperation{
+		DeliveryRequestID: s.dr.ID,
+		ArtifactTechID:    "iflow-" + suffix,
+		ArtifactVersion:   "1.0.0",
+		ArtifactName:      "Test IFlow",
+		PackageID:         pkgID,
+		TenantID:          s.tenant.ID,
+	})
+
+	casMock := &mockCasClient{
+		catalog:       makeCatalog(pkgID, "Test IFlow"),
+		panicOnExport: true, // TriggerExport will panic
+	}
+	svc := newTestService(nil, testServiceOpts{cas: casMock})
+
+	succeeded, failed, fatalErr := svc.GenerateTransportRequest(
+		context.Background(), s.tenant.ID, s.dr.ID, []uint{op.ID},
+	)
+
+	// Must not deadlock — function returns normally.
+	if fatalErr != nil {
+		t.Fatalf("unexpected fatal error: %v", fatalErr)
+	}
+	if len(succeeded) != 0 {
+		t.Errorf("expected 0 succeeded, got %d", len(succeeded))
+	}
+	if _, ok := failed[op.ID]; !ok {
+		t.Fatal("expected op in failed map after panic recovery")
+	}
+
+	// Op state must be TR_FAILED in DB.
+	var updated db.ArtifactTenantOperation
+	if err := testDB.First(&updated, op.ID).Error; err != nil {
+		t.Fatalf("reload op: %v", err)
+	}
+	if updated.RequestState != lifecycle.RequestTrFailed {
+		t.Errorf("expected request_state=%q, got %q", lifecycle.RequestTrFailed, updated.RequestState)
+	}
+	if updated.TrError == "" {
+		t.Error("expected non-empty tr_error after panic")
+	}
+
+	// Condition must be written with "panic" context.
+	var cond db.Condition
+	if err := testDB.Where("delivery_request_id = ? AND state = ?", s.dr.ID, lifecycle.CondError).
+		Order("id DESC").First(&cond).Error; err != nil {
+		t.Fatalf("expected error condition, got: %v", err)
+	}
+	if !strings.Contains(cond.Message, "panic") {
+		t.Errorf("condition message should mention panic, got: %q", cond.Message)
 	}
 }

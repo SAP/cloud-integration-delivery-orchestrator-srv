@@ -262,6 +262,11 @@ func (s *Service) GenerateTransportRequest(ctx context.Context, tenantID, delive
 
 	for _, op := range ops {
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					resultCh <- opResult{opID: op.ID, err: fmt.Errorf("panic during TR export for artifact %q: %v", op.ArtifactName, r)}
+				}
+			}()
 			tr, err := s.exportOneTR(ctx, casClient, &tenant, &dr, op, requester)
 			resultCh <- opResult{opID: op.ID, tr: tr, err: err}
 		}()
@@ -270,8 +275,15 @@ func (s *Service) GenerateTransportRequest(ctx context.Context, tenantID, delive
 	succeeded := make(map[uint]*TransportRequest, len(ops))
 	failed := make(map[uint]error)
 
+	// Build opsByID for Condition messages.
+	opsByID := make(map[uint]db.ArtifactTenantOperation, len(ops))
+	for _, op := range ops {
+		opsByID[op.ID] = op
+	}
+
 	for range ops {
 		r := <-resultCh
+		op := opsByID[r.opID]
 		if r.err != nil {
 			failed[r.opID] = r.err
 			if dbErr := s.DB.WithContext(ctx).Model(&db.ArtifactTenantOperation{}).
@@ -283,6 +295,11 @@ func (s *Service) GenerateTransportRequest(ctx context.Context, tenantID, delive
 				env.Logger().Warnw("GenerateTransportRequest: failed to write TR_FAILED for op",
 					"opID", r.opID, "error", dbErr)
 			}
+			_ = s.BatchInsertConditions([]db.Condition{{
+				DeliveryRequestID: deliveryRequestID,
+				State:             lifecycle.CondError,
+				Message:           fmt.Sprintf("TR generation failed for %s %s: %s", op.ArtifactName, op.ArtifactVersion, r.err.Error()),
+			}})
 			continue
 		}
 
@@ -300,6 +317,11 @@ func (s *Service) GenerateTransportRequest(ctx context.Context, tenantID, delive
 			continue
 		}
 
+		_ = s.BatchInsertConditions([]db.Condition{{
+			DeliveryRequestID: deliveryRequestID,
+			State:             lifecycle.CondSuccess,
+			Message:           fmt.Sprintf("TR %s created for %s %s", r.tr.ID, op.ArtifactName, op.ArtifactVersion),
+		}})
 		succeeded[r.opID] = r.tr
 	}
 
