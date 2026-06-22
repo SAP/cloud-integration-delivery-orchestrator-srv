@@ -1,9 +1,0 @@
-.git
-.env
-.history
-__debug_bin*
-artifacts/
-artifacts-example/
-mta_archives/
-coverage.txt
-*.json
