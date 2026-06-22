@@ -47,7 +47,11 @@ type PackagesResponse struct {
 
 type CpiClient struct {
 	*env.HttpClient
+	sem chan struct{} // limits concurrent requests to this CPI tenant
 }
+
+// maxConcurrentRequests limits parallel outgoing requests per CPI tenant to avoid 429.
+const maxConcurrentRequests = 5
 
 func NewClient(ctx context.Context, destinationName string, resolver *cf.DestinationServiceClient) (*CpiClient, error) {
 	cpiDest, err := resolver.GetDestination(ctx, destinationName)
@@ -65,7 +69,18 @@ func NewClient(ctx context.Context, destinationName string, resolver *cf.Destina
 	}
 	apiUrl := base + "/api/v1"
 	client, err := env.NewClient(ctx, cpiDest.ClientId, cpiDest.ClientSecret, cpiDest.TokenServiceURL, apiUrl)
-	return &CpiClient{client}, err
+	return &CpiClient{HttpClient: client, sem: make(chan struct{}, maxConcurrentRequests)}, err
+}
+
+// Do wraps HttpClient.Do with per-tenant concurrency limiting.
+func (c *CpiClient) Do(ctx context.Context, request *env.HttpRequest) ([]byte, error) {
+	select {
+	case c.sem <- struct{}{}:
+		defer func() { <-c.sem }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return c.HttpClient.Do(ctx, request)
 }
 
 func (c *CpiClient) GetPackages(ctx context.Context) ([]CPIPackage, error) {
@@ -78,7 +93,7 @@ func (c *CpiClient) GetPackages(ctx context.Context) ([]CPIPackage, error) {
 		ApiURL: fullURL,
 	}
 
-	respBodyContent, _, errReq := c.Do(childCtx, &request)
+	respBodyContent, errReq := c.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
 			logger().Errorf("GetPackages request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
@@ -88,7 +103,7 @@ func (c *CpiClient) GetPackages(ctx context.Context) ([]CPIPackage, error) {
 	}
 
 	var packcageResp PackagesResponse
-	jsonUnmarshalError := json.Unmarshal(*respBodyContent, &packcageResp)
+	jsonUnmarshalError := json.Unmarshal(respBodyContent, &packcageResp)
 
 	if jsonUnmarshalError != nil {
 		logger().Errorf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
@@ -111,7 +126,7 @@ func (c *CpiClient) GetPackage(ctx context.Context, packageID string) (CPIPackag
 		Method: http.MethodGet,
 		ApiURL: fullURL,
 	}
-	respBodyContent, _, errReq := c.Do(childCtx, &request)
+	respBodyContent, errReq := c.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
 			logger().Errorf("GetPackage request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
@@ -120,7 +135,7 @@ func (c *CpiClient) GetPackage(ctx context.Context, packageID string) (CPIPackag
 		return CPIPackage{}, errReq
 	}
 	var packcageResp PackageResponse
-	jsonUnmarshalError := json.Unmarshal(*respBodyContent, &packcageResp)
+	jsonUnmarshalError := json.Unmarshal(respBodyContent, &packcageResp)
 
 	if jsonUnmarshalError != nil {
 		logger().Errorf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
@@ -155,7 +170,7 @@ func (c *CpiClient) ImportPackage(ctx context.Context, cpiPackage importPackageR
 		ApiURL:      fullURL,
 		RequestBody: bytes.NewBuffer(requestBodyJson),
 	}
-	respBodyContent, _, errReq := c.Do(childCtx, &request)
+	respBodyContent, errReq := c.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
 			logger().Errorf("ImportPackage request timeout after %v: %s", consts.ImportTimeout, fullURL)
@@ -165,7 +180,7 @@ func (c *CpiClient) ImportPackage(ctx context.Context, cpiPackage importPackageR
 	}
 
 	var packcageResp PackageResponse
-	jsonUnmarshalError := json.Unmarshal(*respBodyContent, &packcageResp)
+	jsonUnmarshalError := json.Unmarshal(respBodyContent, &packcageResp)
 
 	if jsonUnmarshalError != nil {
 		logger().Errorf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
@@ -224,7 +239,7 @@ func (c *CpiClient) GetPackageIflows(ctx context.Context, packageID string) ([]I
 		Method: http.MethodGet,
 		ApiURL: fullURL,
 	}
-	respBodyContent, _, errReq := c.Do(childCtx, &request)
+	respBodyContent, errReq := c.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
 			logger().Errorf("GetPackageIflows request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
@@ -233,11 +248,8 @@ func (c *CpiClient) GetPackageIflows(ctx context.Context, packageID string) ([]I
 		return []IflowItem{}, errReq
 	}
 	var iflowsResp PackageIflowsResp
-	jsonUnmarshalError := json.Unmarshal(*respBodyContent, &iflowsResp)
-
-	if jsonUnmarshalError != nil {
-		logger().Errorf("Error when unmarshal from json, error message %s\n", jsonUnmarshalError)
-		return []IflowItem{}, jsonUnmarshalError
+	if err := json.Unmarshal(respBodyContent, &iflowsResp); err != nil {
+		return []IflowItem{}, fmt.Errorf("unmarshal iflows for package %q: %w", packageID, err)
 	}
 
 	return iflowsResp.D.Results, nil
@@ -257,7 +269,7 @@ func (c *CpiClient) GetPackageIflow(ctx context.Context, packageID string, iflow
 		Method: http.MethodGet,
 		ApiURL: fullURL,
 	}
-	respBodyContent, _, errReq := c.Do(childCtx, &request)
+	respBodyContent, errReq := c.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
 			logger().Errorf("GetPackageIflow request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
@@ -266,7 +278,7 @@ func (c *CpiClient) GetPackageIflow(ctx context.Context, packageID string, iflow
 		return IflowItem{}, errReq
 	}
 	var iflowResp IflowResp
-	jsonUnmarshalError := json.Unmarshal(*respBodyContent, &iflowResp)
+	jsonUnmarshalError := json.Unmarshal(respBodyContent, &iflowResp)
 
 	if jsonUnmarshalError != nil {
 		logger().Errorf("Error when unmarshal from json, error message %s\n", jsonUnmarshalError)
@@ -274,7 +286,7 @@ func (c *CpiClient) GetPackageIflow(ctx context.Context, packageID string, iflow
 	}
 
 	if iflowResp.D.ID == "" {
-		return IflowItem{}, fmt.Errorf("design time iflow %s:%s not found: %s", iflowID, iflowVersion, string(*respBodyContent))
+		return IflowItem{}, fmt.Errorf("design time iflow %s:%s not found: %s", iflowID, iflowVersion, string(respBodyContent))
 	}
 
 	return iflowResp.D, nil
@@ -291,7 +303,7 @@ func (c *CpiClient) GetDesignTimeIflow(ctx context.Context, iflowID string, iflo
 		Method: http.MethodGet,
 		ApiURL: fullURL,
 	}
-	respBodyContent, _, errReq := c.Do(childCtx, &request)
+	respBodyContent, errReq := c.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
 			logger().Errorf("GetDesignTimeIflow request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
@@ -300,7 +312,7 @@ func (c *CpiClient) GetDesignTimeIflow(ctx context.Context, iflowID string, iflo
 		return IflowItem{}, errReq
 	}
 	var iflowResp IflowResp
-	jsonUnmarshalError := json.Unmarshal(*respBodyContent, &iflowResp)
+	jsonUnmarshalError := json.Unmarshal(respBodyContent, &iflowResp)
 
 	if jsonUnmarshalError != nil {
 		logger().Errorf("Error when unmarshal from json, error message %s\n", jsonUnmarshalError)
@@ -321,7 +333,7 @@ func (c *CpiClient) DeployIflow(ctx context.Context, iflowID string, iflowVersio
 		Method: http.MethodPost,
 		ApiURL: fullURL,
 	}
-	respBodyContent, _, errReq := c.Do(childCtx, &request)
+	respBodyContent, errReq := c.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
 			logger().Errorf("DeployIflow request timeout after %v: %s", consts.ImportTimeout, fullURL)
@@ -329,7 +341,7 @@ func (c *CpiClient) DeployIflow(ctx context.Context, iflowID string, iflowVersio
 		logger().Errorf("Error when getting response content, the error message is %s", errReq)
 		return taskID, errReq
 	}
-	taskID = string(*respBodyContent)
+	taskID = string(respBodyContent)
 	return taskID, nil
 }
 
@@ -344,7 +356,7 @@ func (c *CpiClient) DeployScriptCollection(ctx context.Context, scriptCollection
 		Method: http.MethodPost,
 		ApiURL: fullURL,
 	}
-	respBodyContent, _, errReq := c.Do(childCtx, &request)
+	respBodyContent, errReq := c.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
 			logger().Errorf("DeployScriptCollection request timeout after %v: %s", consts.ImportTimeout, fullURL)
@@ -352,7 +364,7 @@ func (c *CpiClient) DeployScriptCollection(ctx context.Context, scriptCollection
 		logger().Errorf("Error when getting response content, the error message is %s", errReq)
 		return "", errReq
 	}
-	taskID = string(*respBodyContent)
+	taskID = string(respBodyContent)
 	return taskID, nil
 }
 
@@ -391,7 +403,7 @@ func (c *CpiClient) CheckDeployStatusByTaskID(ctx context.Context, taskID string
 		Method: http.MethodGet,
 		ApiURL: fullURL,
 	}
-	respBodyContent, _, errReq := c.Do(childCtx, &request)
+	respBodyContent, errReq := c.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
 			logger().Errorf("CheckDeployStatusByTaskID request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
@@ -400,7 +412,7 @@ func (c *CpiClient) CheckDeployStatusByTaskID(ctx context.Context, taskID string
 		return "", fmt.Errorf("error when getting response from %s: %s", fullURL, errReq)
 	}
 	var deployStatus DeployStatus
-	jsonUnmarshalError := json.Unmarshal(*respBodyContent, &deployStatus)
+	jsonUnmarshalError := json.Unmarshal(respBodyContent, &deployStatus)
 
 	if jsonUnmarshalError != nil {
 		logger().Errorf("Error when unmarshal from json, error message %s\n", jsonUnmarshalError)
@@ -418,7 +430,7 @@ func (c *CpiClient) DeleteIflow(ctx context.Context, iflowID string, iflowVersio
 		Method: http.MethodGet,
 		ApiURL: fullURL,
 	}
-	_, _, errReq := c.Do(childCtx, &request)
+	_, errReq := c.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
 			logger().Errorf("DeleteIflow request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
@@ -458,7 +470,7 @@ func (c *CpiClient) GetPackageScriptcollections(ctx context.Context, packageID s
 		Method: http.MethodGet,
 		ApiURL: fullURL,
 	}
-	respBodyContent, _, errReq := c.Do(childCtx, &request)
+	respBodyContent, errReq := c.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
 			logger().Errorf("GetPackageScriptcollections request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
@@ -467,11 +479,8 @@ func (c *CpiClient) GetPackageScriptcollections(ctx context.Context, packageID s
 		return []ScriptCollectionItem{}, errReq
 	}
 	var scriptCollectionsResp ScriptCollectionsResp
-	jsonUnmarshalError := json.Unmarshal(*respBodyContent, &scriptCollectionsResp)
-
-	if jsonUnmarshalError != nil {
-		logger().Errorf("Error when unmarshal from json, error message %s\n", jsonUnmarshalError)
-		return []ScriptCollectionItem{}, jsonUnmarshalError
+	if err := json.Unmarshal(respBodyContent, &scriptCollectionsResp); err != nil {
+		return []ScriptCollectionItem{}, fmt.Errorf("unmarshal script collections for package %q: %w", packageID, err)
 	}
 
 	return scriptCollectionsResp.D.Results, nil
@@ -491,7 +500,7 @@ func (c *CpiClient) GetDesignTimeScriptCollection(ctx context.Context, scriptCol
 		Method: http.MethodGet,
 		ApiURL: fullURL,
 	}
-	respBodyContent, _, errReq := c.Do(childCtx, &request)
+	respBodyContent, errReq := c.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
 			logger().Errorf("GetDesignTimeScriptCollection request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
@@ -500,7 +509,7 @@ func (c *CpiClient) GetDesignTimeScriptCollection(ctx context.Context, scriptCol
 		return ScriptCollectionItem{}, errReq
 	}
 	var scriptCollectionResp ScriptCollectionResp
-	jsonUnmarshalError := json.Unmarshal(*respBodyContent, &scriptCollectionResp)
+	jsonUnmarshalError := json.Unmarshal(respBodyContent, &scriptCollectionResp)
 
 	if jsonUnmarshalError != nil {
 		logger().Errorf("Error when unmarshal from json, error message %s\n", jsonUnmarshalError)
@@ -508,7 +517,7 @@ func (c *CpiClient) GetDesignTimeScriptCollection(ctx context.Context, scriptCol
 	}
 
 	if scriptCollectionResp.D.ID == "" {
-		return ScriptCollectionItem{}, fmt.Errorf("design time script collection %s:%s not found: %s", scriptCollectionID, scriptCollectionVersion, string(*respBodyContent))
+		return ScriptCollectionItem{}, fmt.Errorf("design time script collection %s:%s not found: %s", scriptCollectionID, scriptCollectionVersion, string(respBodyContent))
 	}
 
 	return scriptCollectionResp.D, nil
@@ -523,7 +532,7 @@ func (c *CpiClient) DeleteScriptCollection(ctx context.Context, scriptCollection
 		Method: http.MethodGet,
 		ApiURL: fullURL,
 	}
-	_, _, errReq := c.Do(childCtx, &request)
+	_, errReq := c.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
 			logger().Errorf("DeleteScriptCollection request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
@@ -544,7 +553,7 @@ func (c *CpiClient) UndeployRuntimeArtifacts(ctx context.Context, artifactID str
 		Method: http.MethodDelete,
 		ApiURL: fullURL,
 	}
-	_, _, errReq := c.Do(childCtx, &request)
+	_, errReq := c.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
 			logger().Errorf("UndeployRuntimeArtifacts request timeout after %v: %s", consts.ImportTimeout, fullURL)
@@ -581,7 +590,7 @@ func (c *CpiClient) GetRuntimeArtifacts(ctx context.Context) ([]RuntimeArtifact,
 		Method: http.MethodGet,
 		ApiURL: fullURL,
 	}
-	response, _, err := c.Do(childCtx, &request)
+	response, err := c.Do(childCtx, &request)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			logger().Errorf("GetRuntimeArtifacts request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
@@ -589,7 +598,7 @@ func (c *CpiClient) GetRuntimeArtifacts(ctx context.Context) ([]RuntimeArtifact,
 		return nil, err
 	}
 	var runtimeArtifactsResp RuntimeArtifactsResp
-	if err := json.Unmarshal(*response, &runtimeArtifactsResp); err != nil {
+	if err := json.Unmarshal(response, &runtimeArtifactsResp); err != nil {
 		return nil, err
 	}
 	return runtimeArtifactsResp.D.Results, nil
@@ -606,16 +615,16 @@ func (c *CpiClient) CheckUndeployStatus(ctx context.Context, artifactId string) 
 		Method: http.MethodGet,
 		ApiURL: fullUrl,
 	}
-	var response *[]byte
+	var response []byte
 	var err error
-	if response, _, err = c.Do(childCtx, &request); err != nil {
+	if response, err = c.Do(childCtx, &request); err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			logger().Errorf("CheckUndeployStatus request timeout after %v: %s", consts.DefaultRequestTimeout, fullUrl)
 		}
 		return "", fmt.Errorf("failed to get undeploy stauts from %s: %s", fullUrl, err)
 	}
 	var runtimeArtifact RuntimeArtifact
-	if err := json.Unmarshal(*response, &runtimeArtifact); err != nil {
+	if err := json.Unmarshal(response, &runtimeArtifact); err != nil {
 		return "", fmt.Errorf("failed to unmarshal response: %s", err)
 	}
 	if runtimeArtifact.ID == "" {
@@ -637,20 +646,21 @@ func (c *CpiClient) RuntimeArtifact(ctx context.Context, artifactId string) (Run
 		Method: http.MethodGet,
 		ApiURL: fullUrl,
 	}
-	response, code, err := c.Do(childCtx, &request)
+	response, err := c.Do(childCtx, &request)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			logger().Errorf("RuntimeArtifact request timeout after %v: %s", consts.DefaultRequestTimeout, fullUrl)
 		}
-		return RuntimeArtifact{}, fmt.Errorf("failed to get runtime artifact from %s: %s", fullUrl, err)
-	}
-	if code == http.StatusNotFound {
-		return RuntimeArtifact{}, fmt.Errorf("runtime artifact %s not found", artifactId)
+		var httpErr *env.HttpResponseError
+		if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
+			return RuntimeArtifact{}, fmt.Errorf("runtime artifact %s not found", artifactId)
+		}
+		return RuntimeArtifact{}, fmt.Errorf("failed to get runtime artifact from %s: %w", fullUrl, err)
 	}
 	var t struct {
 		D RuntimeArtifact `json:"d"`
 	}
-	if err := json.Unmarshal(*response, &t); err != nil {
+	if err := json.Unmarshal(response, &t); err != nil {
 		return RuntimeArtifact{}, fmt.Errorf("failed to unmarshal response: %s", err)
 	}
 	return t.D, nil

@@ -102,7 +102,7 @@ func (t *TmsClient) GetTransportRequest(ctx context.Context, TrNumber string) (*
 		ApiURL: fullURL,
 		Method: http.MethodGet,
 	}
-	body, _, err := t.Do(childCtx, &request)
+	body, err := t.Do(childCtx, &request)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			logger().Errorf("GetTransportRequest timeout after %v: %s", DefaultRequestTimeout, fullURL)
@@ -110,7 +110,7 @@ func (t *TmsClient) GetTransportRequest(ctx context.Context, TrNumber string) (*
 		return nil, fmt.Errorf("error when getting transport request %s, error message %s", TrNumber, err)
 	}
 	var tr TransportRequestV1
-	if err := json.Unmarshal(*body, &tr); err != nil {
+	if err := json.Unmarshal(body, &tr); err != nil {
 		return nil, fmt.Errorf("error when unmarshalling transport request %s, error message %s", TrNumber, err)
 	}
 	return &tr, nil

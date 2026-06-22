@@ -8,3 +8,4 @@ artifacts/
 mta_archives/
 __debug_bin*
 artifacts-example/
+dist/

@@ -47,7 +47,7 @@ func (t *TmsClient) GetNodes(ctx context.Context) ([]db.TransportNode, error) {
 		ApiURL: fullURL,
 		Method: http.MethodGet,
 	}
-	respBodyContent, _, errReq := t.Do(childCtx, &request)
+	respBodyContent, errReq := t.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
 			logger().Errorf("GetNodes request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
@@ -57,7 +57,7 @@ func (t *TmsClient) GetNodes(ctx context.Context) ([]db.TransportNode, error) {
 	}
 
 	var tmsNodesResp TMSNodesResp
-	jsonUnmarshalError := json.Unmarshal(*respBodyContent, &tmsNodesResp)
+	jsonUnmarshalError := json.Unmarshal(respBodyContent, &tmsNodesResp)
 
 	if jsonUnmarshalError != nil {
 		logger().Errorf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
@@ -94,7 +94,7 @@ func (t *TmsClient) GetNode(ctx context.Context, nodeID uint) (db.TransportNode,
 		ApiURL: fullURL,
 		Method: http.MethodGet,
 	}
-	respBodyContent, _, errReq := t.Do(childCtx, &request)
+	respBodyContent, errReq := t.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
 			logger().Errorf("GetNode request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
@@ -104,7 +104,7 @@ func (t *TmsClient) GetNode(ctx context.Context, nodeID uint) (db.TransportNode,
 	}
 
 	var tmsNodeResp db.TransportNode
-	jsonUnmarshalError := json.Unmarshal(*respBodyContent, &tmsNodeResp)
+	jsonUnmarshalError := json.Unmarshal(respBodyContent, &tmsNodeResp)
 
 	if jsonUnmarshalError != nil {
 		logger().Errorf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
@@ -140,7 +140,7 @@ func (t *TmsClient) GetRoutes(ctx context.Context) ([]db.TransportRoute, error) 
 		ApiURL: fullURL,
 		Method: http.MethodGet,
 	}
-	respBodyContent, _, errReq := t.Do(childCtx, &request)
+	respBodyContent, errReq := t.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
 			logger().Errorf("GetRoutes request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
@@ -150,7 +150,7 @@ func (t *TmsClient) GetRoutes(ctx context.Context) ([]db.TransportRoute, error) 
 	}
 
 	var tmsRoutesResp TMSRoutesResp
-	if err := json.Unmarshal(*respBodyContent, &tmsRoutesResp); err != nil {
+	if err := json.Unmarshal(respBodyContent, &tmsRoutesResp); err != nil {
 		logger().Errorf("Error when unmarshal from json, error message %s", err)
 		return []db.TransportRoute{}, err
 	}
@@ -191,7 +191,7 @@ func (t *TmsClient) GetNodeTransportRequests(ctx context.Context, nodeID uint) (
 		ApiURL: fullURL,
 		Method: http.MethodGet,
 	}
-	respBodyContent, _, errReq := t.Do(childCtx, &request)
+	respBodyContent, errReq := t.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
 			logger().Errorf("GetNodeTransportRequests request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
@@ -201,7 +201,7 @@ func (t *TmsClient) GetNodeTransportRequests(ctx context.Context, nodeID uint) (
 	}
 
 	var nodeTransportRequestsResp NodeTransportRequestsResp
-	jsonUnmarshalError := json.Unmarshal(*respBodyContent, &nodeTransportRequestsResp)
+	jsonUnmarshalError := json.Unmarshal(respBodyContent, &nodeTransportRequestsResp)
 
 	if jsonUnmarshalError != nil {
 		logger().Errorf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
@@ -238,7 +238,7 @@ func (t *TmsClient) ImportTransportRequest(ctx context.Context, nodeID uint, tra
 		Method:      http.MethodPost,
 		RequestBody: bytes.NewBuffer(requestBodyJson),
 	}
-	respBodyContent, _, errReq := t.Do(childCtx, &request)
+	respBodyContent, errReq := t.Do(childCtx, &request)
 
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
@@ -249,7 +249,7 @@ func (t *TmsClient) ImportTransportRequest(ctx context.Context, nodeID uint, tra
 	}
 
 	var reqImportTransportResp ReqImportTransportResp
-	jsonUnmarshalError := json.Unmarshal(*respBodyContent, &reqImportTransportResp)
+	jsonUnmarshalError := json.Unmarshal(respBodyContent, &reqImportTransportResp)
 
 	if jsonUnmarshalError != nil {
 		logger().Errorf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
@@ -257,7 +257,7 @@ func (t *TmsClient) ImportTransportRequest(ctx context.Context, nodeID uint, tra
 	}
 	if reqImportTransportResp.ActionID == 0 {
 		logger().Errorf("Error when getting action id, the response is %s", reqImportTransportResp)
-		return actionID, fmt.Errorf("failed to trigger import: %s", string(*respBodyContent))
+		return actionID, fmt.Errorf("failed to trigger import: %s", string(respBodyContent))
 	}
 	actionID = uint(reqImportTransportResp.ActionID)
 	return actionID, nil
@@ -294,7 +294,7 @@ func (t *TmsClient) GetActionResult(ctx context.Context, actionID uint) (string,
 		ApiURL: fullURL,
 		Method: http.MethodGet,
 	}
-	respBodyContent, _, errReq := t.Do(childCtx, &request)
+	respBodyContent, errReq := t.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
 			logger().Errorf("GetActionResult request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
@@ -303,7 +303,7 @@ func (t *TmsClient) GetActionResult(ctx context.Context, actionID uint) (string,
 		return "", "", errReq
 	}
 	var actionResultResp ActionResultResp
-	jsonUnmarshalError := json.Unmarshal(*respBodyContent, &actionResultResp)
+	jsonUnmarshalError := json.Unmarshal(respBodyContent, &actionResultResp)
 	if jsonUnmarshalError != nil {
 		logger().Errorf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
 		return "", "", jsonUnmarshalError
@@ -346,7 +346,7 @@ func (t *TmsClient) GetActionResultLog(ctx context.Context, actionID uint) (Acti
 		ApiURL: fullURL,
 		Method: http.MethodGet,
 	}
-	respBodyContent, _, errReq := t.Do(childCtx, &request)
+	respBodyContent, errReq := t.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
 			logger().Errorf("GetActionResultLog request timeout after %v: %s", consts.LongRequestTimeout, fullURL)
@@ -355,7 +355,7 @@ func (t *TmsClient) GetActionResultLog(ctx context.Context, actionID uint) (Acti
 		return ActionLogResp{}, errReq
 	}
 	var actionLogResp ActionLogResp
-	jsonUnmarshalError := json.Unmarshal(*respBodyContent, &actionLogResp)
+	jsonUnmarshalError := json.Unmarshal(respBodyContent, &actionLogResp)
 	if jsonUnmarshalError != nil {
 		logger().Errorf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
 		return ActionLogResp{}, jsonUnmarshalError
@@ -401,7 +401,7 @@ func (t *TmsClient) getTransportLogs(ctx context.Context, trNumber string, nodeI
 		ApiURL: fullURL,
 		Method: http.MethodGet,
 	}
-	respBodyContent, _, errReq := t.Do(childCtx, &request)
+	respBodyContent, errReq := t.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
 			logger().Errorf("getTransportLogs request timeout after %v: %s", consts.LongRequestTimeout, fullURL)
@@ -410,7 +410,7 @@ func (t *TmsClient) getTransportLogs(ctx context.Context, trNumber string, nodeI
 		return TransportLog{}, errReq
 	}
 	var transportLogResp TransportLog
-	jsonUnmarshalError := json.Unmarshal(*respBodyContent, &transportLogResp)
+	jsonUnmarshalError := json.Unmarshal(respBodyContent, &transportLogResp)
 	if jsonUnmarshalError != nil {
 		logger().Errorf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
 		return TransportLog{}, jsonUnmarshalError

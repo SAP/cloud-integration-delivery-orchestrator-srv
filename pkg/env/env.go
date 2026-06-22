@@ -59,21 +59,39 @@ func TmsCredential() Credentials {
 	}
 }
 
-func UaaCredential() Credentials {
+// xsuaaByPlan finds the xsuaa service binding with the given plan name and
+// returns its credentials. Panics with a descriptive message if not found.
+func xsuaaByPlan(plan string) Credentials {
 	services, err := appEnv.Services.WithLabel("xsuaa")
 	if err != nil || len(services) == 0 {
 		Logger().Panic("Failed to get service with label 'xsuaa'")
 	}
-	service := services[0]
-	apiUrl, _ := service.CredentialString("apiurl")
-	uaa := service.Credentials
-
-	return Credentials{
-		Clientid:     uaa["clientid"].(string),
-		Clientsecret: uaa["clientsecret"].(string),
-		AuthUrl:      uaa["url"].(string),
-		ApiUrl:       apiUrl,
+	for _, svc := range services {
+		if svc.Plan == plan {
+			apiUrl, _ := svc.CredentialString("apiurl")
+			uaa := svc.Credentials
+			return Credentials{
+				Clientid:     uaa["clientid"].(string),
+				Clientsecret: uaa["clientsecret"].(string),
+				AuthUrl:      uaa["url"].(string),
+				ApiUrl:       apiUrl,
+			}
+		}
 	}
+	Logger().Panicf("Failed to find xsuaa service binding with plan '%s'", plan)
+	panic("unreachable") // satisfy compiler
+}
+
+// OAuthUaaCredential returns credentials from the xsuaa binding with plan="application".
+// Used for OAuth2 login flows.
+func OAuthUaaCredential() Credentials {
+	return xsuaaByPlan("application")
+}
+
+// ApiUaaCredential returns credentials from the xsuaa binding with plan="apiaccess".
+// Used for SCIM API calls.
+func ApiUaaCredential() Credentials {
+	return xsuaaByPlan("apiaccess")
 }
 
 func PostgreUri() string {

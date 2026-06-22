@@ -12,6 +12,21 @@ import (
 	"time"
 )
 
+// HttpResponseError represents a non-2xx HTTP response from an external API.
+type HttpResponseError struct {
+	StatusCode int
+	Body       []byte
+	URL        string
+}
+
+func (e *HttpResponseError) Error() string {
+	preview := string(e.Body)
+	if len(preview) > 200 {
+		preview = preview[:200]
+	}
+	return fmt.Sprintf("HTTP %d from %s: %s", e.StatusCode, e.URL, preview)
+}
+
 type HttpClient struct {
 	HttpClient   *http.Client
 	AccessToken  string
@@ -19,8 +34,8 @@ type HttpClient struct {
 	ClientId     string
 	ClientSecret string
 	AuthUrl      string
-	TokenExp time.Time    // proactive expiry; set by fetchToken from expires_in
-	mu       sync.Mutex  // protects AccessToken and TokenExp
+	TokenExp     time.Time  // proactive expiry; set by fetchToken from expires_in
+	mu           sync.Mutex // protects AccessToken and TokenExp
 }
 type OauthResp struct {
 	AccessToken string `json:"access_token"`
@@ -85,38 +100,63 @@ func (c *HttpClient) fetchToken(ctx context.Context) error {
 	return nil
 }
 
-// Do executes an HTTP request with the given context and returns the response body, status code, and error.
+// Do executes an HTTP request with the given context and returns the response body.
 // Before each request it proactively refreshes the token if it is expired or within 30 s of expiry.
 // On 401 (e.g. clock skew), it refreshes the token once and retries.
-func (c *HttpClient) Do(ctx context.Context, request *HttpRequest) (*[]byte, int, error) {
+// On 429 (rate limit), it waits and retries up to 2 times with exponential backoff.
+// Non-2xx responses are returned as *HttpResponseError.
+func (c *HttpClient) Do(ctx context.Context, request *HttpRequest) ([]byte, error) {
 	c.mu.Lock()
 	needsToken := c.AccessToken == "" || time.Now().After(c.TokenExp)
 	c.mu.Unlock()
 	if needsToken {
 		if err := c.fetchToken(ctx); err != nil {
-			return nil, 0, fmt.Errorf("proactive token refresh: %w", err)
+			return nil, fmt.Errorf("proactive token refresh: %w", err)
 		}
 	}
 
-	respBody, statusCode, err := c.doRequest(ctx, request)
+	body, statusCode, err := c.doRequest(ctx, request)
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 
-	// refresh token on 401 (retry once, no infinite recursion)
+	// 401: refresh token and retry once
 	if statusCode == 401 {
 		logger.Error("Unauthorized. refreshing token")
 		if err := c.fetchToken(ctx); err != nil {
 			logger.Errorf("Error when refreshing token: %s", err)
-			return nil, 0, err
+			return nil, err
 		}
-		return c.doRequest(ctx, request)
+		body, statusCode, err = c.doRequest(ctx, request)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	return respBody, statusCode, nil
+	// 429: retry with backoff (max 2 retries, 1s then 2s)
+	for attempt := 0; statusCode == 429 && attempt < 2; attempt++ {
+		wait := time.Duration(attempt+1) * time.Second
+		logger.Warnf("Rate limited (429) from %s, retrying in %v (attempt %d/2)", request.ApiURL, wait, attempt+1)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(wait):
+		}
+		body, statusCode, err = c.doRequest(ctx, request)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Non-2xx → error
+	if statusCode < 200 || statusCode >= 300 {
+		return nil, &HttpResponseError{StatusCode: statusCode, Body: body, URL: request.ApiURL}
+	}
+
+	return body, nil
 }
 
-func (c *HttpClient) doRequest(ctx context.Context, request *HttpRequest) (*[]byte, int, error) {
+func (c *HttpClient) doRequest(ctx context.Context, request *HttpRequest) ([]byte, int, error) {
 	var req *http.Request
 	if request.RequestBody == nil || request.RequestBody.String() == "<nil>" {
 		req, _ = http.NewRequestWithContext(ctx, request.Method, request.ApiURL, nil)
@@ -145,5 +185,5 @@ func (c *HttpClient) doRequest(ctx context.Context, request *HttpRequest) (*[]by
 		logger.Errorf("Error when getting content from response, the error message is %s", errIOreader)
 		return nil, 0, errIOreader
 	}
-	return &respBody, resp.StatusCode, nil
+	return respBody, resp.StatusCode, nil
 }

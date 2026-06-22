@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"mmt-delivery/db"
 	"mmt-delivery/service"
@@ -90,35 +91,30 @@ func (h *Handler) GetDestinationsHandler(ctx *gin.Context) {
 }
 
 // GetPackageArtifactsHandler returns all design-time artifacts (IFlows + ScriptCollections)
-// for a given package, merged into a single list.
+// for one or more packages, merged into a result list per package.
+// Partial success: failed packages are reported with error messages rather than aborting.
 //
-// GET /api/v1/tenant/packages/artifacts?tenant=<tenantID>&package=<packageID>
-//
-// Response shape mirrors the frontend Artifact interface:
-//
-//	{ TechID, Version, PackageId, Name, Description, CreatedBy, CreatedAt,
-//	  ModifiedBy, ModifiedAt, Type, TaskId, Status }
+// GET /api/v1/tenant/packages/artifacts?tenant=<tenantID>&packages=<pkg1,pkg2,...>
 func (h *Handler) GetPackageArtifactsHandler(ctx *gin.Context) {
 	destName, ok := h.resolveCpiDestination(ctx)
 	if !ok {
 		return
 	}
-	packageID := ctx.Query("package")
-	if packageID == "" {
-		Fail(ctx, 400, "missing required query param: package")
+	packagesParam := ctx.Query("packages")
+	if packagesParam == "" {
+		Fail(ctx, 400, "missing required query param: packages (comma-separated package IDs)")
 		return
 	}
+	packageIDs := strings.Split(packagesParam, ",")
+
 	cpiClient, err := h.cpi.Get(ctx, destName)
 	if err != nil {
 		Fail(ctx, 500, fmt.Sprintf("failed to create CPI client: %s", err))
 		return
 	}
-	artifacts, err := service.GetPackageArtifacts(ctx, cpiClient, packageID)
-	if err != nil {
-		Fail(ctx, 500, fmt.Sprintf("failed to get artifacts for package %q: %s", packageID, err))
-		return
-	}
-	OK(ctx, artifacts)
+
+	results := service.GetPackageArtifactsBatch(ctx, cpiClient, packageIDs)
+	OK(ctx, results)
 }
 
 func (h *Handler) GetRuntimeArtifacts(ctx *gin.Context) {

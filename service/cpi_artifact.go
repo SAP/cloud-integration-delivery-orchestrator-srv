@@ -21,6 +21,36 @@ type PackageArtifact struct {
 	Type        string
 }
 
+// BatchPackageResult holds the result of fetching artifacts for one package.
+type BatchPackageResult struct {
+	PackageID string            `json:"packageId"`
+	Artifacts []PackageArtifact `json:"artifacts"`
+	Error     string            `json:"error,omitempty"`
+}
+
+// GetPackageArtifactsBatch fetches artifacts for multiple packages concurrently.
+// Concurrency is bounded by the CPI client's built-in semaphore.
+// Failed packages are reported in the result (partial success) rather than aborting the whole operation.
+func GetPackageArtifactsBatch(ctx context.Context, client IntegrationService, packageIDs []string) []BatchPackageResult {
+	results := make([]BatchPackageResult, len(packageIDs))
+	var wg sync.WaitGroup
+
+	for i, pkgID := range packageIDs {
+		wg.Add(1)
+		go func(idx int, pid string) {
+			defer wg.Done()
+			arts, err := GetPackageArtifacts(ctx, client, pid)
+			if err != nil {
+				results[idx] = BatchPackageResult{PackageID: pid, Error: err.Error()}
+			} else {
+				results[idx] = BatchPackageResult{PackageID: pid, Artifacts: arts}
+			}
+		}(i, pkgID)
+	}
+	wg.Wait()
+	return results
+}
+
 // GetPackageArtifacts returns all design-time artifacts (IFlows + ScriptCollections) for a package,
 // fetching both types in parallel.
 func GetPackageArtifacts(ctx context.Context, client IntegrationService, packageID string) ([]PackageArtifact, error) {
