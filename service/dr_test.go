@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 
 	"mmt-delivery/consts"
@@ -511,5 +513,61 @@ func TestApprove_AllTRPresent(t *testing.T) {
 	}
 	if dbDR.ApprovedAt == nil {
 		t.Error("expected ApprovedAt to be set")
+	}
+}
+
+func TestApprove_ConditionWrittenWhenNotifierFails(t *testing.T) {
+	s := setupApproveTest(t, "TR-APPROVE-003")
+
+	tmsMock := &mockTMSClient{
+		transportRequests: map[string]*tms.TransportRequestV1{
+			"TR-APPROVE-003": validTR("TR-APPROVE-003", s.source.TmsSourceNodeName, s.ops[0].ArtifactTechID, s.ops[0].ArtifactVersion, consts.Artifact_Type_Iflow),
+		},
+		nodeStatuses: map[string]map[uint]tms.TrNodeStatus{
+			"TR-APPROVE-003": {
+				s.target.TmsSourceNodeID: {
+					TransportRequestNumber: "TR-APPROVE-003",
+					TransportNodeID:        s.target.TmsSourceNodeID,
+					Status:                 "INITIAL",
+				},
+			},
+		},
+	}
+
+	// Use a notifier that always fails — simulates destination not found
+	failNotifier := &failingNotifier{err: fmt.Errorf("mail service destination 'SMTP_MAIL' not found")}
+	svc := newTestService(nil, testServiceOpts{tms: tmsMock, notifier: failNotifier})
+
+	dr, err := svc.Approve(s.dr.ID, "approver-user")
+	if err != nil {
+		t.Fatalf("Approve should succeed even when notifier fails, got: %v", err)
+	}
+	if dr == nil {
+		t.Fatal("Approve returned nil DR")
+	}
+
+	// Verify DB update completed
+	var dbDR db.DeliveryRequest
+	testDB.First(&dbDR, s.dr.ID)
+	if dbDR.ApprovedBy != "approver-user" {
+		t.Errorf("expected ApprovedBy=approver-user, got %q", dbDR.ApprovedBy)
+	}
+	if dbDR.AggregateStatus != lifecycle.AggAwaitingImport {
+		t.Errorf("expected AggregateStatus=%s, got %s", lifecycle.AggAwaitingImport, dbDR.AggregateStatus)
+	}
+
+	// Verify the "approved by" condition was written (before notification goroutine)
+	var conditions []db.Condition
+	testDB.Where("delivery_request_id = ?", s.dr.ID).Find(&conditions)
+
+	found := false
+	for _, c := range conditions {
+		if c.State == lifecycle.CondSuccess && strings.Contains(c.Message, "approved by") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected 'approved by' condition to be written even when notifier fails")
 	}
 }

@@ -31,6 +31,9 @@ type EmailMessage struct {
 
 // NewEmailClient creates a new email client by resolving the given destination name.
 func NewEmailClient(resolver *cf.DestinationServiceClient, destName string) (*EmailClient, error) {
+	if destName == "" {
+		return nil, fmt.Errorf("mail service destination name is empty")
+	}
 	dest, err := resolver.GetDestination(context.Background(), destName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get mail service destination '%s': %s", destName, err)

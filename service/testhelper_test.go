@@ -483,6 +483,21 @@ func (m *mockNotifier) AddDeliveryComment(issueKey string, drID uint, message st
 	return nil
 }
 
+// failingNotifier implements Notifier but returns an error for email notifications.
+type failingNotifier struct {
+	err error
+}
+
+func (m *failingNotifier) SendApprovalRequest(to []string, drID uint, requestor string, description string) error {
+	return m.err
+}
+func (m *failingNotifier) SendDeliveryNotification(to []string, drID uint, status string, message string) error {
+	return m.err
+}
+func (m *failingNotifier) AddDeliveryComment(issueKey string, drID uint, message string, status string) error {
+	return m.err
+}
+
 // --- Mock CAS Client ---
 
 // mockCasClient implements CasService for testing.
