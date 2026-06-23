@@ -35,6 +35,9 @@ func NewEmailClient(resolver *cf.DestinationServiceClient, destName string) (*Em
 	if err != nil {
 		return nil, fmt.Errorf("failed to get mail service destination '%s': %s", destName, err)
 	}
+	if dest == nil {
+		return nil, fmt.Errorf("mail service destination '%s' not found", destName)
+	}
 
 	if dest.User == "" || dest.Password == "" {
 		return nil, fmt.Errorf("mail service destination missing credentials")

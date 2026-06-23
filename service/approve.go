@@ -40,7 +40,6 @@ func (s *Service) RequestApproval(drID uint, currentUserID string, approvers []s
 	if len(sendMailto) > 0 {
 		go func() {
 			if err := s.Notifier.SendApprovalRequest(sendMailto, drID, requesterEmail, comment); err != nil {
-				// Log email error as condition
 				s.Logger.Error("Failed to send approval request email: %s", err)
 				_ = s.BatchInsertConditions([]db.Condition{
 					{
@@ -99,23 +98,6 @@ func (s *Service) Approve(drID uint, approverID string) (*db.DeliveryRequest, er
 	}
 
 	now := time.Now()
-	// send email notification asynchronously
-	go func() {
-		message := fmt.Sprintf("Delivery request #%d has been approved by %s", drID, approverID)
-		if err := s.Notifier.SendDeliveryNotification(
-			[]string{approverID, dr.CreatedBy, dr.UpdatedBy}, drID, "Approved", message,
-		); err != nil {
-			// Log email error as condition
-			s.Logger.Error("Failed to send approval notification email: %s", err)
-			_ = s.BatchInsertConditions([]db.Condition{
-				{
-					DeliveryRequestID: drID,
-					State:             lifecycle.CondWarn,
-					Message:           fmt.Sprintf("Failed to send approval notification email: %s", err.Error()),
-				},
-			})
-		}
-	}()
 	// TR validation is done via BatchTrExist above, before setting approved status.
 	if err := s.DB.Model(&dr).Updates(db.DeliveryRequest{
 		AggregateStatus: lifecycle.AggAwaitingImport,
@@ -142,6 +124,23 @@ func (s *Service) Approve(drID uint, approverID string) (*db.DeliveryRequest, er
 	}); err != nil {
 		return nil, fmt.Errorf("failed to update condition: %s", err.Error())
 	}
+
+	// send email notification asynchronously (non-critical)
+	go func() {
+		message := fmt.Sprintf("Delivery request #%d has been approved by %s", drID, approverID)
+		if err := s.Notifier.SendDeliveryNotification(
+			[]string{approverID, dr.CreatedBy, dr.UpdatedBy}, drID, "Approved", message,
+		); err != nil {
+			s.Logger.Error("Failed to send approval notification email: %s", err)
+			_ = s.BatchInsertConditions([]db.Condition{
+				{
+					DeliveryRequestID: drID,
+					State:             lifecycle.CondWarn,
+					Message:           fmt.Sprintf("Failed to send approval notification email: %s", err.Error()),
+				},
+			})
+		}
+	}()
 	return dr, nil
 }
 
