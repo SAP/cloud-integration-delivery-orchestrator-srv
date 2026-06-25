@@ -341,24 +341,11 @@ func (s *Service) UpdateTenantOps(drID uint, updateItems []OpUpdateItem, user st
 			errOps[item.ID] = fmt.Errorf("failed to find artifact tenant operation %d: %s", item.ID, err)
 			continue
 		}
-
-		trChanged := existingOp.TransportRequestNumber != item.TransportRequestNumber
-		skipDeployChanged := existingOp.SkipDeploy != item.SkipDeploy
-		oldTR := existingOp.TransportRequestNumber
-
-		// TR number changes require pending state
-		if trChanged && existingOp.RequestState != lifecycle.RequestPending {
-			errOps[item.ID] = fmt.Errorf("cannot update transport request for operation %d in state %s", item.ID, existingOp.RequestState)
+		if existingOp.RequestState != lifecycle.RequestPending {
+			errOps[item.ID] = fmt.Errorf("cannot update artifact tenant operation %d in state %s. Can only update pending operations", item.ID, existingOp.RequestState)
 			continue
 		}
-
-		// SkipDeploy changes are blocked only when deploy is already in progress or complete
-		if skipDeployChanged && (existingOp.DeployState == lifecycle.DeployInProgress || existingOp.DeployState == lifecycle.DeployComplete) {
-			errOps[item.ID] = fmt.Errorf("cannot change SkipDeploy for operation %d: deploy is already %s", item.ID, existingOp.DeployState)
-			continue
-		}
-
-		if trChanged {
+		if existingOp.TransportRequestNumber != item.TransportRequestNumber {
 			// Only validate TR when the new value is non-empty (empty→non-empty or non-empty→different non-empty).
 			// Skip when new TR is empty (allows clearing TR or keeping it empty for auto-created ops).
 			if item.TransportRequestNumber != "" {
@@ -371,44 +358,19 @@ func (s *Service) UpdateTenantOps(drID uint, updateItems []OpUpdateItem, user st
 					continue
 				}
 			}
-			existingOp.TransportRequestNumber = item.TransportRequestNumber
 		}
-
-		if skipDeployChanged {
-			existingOp.SkipDeploy = item.SkipDeploy
-			if item.SkipDeploy {
-				existingOp.DeployState = lifecycle.DeployDisabled
-			} else {
-				existingOp.DeployState = lifecycle.DeployNotStarted
-			}
-		}
-
 		existingOp.UpdatedBy = user
+		existingOp.TransportRequestNumber = item.TransportRequestNumber
+		existingOp.SkipDeploy = item.SkipDeploy
+		if item.SkipDeploy {
+			existingOp.DeployState = lifecycle.DeployDisabled
+		} else {
+			existingOp.DeployState = lifecycle.DeployNotStarted
+		}
 		if err := s.DB.Save(&existingOp).Error; err != nil {
 			errOps[item.ID] = fmt.Errorf("failed to update artifact tenant operation %d: %s", item.ID, err)
 			continue
 		}
-
-		// Record conditions for audit trail
-		if trChanged {
-			_ = s.BatchInsertConditions([]db.Condition{{
-				DeliveryRequestID: drID,
-				State:             lifecycle.CondSuccess,
-				Message:           fmt.Sprintf("%s updated TR for %s: %q → %q", user, existingOp.ArtifactName, oldTR, item.TransportRequestNumber),
-			}})
-		}
-		if skipDeployChanged {
-			action := "enabled"
-			if !item.SkipDeploy {
-				action = "disabled"
-			}
-			_ = s.BatchInsertConditions([]db.Condition{{
-				DeliveryRequestID: drID,
-				State:             lifecycle.CondSuccess,
-				Message:           fmt.Sprintf("%s %s skip deploy for %s", user, action, existingOp.ArtifactName),
-			}})
-		}
-
 		result = append(result, existingOp)
 	}
 	if len(errOps) > 0 {
