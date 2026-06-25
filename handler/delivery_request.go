@@ -68,7 +68,14 @@ func (h *Handler) UpdateDr(c *gin.Context) {
 		Fail(c, http.StatusNotFound, fmt.Sprintf("delivery request id %d not found", dr.ID))
 		return
 	}
-	if existing.AggregateStatus != lifecycle.AggPending && existing.AggregateStatus != lifecycle.AggWaitingApprove {
+
+	// Check if any DR-level field actually changed
+	drChanged := existing.Name != dr.Name ||
+		existing.JiraLink != dr.JiraLink ||
+		existing.DeliveryRuleID != dr.DeliveryRule.ID
+
+	// Status gate only applies when DR-level fields are being modified
+	if drChanged && existing.AggregateStatus != lifecycle.AggPending && existing.AggregateStatus != lifecycle.AggWaitingApprove {
 		Fail(c, http.StatusBadRequest, "only pending or waiting approval delivery request can be updated")
 		return
 	}
