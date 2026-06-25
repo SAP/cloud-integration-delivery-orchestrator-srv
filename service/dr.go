@@ -344,6 +344,7 @@ func (s *Service) UpdateTenantOps(drID uint, updateItems []OpUpdateItem, user st
 
 		trChanged := existingOp.TransportRequestNumber != item.TransportRequestNumber
 		skipDeployChanged := existingOp.SkipDeploy != item.SkipDeploy
+		oldTR := existingOp.TransportRequestNumber
 
 		// TR number changes require pending state
 		if trChanged && existingOp.RequestState != lifecycle.RequestPending {
@@ -387,6 +388,27 @@ func (s *Service) UpdateTenantOps(drID uint, updateItems []OpUpdateItem, user st
 			errOps[item.ID] = fmt.Errorf("failed to update artifact tenant operation %d: %s", item.ID, err)
 			continue
 		}
+
+		// Record conditions for audit trail
+		if trChanged {
+			_ = s.BatchInsertConditions([]db.Condition{{
+				DeliveryRequestID: drID,
+				State:             lifecycle.CondSuccess,
+				Message:           fmt.Sprintf("%s updated TR for %s: %q → %q", user, existingOp.ArtifactName, oldTR, item.TransportRequestNumber),
+			}})
+		}
+		if skipDeployChanged {
+			action := "enabled"
+			if !item.SkipDeploy {
+				action = "disabled"
+			}
+			_ = s.BatchInsertConditions([]db.Condition{{
+				DeliveryRequestID: drID,
+				State:             lifecycle.CondSuccess,
+				Message:           fmt.Sprintf("%s %s skip deploy for %s", user, action, existingOp.ArtifactName),
+			}})
+		}
+
 		result = append(result, existingOp)
 	}
 	if len(errOps) > 0 {
