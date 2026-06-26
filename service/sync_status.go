@@ -191,13 +191,28 @@ func (s *Service) syncDeployState(deliveryRequestID uint, user string) []db.Cond
 				state = lifecycle.DeployFailed
 			}
 		} else {
-			conditions = append(conditions, db.Condition{
-				DeliveryRequestID:         deliveryRequestID,
-				ArtifactTenantOperationID: op.ID,
-				State:                     lifecycle.CondWarn,
-				Message:                   fmt.Sprintf("runtime artifact %s version %s in tenant %s does not match expected version %s. May not triggered by this operation", op.ArtifactTechID, rt.Version, op.Tenant.Name, op.ArtifactVersion),
-			})
-			continue // not triggered by this operation
+			// Version mismatch: runtime has a different version than expected.
+			// This means the deploy was superseded by another operation.
+			// Mark as failed so the goroutine can exit (terminal state).
+			state = lifecycle.DeployFailed
+			if err := s.DB.Model(&op).Updates(db.ArtifactTenantOperation{
+				DeployState: state,
+			}).Error; err != nil {
+				conditions = append(conditions, db.Condition{
+					DeliveryRequestID:         deliveryRequestID,
+					ArtifactTenantOperationID: op.ID,
+					State:                     lifecycle.CondError,
+					Message:                   fmt.Sprintf("error occurred during sync deploy state for artifact %s in tenant %s: %s", op.ArtifactTechID, op.Tenant.Name, err.Error()),
+				})
+			} else {
+				conditions = append(conditions, db.Condition{
+					DeliveryRequestID:         deliveryRequestID,
+					ArtifactTenantOperationID: op.ID,
+					State:                     lifecycle.CondWarn,
+					Message:                   fmt.Sprintf("runtime artifact %s version %s in tenant %s does not match expected version %s. Deploy may have been superseded by another operation", op.ArtifactTechID, rt.Version, op.Tenant.Name, op.ArtifactVersion),
+				})
+			}
+			continue
 		}
 		if state == op.DeployState { // only need update if deploy state changed
 			continue

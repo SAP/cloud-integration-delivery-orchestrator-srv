@@ -222,8 +222,8 @@ func TestSyncDeployState_UpdatesRuntimeStatesAndCreatesConditions(t *testing.T) 
 	if err := testDB.First(&updatedMismatch, opMismatch.ID).Error; err != nil {
 		t.Fatalf("reload mismatch op: %v", err)
 	}
-	if updatedMismatch.DeployState != lifecycle.DeployInProgress {
-		t.Fatalf("mismatch op deploy state = %s, want %s", updatedMismatch.DeployState, lifecycle.DeployInProgress)
+	if updatedMismatch.DeployState != lifecycle.DeployFailed {
+		t.Fatalf("mismatch op deploy state = %s, want %s", updatedMismatch.DeployState, lifecycle.DeployFailed)
 	}
 
 	var updatedError db.ArtifactTenantOperation
@@ -248,6 +248,14 @@ func TestSyncDeployState_UpdatesRuntimeStatesAndCreatesConditions(t *testing.T) 
 	}
 	if !hasSuccess || !hasMismatchWarn || !hasRuntimeWarn {
 		t.Fatalf("unexpected deploy conditions: %+v", conditions)
+	}
+
+	// Second sync: mismatch op is now DeployFailed, should NOT produce duplicate condition
+	conditions2 := svc.syncDeployState(fx.dr.ID, "tester")
+	for _, c := range conditions2 {
+		if strings.Contains(c.Message, "does not match expected version") {
+			t.Fatal("version mismatch condition should not repeat on second sync")
+		}
 	}
 }
 
