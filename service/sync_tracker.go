@@ -9,12 +9,19 @@ import (
 	"mmt-delivery/pkg/lifecycle"
 )
 
-// ActiveDRStatuses defines the aggregate statuses that require periodic TMS/CPI polling.
-// Only states where TMS/CPI is actively processing need goroutines — "waiting for user"
-// states (AWAITING_IMPORT, IMPORT_FAILED, etc.) do not need polling.
-var ActiveDRStatuses = []lifecycle.AggregateStatus{
-	lifecycle.AggImporting,
-	lifecycle.AggDeploying,
+// TerminalDRStatuses defines aggregate statuses where the DR lifecycle is complete
+// and no further TMS/CPI polling is needed. The sync goroutine exits when the DR
+// reaches one of these states.
+//
+// Non-terminal states (AWAITING_IMPORT, IMPORTING, DEPLOYING, etc.) keep the
+// goroutine alive because TMS/CPI may still be processing (even if TMS temporarily
+// reports "INITIAL" due to processing lag).
+var TerminalDRStatuses = []lifecycle.AggregateStatus{
+	lifecycle.AggDeployed,
+	lifecycle.AggCanceled,
+	lifecycle.AggImportFailed,
+	lifecycle.AggDeployFailed,
+	lifecycle.AggWaitingDeploy,
 }
 
 // SyncTracker manages per-DR sync goroutines.
@@ -81,7 +88,7 @@ func (s *Service) StartDRSync(drID uint) {
 	go s.runDRSync(ctx, drID)
 }
 
-// runDRSync will trigger a sync immediately, then every 15s until the DR is no longer in ActiveDRStatuses.
+// runDRSync will trigger a sync immediately, then every 15s until the DR reaches a terminal state.
 func (s *Service) runDRSync(ctx context.Context, drID uint) {
 	defer func() {
 		s.Logger.Infof("[SyncTracker] drId=%d goroutine exiting", drID)
@@ -115,7 +122,9 @@ func (s *Service) runDRSync(ctx context.Context, drID uint) {
 	}
 }
 
-// isDRTerminal checks whether the DR has left ActiveDRStatuses.
+// isDRTerminal checks whether the DR has reached a terminal state (deployed, canceled, or failed).
+// Only terminal states cause the sync goroutine to exit. Non-terminal states (including
+// AWAITING_IMPORT where TMS may have regressed the op state) keep the goroutine alive.
 func (s *Service) isDRTerminal(drID uint) bool {
 	var statuses []lifecycle.AggregateStatus
 	s.DB.Model(&db.DeliveryRequest{}).
@@ -124,19 +133,22 @@ func (s *Service) isDRTerminal(drID uint) bool {
 	if len(statuses) == 0 {
 		return true // DR not found or deleted → treat as terminal
 	}
-	for _, active := range ActiveDRStatuses {
-		if statuses[0] == active {
-			return false
+	for _, terminal := range TerminalDRStatuses {
+		if statuses[0] == terminal {
+			return true
 		}
 	}
-	return true
+	return false
 }
 
-// RecoverActiveSyncs starts sync goroutines for all DRs currently in active states.
-// Called once at service startup.
+// RecoverActiveSyncs starts sync goroutines for all approved DRs not yet in terminal states.
+// Called once at service startup to resume polling for DRs that were being tracked before restart.
 func (s *Service) RecoverActiveSyncs() {
 	var drs []db.DeliveryRequest
-	if err := s.DB.Where("aggregate_status IN ?", ActiveDRStatuses).Find(&drs).Error; err != nil {
+	if err := s.DB.
+		Where("aggregate_status NOT IN ?", TerminalDRStatuses).
+		Where("approved_at IS NOT NULL").
+		Find(&drs).Error; err != nil {
 		s.Logger.Errorf("RecoverActiveSyncs: failed to query active DRs: %s", err)
 		return
 	}
@@ -144,6 +156,6 @@ func (s *Service) RecoverActiveSyncs() {
 		s.StartDRSync(dr.ID)
 	}
 	if len(drs) > 0 {
-		s.Logger.Infof("recovered %d active DR sync goroutines: %v", len(drs), drs)
+		s.Logger.Infof("recovered %d active DR sync goroutines", len(drs))
 	}
 }

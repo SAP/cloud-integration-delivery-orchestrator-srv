@@ -61,10 +61,16 @@ func (s *Service) BatchImportTenantOps(drID uint, opIDs []uint, targetTenantID u
 	if err != nil {
 		return false, err
 	}
+	_ = s.DetermineOverallStatus(drID)
 	s.NotifyDrUpdated(drID)
 
 	// trigger async import in goroutine to avoid blocking
 	go func(drID uint, targetNodeID uint, targetTenantName string, trs []uint, ops []db.ArtifactTenantOperation, user string) {
+		defer func() {
+			_ = s.DetermineOverallStatus(drID)
+			s.NotifyDrUpdated(drID)
+		}()
+
 		tmsClient, err := s.TmsSvc(context.Background())
 		var actionID uint
 		if err == nil {
@@ -76,7 +82,6 @@ func (s *Service) BatchImportTenantOps(drID uint, opIDs []uint, targetTenantID u
 				ops[i].ImportState = lifecycle.ImportFailed
 			}
 			_ = s.batchUpdateOps(ops)
-			s.NotifyDrUpdated(drID)
 
 			condition := db.Condition{
 				DeliveryRequestID: drID,
@@ -152,10 +157,16 @@ func (s *Service) BatchDeployTenantOps(drID uint, opIDs []uint, targetTenantID u
 	if err != nil {
 		return false, err
 	}
+	_ = s.DetermineOverallStatus(drID)
 	s.NotifyDrUpdated(drID)
 
 	// trigger async deploy in goroutine to avoid blocking
 	go func(drID uint, tenant *db.CpiTenant, ops []db.ArtifactTenantOperation, user string) {
+		defer func() {
+			_ = s.DetermineOverallStatus(drID)
+			s.NotifyDrUpdated(drID)
+		}()
+
 		errOps := make(map[uint]error)
 		successOps := make([]db.ArtifactTenantOperation, 0)
 		failedOps := make([]db.ArtifactTenantOperation, 0)
@@ -184,7 +195,6 @@ func (s *Service) BatchDeployTenantOps(drID uint, opIDs []uint, targetTenantID u
 		// update failed ops state to DeployFailed in database
 		if len(failedOps) > 0 {
 			_ = s.batchUpdateOps(failedOps)
-			s.NotifyDrUpdated(drID)
 		}
 
 		// record conditions based on results
