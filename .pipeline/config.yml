@@ -23,3 +23,5 @@ steps:
     pipelineId: 'ab98df78-71b3-4696-94fb-5f33b9f70c39'
   sonarExecuteScan:
     serverUrl: 'https://sonar.tools.sap'
+  detectExecuteScan:
+    
