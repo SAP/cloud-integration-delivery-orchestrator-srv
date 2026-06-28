@@ -85,13 +85,13 @@ func (s *Service) ApplyBootstrap(ctx context.Context, tenantID uint, cfToken str
 	}
 	// Reset all prerequisite statuses and clear stale error from any previous run.
 	if err := s.DB.Model(&db.CpiTenant{}).Where("id = ?", tenantID).Updates(map[string]any{
-		"blocking_reason":                    "",
-		"pir_api_status":                     lifecycle.PrereqMissing,
-		"cas_application_status":             lifecycle.PrereqMissing,
-		"cas_standard_status":                lifecycle.PrereqMissing,
-		"cloud_integration_dest_status":      lifecycle.PrereqMissing,
-		"content_assembly_dest_status":       lifecycle.PrereqMissing,
-		"transport_management_dest_status":   lifecycle.PrereqMissing,
+		"blocking_reason":                  "",
+		"pir_api_status":                   lifecycle.PrereqMissing,
+		"cas_application_status":           lifecycle.PrereqMissing,
+		"cas_standard_status":              lifecycle.PrereqMissing,
+		"cloud_integration_dest_status":    lifecycle.PrereqMissing,
+		"content_assembly_dest_status":     lifecycle.PrereqMissing,
+		"transport_management_dest_status": lifecycle.PrereqMissing,
 	}).Error; err != nil {
 		env.Logger().Warnw("apply: failed to reset prereq statuses", "tenantID", tenantID, "error", err)
 	}
