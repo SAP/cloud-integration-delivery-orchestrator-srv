@@ -24,4 +24,5 @@ steps:
   sonarExecuteScan:
     serverUrl: 'https://sonar.tools.sap'
   detectExecuteScan:
-    
+    groups: ['Delivery Orchestration for SAP Cloud Integration']
+
