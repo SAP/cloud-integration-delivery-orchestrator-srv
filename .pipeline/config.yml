@@ -26,6 +26,6 @@ steps:
   sonarExecuteScan:
     serverUrl: 'https://sonar.tools.sap'
   detectExecuteScan:
-    serverUrl: 'https://blackduck.tools.sap'
+    serverUrl: https://sap.blackducksoftware.com
     groups: ['Delivery Orchestration for SAP Cloud Integration']
 
