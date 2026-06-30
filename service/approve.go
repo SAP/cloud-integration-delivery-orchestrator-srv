@@ -108,9 +108,9 @@ func (s *Service) Approve(drID uint, approverID string) (*db.DeliveryRequest, er
 		return nil, fmt.Errorf("failed to update delivery request status: %s", err.Error())
 	}
 
-	if dr.AggregateStatus != lifecycle.AggAwaitingImport {
-		s.NotifyDrUpdated(drID)
-	}
+	// DB status committed — notify all subscribers on every exit path from here,
+	// even if subsequent steps (email lookup, condition insert) fail.
+	defer s.NotifyDrUpdated(drID)
 	approverEmail, err := s.GetUserEmail(context.Background(), approverID)
 	if err != nil {
 		return nil, err
