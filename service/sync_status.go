@@ -10,6 +10,8 @@ import (
 	"mmt-delivery/pkg/tms"
 	"regexp"
 	"strings"
+
+	"golang.org/x/mod/semver"
 )
 
 // drSnapshot captures the state of a DR at a point in time for change detection.
@@ -191,27 +193,49 @@ func (s *Service) syncDeployState(deliveryRequestID uint, user string) []db.Cond
 				state = lifecycle.DeployFailed
 			}
 		} else {
-			// Version mismatch: runtime has a different version than expected.
-			// This means the deploy was superseded by another operation.
-			// Mark as failed so the goroutine can exit (terminal state).
-			state = lifecycle.DeployFailed
-			if err := s.DB.Model(&op).Updates(db.ArtifactTenantOperation{
-				DeployState: state,
-			}).Error; err != nil {
-				conditions = append(conditions, db.Condition{
-					DeliveryRequestID:         deliveryRequestID,
-					ArtifactTenantOperationID: op.ID,
-					State:                     lifecycle.CondError,
-					Message:                   fmt.Sprintf("error occurred during sync deploy state for artifact %s in tenant %s: %s", op.ArtifactTechID, op.Tenant.Name, err.Error()),
-				})
-			} else {
+			// Version mismatch: runtime version differs from expected.
+			// Compare versions to distinguish "deploy pending" from "superseded":
+			// - runtime > expected → a higher version was deployed, this op is superseded
+			// - runtime < expected → deploy hasn't taken effect yet, wait for next cycle
+			rtV, opV := rt.Version, op.ArtifactVersion
+			if !strings.HasPrefix(rtV, "v") {
+				rtV = "v" + rtV
+			}
+			if !strings.HasPrefix(opV, "v") {
+				opV = "v" + opV
+			}
+			if !semver.IsValid(rtV) || !semver.IsValid(opV) {
+				s.Logger.Warn("invalid semver in deploy sync: runtime=%s, expected=%s for artifact %s in tenant %s", rt.Version, op.ArtifactVersion, op.ArtifactTechID, op.Tenant.Name)
 				conditions = append(conditions, db.Condition{
 					DeliveryRequestID:         deliveryRequestID,
 					ArtifactTenantOperationID: op.ID,
 					State:                     lifecycle.CondWarn,
-					Message:                   fmt.Sprintf("runtime artifact %s version %s in tenant %s does not match expected version %s. Deploy may have been superseded by another operation", op.ArtifactTechID, rt.Version, op.Tenant.Name, op.ArtifactVersion),
+					Message:                   fmt.Sprintf("cannot compare versions for artifact %s in tenant %s: runtime version %q or expected version %q is not valid semver", op.ArtifactTechID, op.Tenant.Name, rt.Version, op.ArtifactVersion),
 				})
+				continue
 			}
+			if semver.Compare(rtV, opV) > 0 {
+				// Superseded: runtime has a higher version
+				state = lifecycle.DeployFailed
+				if err := s.DB.Model(&op).Updates(db.ArtifactTenantOperation{
+					DeployState: state,
+				}).Error; err != nil {
+					conditions = append(conditions, db.Condition{
+						DeliveryRequestID:         deliveryRequestID,
+						ArtifactTenantOperationID: op.ID,
+						State:                     lifecycle.CondError,
+						Message:                   fmt.Sprintf("error occurred during sync deploy state for artifact %s in tenant %s: %s", op.ArtifactTechID, op.Tenant.Name, err.Error()),
+					})
+				} else {
+					conditions = append(conditions, db.Condition{
+						DeliveryRequestID:         deliveryRequestID,
+						ArtifactTenantOperationID: op.ID,
+						State:                     lifecycle.CondWarn,
+						Message:                   fmt.Sprintf("runtime artifact %s version %s in tenant %s is higher than expected version %s. Deploy was superseded by another operation", op.ArtifactTechID, rt.Version, op.Tenant.Name, op.ArtifactVersion),
+					})
+				}
+			}
+			// runtime < expected: deploy still in progress, skip this cycle
 			continue
 		}
 		if state == op.DeployState { // only need update if deploy state changed

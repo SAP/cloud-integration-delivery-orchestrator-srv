@@ -239,7 +239,7 @@ func TestSyncDeployState_UpdatesRuntimeStatesAndCreatesConditions(t *testing.T) 
 		if condition.State == lifecycle.CondSuccess && strings.Contains(condition.Message, "deployed in") {
 			hasSuccess = true
 		}
-		if condition.State == lifecycle.CondWarn && strings.Contains(condition.Message, "does not match expected version") {
+		if condition.State == lifecycle.CondWarn && strings.Contains(condition.Message, "is higher than expected version") {
 			hasMismatchWarn = true
 		}
 		if condition.State == lifecycle.CondWarn && strings.Contains(condition.Message, "may not deployed yet") {
@@ -253,9 +253,53 @@ func TestSyncDeployState_UpdatesRuntimeStatesAndCreatesConditions(t *testing.T) 
 	// Second sync: mismatch op is now DeployFailed, should NOT produce duplicate condition
 	conditions2 := svc.syncDeployState(fx.dr.ID, "tester")
 	for _, c := range conditions2 {
-		if strings.Contains(c.Message, "does not match expected version") {
+		if strings.Contains(c.Message, "is higher than expected version") {
 			t.Fatal("version mismatch condition should not repeat on second sync")
 		}
+	}
+}
+
+func TestSyncDeployState_PendingDeploy_SkipsWhenRuntimeVersionLower(t *testing.T) {
+	fx := setupSyncFixture(t)
+
+	// Op expects version 2.0.0 but runtime still shows 1.0.0 (deploy hasn't taken effect)
+	opPending := seedOp(t, db.ArtifactTenantOperation{
+		DeliveryRequestID: fx.dr.ID,
+		TenantID:          fx.target.ID,
+		ArtifactTechID:    "artifact-pending",
+		ArtifactVersion:   "2.0.0",
+		ArtifactType:      consts.Artifact_Type_Iflow,
+		DeployState:       lifecycle.DeployInProgress,
+	})
+
+	svc := newTestService(func(ctx context.Context, tenant string) (IntegrationService, error) {
+		return &mockRuntimeCPI{
+			runtimeByID: map[string]cpi.RuntimeArtifact{
+				"artifact-pending": {
+					ID:      "artifact-pending",
+					Version: "1.0.0", // lower than expected 2.0.0
+					Status:  consts.Artifact_Rt_Started,
+				},
+			},
+		}, nil
+	})
+
+	conditions := svc.syncDeployState(fx.dr.ID, "tester")
+
+	// Should produce no conditions (silently skipped)
+	for _, c := range conditions {
+		if c.ArtifactTenantOperationID == opPending.ID {
+			t.Fatalf("expected no condition for pending deploy, got: %s", c.Message)
+		}
+	}
+
+	// Op should remain DeployInProgress (not changed to DeployFailed)
+	var updated db.ArtifactTenantOperation
+	if err := testDB.First(&updated, opPending.ID).Error; err != nil {
+		t.Fatalf("reload pending op: %v", err)
+	}
+	if updated.DeployState != lifecycle.DeployInProgress {
+		t.Fatalf("pending op deploy state = %s, want %s", updated.DeployState, lifecycle.DeployInProgress)
 	}
 }
 
