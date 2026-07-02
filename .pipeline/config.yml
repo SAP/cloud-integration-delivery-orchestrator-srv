@@ -28,40 +28,14 @@ steps:
   detectExecuteScan:
     serverUrl: https://sap.blackducksoftware.com
     groups: ["Delivery Orchestration for SAP Cloud Integration"]
+    scanners: []
+    scanPaths: []
+    detectTools: ["DETECTOR"]
+    mavenExcludedScopes: ["test"]
     scanProperties: [
-        # Accuracy requirement: NONE allows fallback to Package Json Parse when npm ls is unavailable.
-        # After MTA build, node_modules may not be intact, so NPM CLI detector (HIGH accuracy) can fail.
-        # NONE permits the LOW-accuracy NPM Package Json Parse detector to succeed.
-        # Property: detect.accuracy.required
         "--detect.accuracy.required=NONE",
-
-        # Project version distribution type
-        # Property: detect.project.version.distribution
         "--detect.project.version.distribution=SAAS",
-
-        # Overall timeout in seconds
-        # Property: detect.timeout
         "--detect.timeout=6000",
-
-        # Trust SSL certificates
-        # Property: blackduck.trust.cert
         "--blackduck.trust.cert=true",
-
-        # Detector search depth
-        # Property: detect.detector.search.depth
-        "--detect.detector.search.depth=10",
-
-        # Minimum scan interval in hours (0 = always scan)
-        # Property: min-scan-interval
         "--min-scan-interval=0",
-
-        # Maven: exclude test scope dependencies (not deployed to production)
-        # Property: detect.maven.excluded.scopes
-        # Doc: https://documentation.blackduck.com/zh-CN/bundle/detect/page/properties/all-properties.html
-        "--detect.maven.excluded.scopes=test",
-
-        # NPM: exclude devDependencies (not deployed to production)
-        # Property: detect.npm.include.dev.dependencies
-        # Doc: https://documentation.blackduck.com/zh-CN/bundle/detect/page/properties/all-properties.html
-        "--detect.npm.include.dev.dependencies=false",
       ]
