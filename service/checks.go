@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"mmt-delivery/consts"
 	"mmt-delivery/db"
+	"mmt-delivery/pkg/env"
+	"net/http"
 	"strings"
 
 	"github.com/gobwas/glob"
@@ -61,12 +63,20 @@ func (s *Service) checkVersionDowngradeInTenant(op *db.ArtifactTenantOperation, 
 	case consts.Artifact_Type_Iflow:
 		iflow, err := cli.GetDesignTimeIflow(context.Background(), op.ArtifactTechID, "active")
 		if err != nil {
+			var httpErr *env.HttpResponseError
+			if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
+				return nil // artifact does not exist in target tenant yet — no downgrade risk
+			}
 			return err
 		}
 		targetVersion = iflow.Version
 	case consts.Artifact_Type_Sc:
 		sc, err := cli.GetDesignTimeScriptCollection(context.Background(), op.ArtifactTechID, "active")
 		if err != nil {
+			var httpErr *env.HttpResponseError
+			if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
+				return nil // artifact does not exist in target tenant yet — no downgrade risk
+			}
 			return err
 		}
 		targetVersion = sc.Version
