@@ -30,6 +30,10 @@ func (s *Service) BatchImportTenantOps(drID uint, opIDs []uint, targetTenantID u
 	// pre-check before import
 	for i := range ops {
 		op := &ops[i]
+		// skip already-completed ops (may have been imported by another DR or manually)
+		if op.ImportState == lifecycle.ImportComplete {
+			continue
+		}
 		// only queued(INITIAL), Failed(enable re-import) state can be triggered for import
 		if (op.ImportState != lifecycle.ImportQueued && op.ImportState != lifecycle.ImportFailed) || op.Tenant.TmsSourceNodeID != targetNodeID {
 			errOps[op.ID] = fmt.Errorf("cannot import artifact operation #%d(at TMS node %d) for target TMS node %d. Import State: %s", op.ID, op.Tenant.TmsSourceNodeID, targetNodeID, op.ImportState)

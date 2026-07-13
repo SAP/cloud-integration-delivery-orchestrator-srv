@@ -311,6 +311,7 @@ func (s *Service) syncImportState(deliveryRequestID uint, user string) []db.Cond
 
 	trNodeStatus := make(map[string]map[uint]tms.TrNodeStatus)          // tr number status in all nodes. trNumber - map[nodeID]status
 	tenantToOps := make(map[uint]map[string]db.ArtifactTenantOperation) // arTenantOp record in each node. cpi tenant ID - map[trNumber]ArtifactTenantOperation
+	conditions := make([]db.Condition, 0)
 
 	tmsClient, err := s.TmsSvc(context.Background())
 	if err != nil {
@@ -329,14 +330,13 @@ func (s *Service) syncImportState(deliveryRequestID uint, user string) []db.Cond
 		// UpdateArtifactNodeStatus will call GetTransportRequest internally
 		ns, err := tmsClient.TrNodeStatuses(context.Background(), trNumber)
 		if err != nil {
-			return []db.Condition{
-				{
-					DeliveryRequestID:         deliveryRequestID,
-					State:                     lifecycle.CondError,
-					ArtifactTenantOperationID: op.ID,
-					Message:                   fmt.Sprintf("error when getting transport request %s: %s", trNumber, err.Error()),
-				},
-			}
+			conditions = append(conditions, db.Condition{
+				DeliveryRequestID:         deliveryRequestID,
+				State:                     lifecycle.CondError,
+				ArtifactTenantOperationID: op.ID,
+				Message:                   fmt.Sprintf("error when getting transport request %s: %s", trNumber, err.Error()),
+			})
+			continue // transient failure — skip this TR, retry on next sync cycle
 		}
 		trNodeStatus[trNumber] = ns
 	}
@@ -353,7 +353,6 @@ func (s *Service) syncImportState(deliveryRequestID uint, user string) []db.Cond
 	}
 	trUpdated := make(map[string]bool)
 
-	conditions := make([]db.Condition, 0)
 	for _, op := range artifactOps { // check to create new record if new tr status happens in tms
 		trNumber := op.TransportRequestNumber
 		if _, ok := trUpdated[trNumber]; ok { // prevent duplicate update
