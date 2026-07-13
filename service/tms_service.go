@@ -5,7 +5,7 @@ package service
 // TmsClientFunc is the single dependency type for TMS access across the service
 // and handler layers.  Call it to obtain a ready TransportService; it resolves
 // CentralTmsContext from the DB and OAuth credentials from the provider
-// Destination Service on each invocation.
+// Destination Service on first invocation, then reuses the same client instance.
 //
 // Production: use NewTmsFactory to build the func at startup.
 // Tests: pass a function literal that returns a mock TransportService.
@@ -17,6 +17,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"mmt-delivery/db"
 	"mmt-delivery/pkg/cf"
@@ -29,15 +30,30 @@ import (
 // Production value built by NewTmsFactory; test value is a literal returning a mock.
 type TmsClientFunc func(ctx context.Context) (TransportService, error)
 
-// NewTmsFactory returns a TmsClientFunc that loads CentralTmsContext from db,
-// resolves OAuth credentials via providerDest, and constructs a *tms.TmsClient.
+// NewTmsFactory returns a TmsClientFunc that lazily creates a single TMS client
+// and reuses it for all subsequent calls. Token refresh is handled internally
+// by the underlying HttpClient.
 func NewTmsFactory(database *gorm.DB, providerDest *cf.DestinationServiceClient) TmsClientFunc {
+	var (
+		mu     sync.Mutex
+		client TransportService
+	)
 	return func(ctx context.Context) (TransportService, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if client != nil {
+			return client, nil
+		}
 		tmsCtx, err := loadTmsContext(database)
 		if err != nil {
 			return nil, err
 		}
-		return buildTmsClient(ctx, tmsCtx, providerDest)
+		c, err := buildTmsClient(ctx, tmsCtx, providerDest)
+		if err != nil {
+			return nil, err
+		}
+		client = c
+		return client, nil
 	}
 }
 
