@@ -70,7 +70,7 @@ func NewEmailClient(resolver *cf.DestinationServiceClient, destName string) (*Em
 func SendEmail(resolver *cf.DestinationServiceClient, destName string, to []string, subject string, body string, isHTML bool) error {
 	client, err := NewEmailClient(resolver, destName)
 	if err != nil {
-		env.Logger().Error("Failed to create email client: %s", err)
+		env.Logger().Errorf("Failed to create email client: %s", err)
 		return err
 	}
 
@@ -92,8 +92,8 @@ func (c *EmailClient) Send(msg *EmailMessage) error {
 
 	// Log connection details for debugging
 	smtpAddr := fmt.Sprintf("%s:%s", c.smtpHost, c.smtpPort)
-	env.Logger().Info("Attempting to send email via SMTP: %s", smtpAddr)
-	env.Logger().Info("SMTP auth user: %s (password length: %d)", c.username, len(c.password))
+	env.Logger().Infof("Attempting to send email via SMTP: %s", smtpAddr)
+	env.Logger().Infof("SMTP auth user: %s (password length: %d)", c.username, len(c.password))
 
 	// Create a new message
 	m := gomail.NewMessage()
@@ -114,7 +114,7 @@ func (c *EmailClient) Send(msg *EmailMessage) error {
 	// Create SMTP dialer with TLS support
 	port := 587
 	if _, err := fmt.Sscanf(c.smtpPort, "%d", &port); err != nil {
-		env.Logger().Warn("Failed to parse port %s, using default 587", c.smtpPort)
+		env.Logger().Warnf("Failed to parse port %s, using default 587", c.smtpPort)
 	}
 
 	dialer := gomail.NewDialer(c.smtpHost, port, c.username, c.password)
@@ -125,11 +125,11 @@ func (c *EmailClient) Send(msg *EmailMessage) error {
 
 	// Send email with timeout
 	if err := dialer.DialAndSend(m); err != nil {
-		env.Logger().Error("Failed to send email via %s: %s", smtpAddr, err)
+		env.Logger().Errorf("Failed to send email via %s: %s", smtpAddr, err)
 		return fmt.Errorf("failed to send email: %s", err)
 	}
 
-	env.Logger().Info("Email sent successfully to %v", msg.To)
+	env.Logger().Infof("Email sent successfully to %v", msg.To)
 	return nil
 }
 

@@ -208,7 +208,7 @@ func (s *Service) syncDeployState(deliveryRequestID uint, user string) []db.Cond
 				opV = "v" + opV
 			}
 			if !semver.IsValid(rtV) || !semver.IsValid(opV) {
-				s.Logger.Warn("invalid semver in deploy sync: runtime=%s, expected=%s for artifact %s in tenant %s", rt.Version, op.ArtifactVersion, op.ArtifactTechID, op.Tenant.Name)
+				s.Logger.Warnf("invalid semver in deploy sync: runtime=%s, expected=%s for artifact %s in tenant %s", rt.Version, op.ArtifactVersion, op.ArtifactTechID, op.Tenant.Name)
 				conditions = append(conditions, db.Condition{
 					DeliveryRequestID:         deliveryRequestID,
 					ArtifactTenantOperationID: op.ID,
@@ -366,7 +366,7 @@ func (s *Service) syncImportState(deliveryRequestID uint, user string) []db.Cond
 		for nID, nState := range trNodeStatus[trNumber] {
 			// Skip nodes not in delivery rule - only process target nodes defined in the rule
 			if _, ok := ruleTargetNodeIDs[nID]; !ok {
-				s.Logger.Infof("skipping node %d for transport request %s: not in delivery rule target nodes", nID, trNumber)
+				s.Logger.Debugf("skipping node %d for transport request %s: not in delivery rule target nodes", nID, trNumber)
 				continue
 			}
 
@@ -414,7 +414,7 @@ func (s *Service) syncImportState(deliveryRequestID uint, user string) []db.Cond
 			// NOTE: determine import state
 			state := lifecycle.DeriveImport(nState.Status)
 			if state == curOp.ImportState { // skip if state no change
-				s.Logger.Infof("no import state change for artifact %s(#%d) in node %d, current state: %s", curOp.ArtifactTechID, curOp.ID, nID, state)
+				s.Logger.Debugf("no import state change for artifact %s(#%d) in node %d, current state: %s", curOp.ArtifactTechID, curOp.ID, nID, state)
 				continue
 			}
 
@@ -514,7 +514,7 @@ func (s *Service) extractJiraIssueKey(jiraURL string) string {
 		return matches[1]
 	}
 
-	s.Logger.Warn("Failed to extract JIRA issue key from URL: %s", jiraURL)
+	s.Logger.Warnf("Failed to extract JIRA issue key from URL: %s", jiraURL)
 	return ""
 }
 

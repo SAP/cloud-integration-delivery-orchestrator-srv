@@ -49,7 +49,7 @@ func NewWSHub(logger *zap.SugaredLogger) *WSHub {
 
 // NewConn creates a WSConn managed by this hub.
 func (h *WSHub) NewConn(conn *websocket.Conn) *WSConn {
-	h.logger.Infof("[WS] new connection established")
+	h.logger.Debugf("[WS] new connection established")
 	return &WSConn{
 		conn:     conn,
 		hub:      h,
@@ -83,7 +83,7 @@ func (c *WSConn) Disconnect() {
 
 // Subscribe registers interest in a specific DR for this connection.
 func (h *WSHub) Subscribe(c *WSConn, drID uint) {
-	h.logger.Infof("[WS] subscribe drId=%d", drID)
+	h.logger.Debugf("[WS] subscribe drId=%d", drID)
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -99,7 +99,7 @@ func (h *WSHub) Subscribe(c *WSConn, drID uint) {
 
 // Unsubscribe removes interest in a specific DR for this connection.
 func (h *WSHub) Unsubscribe(c *WSConn, drID uint) {
-	h.logger.Infof("[WS] unsubscribe drId=%d", drID)
+	h.logger.Debugf("[WS] unsubscribe drId=%d", drID)
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -126,7 +126,7 @@ func (h *WSHub) PublishDrEvent(drID uint, eventType string, payload json.RawMess
 		return
 	}
 
-	h.logger.Infof("[WS] publish drId=%d event=%s to %d watcher(s)", drID, eventType, len(watchers))
+	h.logger.Debugf("[WS] publish drId=%d event=%s to %d watcher(s)", drID, eventType, len(watchers))
 
 	evt := wsEvent{Event: eventType, Data: payload}
 	data, err := json.Marshal(evt)

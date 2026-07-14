@@ -76,7 +76,7 @@ func (c *HttpClient) fetchToken(ctx context.Context) error {
 
 	res, errReq := c.HttpClient.Do(req)
 	if errReq != nil {
-		logger.Errorf("Error when get the response, %s", errReq)
+		logger.Errorf("Error when getting the response: %s", errReq)
 		return errReq
 	}
 	defer res.Body.Close()

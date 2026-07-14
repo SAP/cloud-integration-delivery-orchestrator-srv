@@ -51,13 +51,11 @@ func (h *Handler) GetPackagesHandler(ctx *gin.Context) {
 	}
 	cpiClient, err := h.cpi.Get(ctx, destName)
 	if err != nil {
-		h.logger.Errorf("error while retrieving packages: %s", err)
 		Fail(ctx, 500, err.Error())
 		return
 	}
 	packages, err := cpiClient.GetPackages(ctx)
 	if err != nil {
-		h.logger.Errorf("error while retrieving packages: %s", err)
 		Fail(ctx, 500, err.Error())
 		return
 	}
@@ -75,7 +73,6 @@ type DestinationResp struct {
 func (h *Handler) GetDestinationsHandler(ctx *gin.Context) {
 	dests, err := h.destSvc.ListDestinations(ctx)
 	if err != nil {
-		h.logger.Errorf("error fetching destinations: %s", err)
 		Fail(ctx, 500, err.Error())
 		return
 	}

@@ -30,7 +30,7 @@ func (h *Handler) GetRoutesHandler(ctx *gin.Context) {
 	}
 	routes, err := c.GetRoutes(ctx)
 	if err != nil {
-		Fail(ctx, http.StatusInternalServerError, fmt.Sprintf("Error while get routes from tms: %s", err))
+		Fail(ctx, http.StatusInternalServerError, fmt.Sprintf("Error while getting routes from TMS: %s", err))
 		return
 	}
 	OK(ctx, routes)
@@ -40,24 +40,18 @@ func (h *Handler) GetTranportRequestsHandler(ctx *gin.Context) {
 	trNode := ctx.Query("transportNode")
 	nodeId, err := strconv.Atoi(trNode)
 	if err != nil {
-		errorMsg := fmt.Sprintf("Invalid transport node id %s: %s", trNode, err)
-		h.logger.Error(errorMsg)
-		Fail(ctx, http.StatusBadRequest, errorMsg)
+		Fail(ctx, http.StatusBadRequest, fmt.Sprintf("Invalid transport node id %s: %s", trNode, err))
 		return
 	}
 
 	c, err := h.svc.TmsSvc(ctx)
 	if err != nil {
-		errorMsg := fmt.Sprintf("Error resolving TMS client: %s", err)
-		h.logger.Error(errorMsg)
-		Fail(ctx, http.StatusInternalServerError, errorMsg)
+		Fail(ctx, http.StatusInternalServerError, fmt.Sprintf("Error resolving TMS client: %s", err))
 		return
 	}
 	trs, err := c.GetNodeTransportRequests(ctx, uint(nodeId))
 	if err != nil {
-		errorMsg := fmt.Sprintf("Error while get node trs: %s", err)
-		h.logger.Error(errorMsg)
-		Fail(ctx, http.StatusInternalServerError, errorMsg)
+		Fail(ctx, http.StatusInternalServerError, fmt.Sprintf("Error while getting node transport requests: %s", err))
 		return
 	}
 	OK(ctx, trs)

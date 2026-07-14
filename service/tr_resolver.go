@@ -29,7 +29,6 @@ import (
 
 	"mmt-delivery/db"
 	"mmt-delivery/pkg/cas"
-	"mmt-delivery/pkg/env"
 	"mmt-delivery/pkg/lifecycle"
 )
 
@@ -186,7 +185,7 @@ func (s *Service) GenerateTransportRequest(ctx context.Context, tenantID, delive
 			"request_state": lifecycle.RequestTrGenerating,
 			"tr_error":      "",
 		}).Error; dbErr != nil {
-		env.Logger().Warnw("GenerateTransportRequest: failed to set ops to TR_GENERATING", "error", dbErr)
+		s.Logger.Warnw("GenerateTransportRequest: failed to set ops to TR_GENERATING", "error", dbErr)
 	}
 
 	// fatalf handles pre-op fatal errors: writes a DR-level Condition for observability,
@@ -203,7 +202,7 @@ func (s *Service) GenerateTransportRequest(ctx context.Context, tenantID, delive
 				"request_state": lifecycle.RequestTrFailed,
 				"tr_error":      err.Error(),
 			}).Error; dbErr != nil {
-			env.Logger().Warnw("GenerateTransportRequest: failed to reset TR_GENERATING ops on fatal error", "error", dbErr)
+			s.Logger.Warnw("GenerateTransportRequest: failed to reset TR_GENERATING ops on fatal error", "error", dbErr)
 		}
 		s.NotifyDrUpdated(deliveryRequestID)
 		return nil, nil, err
@@ -292,7 +291,7 @@ func (s *Service) GenerateTransportRequest(ctx context.Context, tenantID, delive
 					"request_state": lifecycle.RequestTrFailed,
 					"tr_error":      r.err.Error(),
 				}).Error; dbErr != nil {
-				env.Logger().Warnw("GenerateTransportRequest: failed to write TR_FAILED for op",
+				s.Logger.Warnw("GenerateTransportRequest: failed to write TR_FAILED for op",
 					"opID", r.opID, "error", dbErr)
 			}
 			_ = s.BatchInsertConditions([]db.Condition{{
@@ -311,7 +310,7 @@ func (s *Service) GenerateTransportRequest(ctx context.Context, tenantID, delive
 				"request_state":            lifecycle.RequestPending,
 				"tr_error":                 "",
 			}).Error; dbErr != nil {
-			env.Logger().Errorw("GenerateTransportRequest: TR created but write-back failed (orphan TR)",
+			s.Logger.Errorw("GenerateTransportRequest: TR created but write-back failed (orphan TR)",
 				"trID", r.tr.ID, "opID", r.opID, "error", dbErr)
 			failed[r.opID] = fmt.Errorf("TR %s created in TMS but write-back failed: %w", r.tr.ID, dbErr)
 			continue

@@ -40,7 +40,7 @@ func (s *Service) RequestApproval(drID uint, currentUserID string, approvers []s
 	if len(sendMailto) > 0 {
 		go func() {
 			if err := s.Notifier.SendApprovalRequest(sendMailto, drID, requesterEmail, comment); err != nil {
-				s.Logger.Error("Failed to send approval request email: %s", err)
+				s.Logger.Errorf("Failed to send approval request email: %s", err)
 				_ = s.BatchInsertConditions([]db.Condition{
 					{
 						DeliveryRequestID: drID,
@@ -131,7 +131,7 @@ func (s *Service) Approve(drID uint, approverID string) (*db.DeliveryRequest, er
 		if err := s.Notifier.SendDeliveryNotification(
 			[]string{approverID, dr.CreatedBy, dr.UpdatedBy}, drID, "Approved", message,
 		); err != nil {
-			s.Logger.Error("Failed to send approval notification email: %s", err)
+			s.Logger.Errorf("Failed to send approval notification email: %s", err)
 			_ = s.BatchInsertConditions([]db.Condition{
 				{
 					DeliveryRequestID: drID,
@@ -166,7 +166,7 @@ func (s *Service) sendMailto(existAppr []string, newAppr []string) []string {
 			// Convert XSUAA user ID to email address
 			email, err := s.GetUserEmail(context.Background(), appr)
 			if err != nil {
-				s.Logger.Error("Failed to get email for user %s: %s", appr, err)
+				s.Logger.Errorf("Failed to get email for user %s: %s", appr, err)
 				continue // skip if failed to get email
 			}
 			sendMailto = append(sendMailto, email)

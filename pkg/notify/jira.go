@@ -289,7 +289,7 @@ func (c *JiraClient) GetSubtasks(issueKey string) ([]JiraSubtask, error) {
 func AddDeliveryComment(resolver *cf.DestinationServiceClient, destName string, issueKey string, deliveryRequestID uint, message string, status string) error {
 	client, err := NewJiraClient(resolver, destName)
 	if err != nil {
-		env.Logger().Error("Failed to create JIRA client: %s", err)
+		env.Logger().Errorf("Failed to create JIRA client: %s", err)
 		return err
 	}
 
@@ -297,10 +297,10 @@ func AddDeliveryComment(resolver *cf.DestinationServiceClient, destName string, 
 
 	_, err = client.AddComment(issueKey, comment)
 	if err != nil {
-		env.Logger().Error("Failed to add comment to JIRA issue %s: %s", issueKey, err)
+		env.Logger().Errorf("Failed to add comment to JIRA issue %s: %s", issueKey, err)
 		return err
 	}
 
-	env.Logger().Info("Successfully added comment to JIRA issue %s for delivery request #%d", issueKey, deliveryRequestID)
+	env.Logger().Infof("Successfully added comment to JIRA issue %s for delivery request #%d", issueKey, deliveryRequestID)
 	return nil
 }
