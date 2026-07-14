@@ -27,7 +27,7 @@ func (s *Service) CancelDeliveryRequest(drID uint, userID string, reason string)
 	// Ignored errors: "not approved yet" (PENDING/WAITING_APPROVAL are cancellable without sync),
 	// "already in progress" (tracker is running — proceed with DB state as-is).
 	// cancellableStatuses guard at step 3 is the authoritative safety check.
-	if err := s.SyncDeliveryStatus(drID, userID); err != nil {
+	if err := s.SyncDeliveryStatus(context.Background(), drID, userID); err != nil {
 		if !strings.Contains(err.Error(), "has not been approved yet") &&
 			!strings.Contains(err.Error(), "already in progress") {
 			return fmt.Errorf("failed to sync delivery status before cancel: %s", err.Error())

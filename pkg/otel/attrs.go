@@ -44,6 +44,24 @@ func MetricAttrs(result string, tenantName string) metric.MeasurementOption {
 	)
 }
 
+// ImportTRAttrs returns attributes for TR numbers (set after pre-checks complete).
+func ImportTRAttrs(trs []uint) []attribute.KeyValue {
+	return []attribute.KeyValue{
+		attribute.Int("tr_count", len(trs)),
+		attribute.IntSlice("tr_numbers", uintsToInts(trs)),
+	}
+}
+
+// GenerateTRSpanAttrs builds trace span attributes for transport request generation.
+func GenerateTRSpanAttrs(drID uint, tenantID uint, tenantName string, opCount int) []attribute.KeyValue {
+	return []attribute.KeyValue{
+		attribute.Int("dr_id", int(drID)),
+		attribute.Int("tenant_id", int(tenantID)),
+		attribute.String("tenant", tenantName),
+		attribute.Int("op_count", opCount),
+	}
+}
+
 func artifactStrings(arts []ArtifactInfo) []string {
 	out := make([]string, 0, len(arts))
 	for _, a := range arts {

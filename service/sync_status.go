@@ -4,14 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"mmt-delivery/consts"
-	"mmt-delivery/db"
-	"mmt-delivery/pkg/lifecycle"
-	"mmt-delivery/pkg/tms"
 	"regexp"
 	"strings"
 
+	"go.opentelemetry.io/otel/attribute"
+	oteltrace "go.opentelemetry.io/otel/trace"
 	"golang.org/x/mod/semver"
+
+	"mmt-delivery/consts"
+	"mmt-delivery/db"
+	"mmt-delivery/pkg/lifecycle"
+	cpiotel "mmt-delivery/pkg/otel"
+	"mmt-delivery/pkg/tms"
 )
 
 // ErrSyncAlreadyInProgress is returned when a concurrent sync is already running for the same DR.
@@ -89,7 +93,11 @@ func (s *Service) DetermineOverallStatus(drID uint) error {
 	return nil
 }
 
-func (s *Service) SyncDeliveryStatus(deliveryRequestID uint, user string) error {
+func (s *Service) SyncDeliveryStatus(ctx context.Context, deliveryRequestID uint, user string) error {
+	ctx, span := cpiotel.Tracer().Start(ctx, "SyncDeliveryStatus",
+		oteltrace.WithAttributes(attribute.Int("dr_id", int(deliveryRequestID))))
+	defer span.End()
+
 	// Guard against concurrent sync for the same DR.
 	// Two simultaneous calls both do queryOpsInDrWithAcc, both see no op for a
 	// tenant, and both INSERT — producing duplicate ArtifactTenantOperation rows
@@ -129,17 +137,17 @@ func (s *Service) SyncDeliveryStatus(deliveryRequestID uint, user string) error 
 	}
 
 	// sync import/deploy state after approval
-	if conditions := s.syncImportState(deliveryRequestID, user); len(conditions) != 0 {
+	if conditions := s.syncImportState(ctx, deliveryRequestID, user); len(conditions) != 0 {
 		s.BatchInsertConditions(conditions)
 	}
-	if conditions := s.syncDeployState(deliveryRequestID, user); len(conditions) != 0 {
+	if conditions := s.syncDeployState(ctx, deliveryRequestID, user); len(conditions) != 0 {
 		s.BatchInsertConditions(conditions)
 	}
 	return nil
 }
 
 // do this after sync import state
-func (s *Service) syncDeployState(deliveryRequestID uint, user string) []db.Condition {
+func (s *Service) syncDeployState(ctx context.Context, deliveryRequestID uint, user string) []db.Condition {
 	var ops []db.ArtifactTenantOperation
 	var err error
 	conditions := make([]db.Condition, 0)
@@ -163,7 +171,7 @@ func (s *Service) syncDeployState(deliveryRequestID uint, user string) []db.Cond
 		if op.DeployState != lifecycle.DeployInProgress {
 			continue
 		}
-		cpiCli, err := s.CPI(context.Background(), op.Tenant.PirApiDestinationName)
+		cpiCli, err := s.CPI(ctx, op.Tenant.PirApiDestinationName)
 		if err != nil {
 			conditions = append(conditions, db.Condition{
 				DeliveryRequestID:         deliveryRequestID,
@@ -173,7 +181,7 @@ func (s *Service) syncDeployState(deliveryRequestID uint, user string) []db.Cond
 			})
 			continue
 		}
-		rt, err := cpiCli.RuntimeArtifact(context.Background(), op.ArtifactTechID)
+		rt, err := cpiCli.RuntimeArtifact(ctx, op.ArtifactTechID)
 		if err != nil {
 			// if api return error, may not deployed yet, just continue
 			conditions = append(conditions, db.Condition{
@@ -280,7 +288,7 @@ func (s *Service) syncDeployState(deliveryRequestID uint, user string) []db.Cond
 }
 
 // when call this function, make sure all ops have valid tr number
-func (s *Service) syncImportState(deliveryRequestID uint, user string) []db.Condition {
+func (s *Service) syncImportState(ctx context.Context, deliveryRequestID uint, user string) []db.Condition {
 	var artifactOps []db.ArtifactTenantOperation
 	// Adjust the DB accessor (db.DB / db.GetDB()) to match your project setup
 	artifactOps, err := s.queryOpsInDrWithAcc(deliveryRequestID)
@@ -316,7 +324,7 @@ func (s *Service) syncImportState(deliveryRequestID uint, user string) []db.Cond
 	tenantToOps := make(map[uint]map[string]db.ArtifactTenantOperation) // arTenantOp record in each node. cpi tenant ID - map[trNumber]ArtifactTenantOperation
 	conditions := make([]db.Condition, 0)
 
-	tmsClient, err := s.TmsSvc(context.Background())
+	tmsClient, err := s.TmsSvc(ctx)
 	if err != nil {
 		return []db.Condition{{
 			DeliveryRequestID: deliveryRequestID,
@@ -331,7 +339,7 @@ func (s *Service) syncImportState(deliveryRequestID uint, user string) []db.Cond
 			continue
 		}
 		// UpdateArtifactNodeStatus will call GetTransportRequest internally
-		ns, err := tmsClient.TrNodeStatuses(context.Background(), trNumber)
+		ns, err := tmsClient.TrNodeStatuses(ctx, trNumber)
 		if err != nil {
 			conditions = append(conditions, db.Condition{
 				DeliveryRequestID:         deliveryRequestID,
@@ -462,7 +470,7 @@ func (s *Service) syncImportState(deliveryRequestID uint, user string) []db.Cond
 
 				// TMS WARNING: import counts as complete but persist severity-W log lines as CondWarn
 				if strings.EqualFold(nState.Status, "WARNING") {
-					warnMsgs, werr := tmsClient.WarnLogsInTransportLog(context.Background(), trNumber, nID)
+					warnMsgs, werr := tmsClient.WarnLogsInTransportLog(ctx, trNumber, nID)
 					var warnBody string
 					if werr != nil {
 						warnBody = fmt.Sprintf("could not load TMS warning messages for transport request %s in node %d: %s", trNumber, nID, werr.Error())
@@ -481,7 +489,7 @@ func (s *Service) syncImportState(deliveryRequestID uint, user string) []db.Cond
 			}
 			// get error logs if import failed
 			if state == lifecycle.ImportFailed {
-				logs, err := tmsClient.ErrLogsInTransportLog(context.Background(), trNumber, nID)
+				logs, err := tmsClient.ErrLogsInTransportLog(ctx, trNumber, nID)
 				var message string
 				if err != nil {
 					message = fmt.Sprintf("error when getting error logs for transport request %s in node %d: %s", trNumber, nID, err.Error())

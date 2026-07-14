@@ -266,7 +266,7 @@ func (h *Handler) HandleImportOps(c *gin.Context) {
 		return
 	}
 	user := service.UserID(c)
-	success, err := h.svc.BatchImportTenantOps(req.DeliveryRequestID, req.OpIDs, req.TargetTenant, user)
+	success, err := h.svc.BatchImportTenantOps(c.Request.Context(), req.DeliveryRequestID, req.OpIDs, req.TargetTenant, user)
 	if err != nil {
 		Fail(c, http.StatusInternalServerError, err.Error())
 		return
@@ -285,7 +285,7 @@ func (h *Handler) HandleDeployOps(c *gin.Context) {
 		return
 	}
 	user := service.UserID(c)
-	success, err := h.svc.BatchDeployTenantOps(req.DeliveryRequestID, req.OpIDs, req.TargetTenant, user)
+	success, err := h.svc.BatchDeployTenantOps(c.Request.Context(), req.DeliveryRequestID, req.OpIDs, req.TargetTenant, user)
 	if err != nil {
 		Fail(c, http.StatusInternalServerError, err.Error())
 		return
@@ -305,7 +305,7 @@ func (h *Handler) HandleSyncState(ctx *gin.Context) {
 		Fail(ctx, http.StatusBadRequest, "invalid deliveryRequestId")
 		return
 	}
-	if err := h.svc.SyncDeliveryStatus(drID, user); err != nil {
+	if err := h.svc.SyncDeliveryStatus(ctx.Request.Context(), drID, user); err != nil {
 		if errors.Is(err, service.ErrSyncAlreadyInProgress) {
 			OKMsg(ctx, nil, "sync already in progress")
 			return

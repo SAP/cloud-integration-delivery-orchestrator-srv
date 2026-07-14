@@ -16,7 +16,7 @@ import (
 )
 
 // import INITIAL artifact operations under target node
-func (s *Service) BatchImportTenantOps(drID uint, opIDs []uint, targetTenantID uint, userID string) (bool, error) {
+func (s *Service) BatchImportTenantOps(ctx context.Context, drID uint, opIDs []uint, targetTenantID uint, userID string) (bool, error) {
 	var ops []db.ArtifactTenantOperation
 	var err error
 	if ops, err = s.queryOpsWithAcco(opIDs); err != nil {
@@ -49,7 +49,7 @@ func (s *Service) BatchImportTenantOps(drID uint, opIDs []uint, targetTenantID u
 			continue
 		}
 		// NOTE: VERY IMPORTANT! validate if there is version decrease in target tenant before import
-		if err := s.checkVersionDowngradeInTenant(op, targetTenant); err != nil {
+		if err := s.checkVersionDowngradeInTenant(ctx, op, targetTenant); err != nil {
 			errOps[op.ID] = err
 			continue
 		}
@@ -73,8 +73,8 @@ func (s *Service) BatchImportTenantOps(drID uint, opIDs []uint, targetTenantID u
 	s.NotifyDrUpdated(drID)
 
 	// trigger async import in goroutine to avoid blocking
-	go func(drID uint, targetNodeID uint, targetTenantName string, trs []uint, ops []db.ArtifactTenantOperation, user string) {
-		ctx, span := cpiotel.Tracer().Start(context.Background(), "BatchImport.Async",
+	go func(ctx context.Context, drID uint, targetNodeID uint, targetTenantName string, trs []uint, ops []db.ArtifactTenantOperation, user string) {
+		ctx, span := cpiotel.Tracer().Start(ctx, "BatchImport.Async",
 			oteltrace.WithAttributes(cpiotel.ImportSpanAttrs(drID, targetNodeID, targetTenantName, trs, opsToArtifactInfo(ops))...))
 		defer span.End()
 		start := time.Now()
@@ -112,7 +112,7 @@ func (s *Service) BatchImportTenantOps(drID uint, opIDs []uint, targetTenantID u
 		for _, op := range ops {
 			artifactList = append(artifactList, fmt.Sprintf("  - %s (version %s)", op.ArtifactTechID, op.ArtifactVersion))
 		}
-		userEmail, _ := s.GetUserEmail(context.Background(), user)
+		userEmail, _ := s.GetUserEmail(ctx, user)
 		condition := db.Condition{
 			DeliveryRequestID: drID,
 			State:             lifecycle.CondSuccess,
@@ -125,13 +125,13 @@ func (s *Service) BatchImportTenantOps(drID uint, opIDs []uint, targetTenantID u
 		cpiotel.ImportTotal.Add(ctx, int64(len(ops)), successAttrs)
 		// TMS is now processing — start polling to track import progress
 		s.StartDRSync(drID)
-	}(drID, targetNodeID, targetTenant.Name, trs, ops, userID)
+	}(context.WithoutCancel(ctx), drID, targetNodeID, targetTenant.Name, trs, ops, userID)
 
 	return true, nil
 }
 
 // when trggered deploy, the artifact operation will be set to DeployInProgress
-func (s *Service) BatchDeployTenantOps(drID uint, opIDs []uint, targetTenantID uint, userID string) (bool, error) {
+func (s *Service) BatchDeployTenantOps(ctx context.Context, drID uint, opIDs []uint, targetTenantID uint, userID string) (bool, error) {
 	var ops []db.ArtifactTenantOperation
 	var err error
 	if ops, err = s.queryOpsWithAcco(opIDs); err != nil {
@@ -141,6 +141,7 @@ func (s *Service) BatchDeployTenantOps(drID uint, opIDs []uint, targetTenantID u
 	if tenant, err = s.queryTenant(targetTenantID); err != nil { // check tenant existence
 		return false, err
 	}
+
 	errOps := make(map[uint]error)
 	validOps := make([]db.ArtifactTenantOperation, 0)
 	// pre-check before deploy
@@ -179,8 +180,8 @@ func (s *Service) BatchDeployTenantOps(drID uint, opIDs []uint, targetTenantID u
 	s.NotifyDrUpdated(drID)
 
 	// trigger async deploy in goroutine to avoid blocking
-	go func(drID uint, tenant *db.CpiTenant, ops []db.ArtifactTenantOperation, user string) {
-		ctx, span := cpiotel.Tracer().Start(context.Background(), "BatchDeploy.Async",
+	go func(ctx context.Context, drID uint, tenant *db.CpiTenant, ops []db.ArtifactTenantOperation, user string) {
+		ctx, span := cpiotel.Tracer().Start(ctx, "BatchDeploy.Async",
 			oteltrace.WithAttributes(cpiotel.DeploySpanAttrs(drID, tenant.ID, tenant.Name, opsToArtifactInfo(ops))...))
 		defer span.End()
 		start := time.Now()
@@ -244,7 +245,7 @@ func (s *Service) BatchDeployTenantOps(drID uint, opIDs []uint, targetTenantID u
 			for _, op := range successOps {
 				artifactList = append(artifactList, fmt.Sprintf("  - %s (version %s)", op.ArtifactTechID, op.ArtifactVersion))
 			}
-			userEmail, _ := s.GetUserEmail(context.Background(), user)
+			userEmail, _ := s.GetUserEmail(ctx, user)
 			condition := db.Condition{
 				DeliveryRequestID: drID,
 				State:             lifecycle.CondSuccess,
@@ -259,7 +260,7 @@ func (s *Service) BatchDeployTenantOps(drID uint, opIDs []uint, targetTenantID u
 
 		// CPI is now processing — start polling to track deploy progress
 		s.StartDRSync(drID)
-	}(drID, tenant, validOps, userID)
+	}(context.WithoutCancel(ctx), drID, tenant, validOps, userID)
 
 	return true, nil
 }

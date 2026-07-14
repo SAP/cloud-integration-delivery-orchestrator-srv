@@ -16,7 +16,7 @@ import (
 func TestTrExist_RejectsEmptyTransportRequestNumber(t *testing.T) {
 	svc := newTestService(nil)
 
-	ok, err := svc.TrExist(&db.ArtifactTenantOperation{
+	ok, err := svc.TrExist(context.Background(), &db.ArtifactTenantOperation{
 		ArtifactTechID: "artifact-1",
 	}, &db.CpiTenant{TmsSourceNodeName: "SRC"})
 
@@ -88,7 +88,7 @@ func TestTrExist_ValidatesTransportRequestStateOriginAndMetadata(t *testing.T) {
 				},
 			})
 
-			ok, err := svc.TrExist(&baseOp, source)
+			ok, err := svc.TrExist(context.Background(), &baseOp, source)
 			if ok {
 				t.Fatal("expected invalid transport request to return false")
 			}
@@ -138,7 +138,7 @@ func TestTrExist_AcceptsArtifactNameOrTechIDMetadata(t *testing.T) {
 				},
 			})
 
-			ok, err := svc.TrExist(&op, source)
+			ok, err := svc.TrExist(context.Background(), &op, source)
 			if err != nil {
 				t.Fatalf("expected valid transport request, got %v", err)
 			}
@@ -177,7 +177,7 @@ func TestBatchTrExist_AggregatesFailures(t *testing.T) {
 		{Model: gorm.Model{ID: 3}, ArtifactTechID: "artifact-missing"},
 	}
 
-	ok, err := svc.BatchTrExist(ops, source)
+	ok, err := svc.BatchTrExist(context.Background(), ops, source)
 	if ok {
 		t.Fatal("expected batch check to fail")
 	}
@@ -198,7 +198,7 @@ func TestDeliveryRuleCheck_RejectsPatternMismatchWithoutCallingCPI(t *testing.T)
 		return &mockCPIClientWithDesignTime{}, nil
 	})
 
-	err := svc.DeliveryRuleCheck(&db.ArtifactTenantOperation{
+	err := svc.DeliveryRuleCheck(context.Background(), &db.ArtifactTenantOperation{
 		ArtifactTechID:  "artifact-1",
 		ArtifactVersion: "2.0.0",
 		ArtifactType:    consts.Artifact_Type_Iflow,
@@ -224,7 +224,7 @@ func TestDeliveryRuleCheck_SkipsCurrentTenantInIncludedTenants(t *testing.T) {
 	})
 
 	sourceTenant := db.CpiTenant{Model: gorm.Model{ID: 10}, Name: "source"}
-	err := svc.DeliveryRuleCheck(&db.ArtifactTenantOperation{
+	err := svc.DeliveryRuleCheck(context.Background(), &db.ArtifactTenantOperation{
 		ArtifactTechID:  "artifact-1",
 		ArtifactVersion: "1.0.0",
 		ArtifactType:    consts.Artifact_Type_Iflow,
@@ -260,7 +260,7 @@ func TestDeliveryRuleCheck_RejectsDowngradeInTargetTenant(t *testing.T) {
 		}, nil
 	})
 
-	err := svc.DeliveryRuleCheck(&db.ArtifactTenantOperation{
+	err := svc.DeliveryRuleCheck(context.Background(), &db.ArtifactTenantOperation{
 		ArtifactTechID:  "artifact-1",
 		ArtifactVersion: "1.0.0",
 		ArtifactType:    consts.Artifact_Type_Iflow,

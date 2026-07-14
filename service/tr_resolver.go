@@ -27,7 +27,6 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"go.opentelemetry.io/otel/attribute"
 	oteltrace "go.opentelemetry.io/otel/trace"
 
 	"mmt-delivery/db"
@@ -182,11 +181,7 @@ func (s *Service) ensureCasGUIDs(ctx context.Context, casClient CasService, ops 
 // succeeded TRs are already persisted and must not be re-created.
 func (s *Service) GenerateTransportRequest(ctx context.Context, tenantID, deliveryRequestID uint, artifactOperationIDs []uint) (map[uint]*TransportRequest, map[uint]error, error) {
 	ctx, span := cpiotel.Tracer().Start(ctx, "GenerateTransportRequest",
-		oteltrace.WithAttributes(
-			attribute.Int("dr_id", int(deliveryRequestID)),
-			attribute.Int("tenant_id", int(tenantID)),
-			attribute.Int("op_count", len(artifactOperationIDs)),
-		))
+		oteltrace.WithAttributes(cpiotel.GenerateTRSpanAttrs(deliveryRequestID, tenantID, "", len(artifactOperationIDs))...))
 	defer span.End()
 
 	// ── 0. Set all target ops to TR_GENERATING unconditionally.

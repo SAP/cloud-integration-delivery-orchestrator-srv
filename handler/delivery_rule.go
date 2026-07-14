@@ -34,7 +34,7 @@ func (h *Handler) RuleCheck(c *gin.Context) {
 	}
 	for i := range req.Ops {
 		op := &req.Ops[i]
-		if err := h.svc.DeliveryRuleCheck(op, &rule); err != nil {
+		if err := h.svc.DeliveryRuleCheck(c.Request.Context(), op, &rule); err != nil {
 			Fail(c, 400, err.Error())
 			return
 		}

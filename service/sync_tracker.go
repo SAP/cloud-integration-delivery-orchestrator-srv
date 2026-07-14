@@ -104,7 +104,7 @@ func (s *Service) runDRSync(ctx context.Context, drID uint) {
 
 	// Immediate first sync — don't wait for the first tick.
 	s.Logger.Debugf("[SyncTracker] drId=%d immediate sync", drID)
-	_ = s.SyncDeliveryStatus(drID, "system")
+	_ = s.SyncDeliveryStatus(ctx, drID, "system")
 	if !s.hasActiveOps(drID) {
 		return
 	}
@@ -119,7 +119,7 @@ func (s *Service) runDRSync(ctx context.Context, drID uint) {
 			return
 		case <-ticker.C:
 			s.Logger.Debugf("[SyncTracker] drId=%d tick sync", drID)
-			_ = s.SyncDeliveryStatus(drID, "system")
+			_ = s.SyncDeliveryStatus(ctx, drID, "system")
 			if !s.hasActiveOps(drID) {
 				s.Logger.Infof("[SyncTracker] drId=%d no active ops, stopping", drID)
 				return

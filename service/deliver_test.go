@@ -141,7 +141,7 @@ func TestBatchImportTenantOps_PrecheckAggregatesErrors(t *testing.T) {
 		}, nil
 	})
 
-	ok, err := svc.BatchImportTenantOps(fx.dr.ID, []uint{opWrongState.ID, opWrongNode.ID, opBadTR.ID, opDowngrade.ID}, fx.target.ID, "tester")
+	ok, err := svc.BatchImportTenantOps(context.Background(), fx.dr.ID, []uint{opWrongState.ID, opWrongNode.ID, opBadTR.ID, opDowngrade.ID}, fx.target.ID, "tester")
 	if ok {
 		t.Fatal("expected batch import pre-check to fail")
 	}
@@ -189,7 +189,7 @@ func TestBatchImportTenantOps_AsyncFailureRollsBackStateAndRecordsCondition(t *t
 		},
 	})
 
-	ok, err := svc.BatchImportTenantOps(fx.dr.ID, []uint{op.ID}, fx.target.ID, "tester")
+	ok, err := svc.BatchImportTenantOps(context.Background(), fx.dr.ID, []uint{op.ID}, fx.target.ID, "tester")
 	if err != nil {
 		t.Fatalf("expected async import to be triggered, got %v", err)
 	}
@@ -251,7 +251,7 @@ func TestBatchDeployTenantOps_PrecheckAggregatesErrorsAndSkipsDisabled(t *testin
 		return &mockRuntimeCPI{}, nil
 	})
 
-	ok, err := svc.BatchDeployTenantOps(fx.dr.ID, []uint{opDisabled.ID, opWrongTenant.ID, opWrongState.ID}, fx.target.ID, "tester")
+	ok, err := svc.BatchDeployTenantOps(context.Background(), fx.dr.ID, []uint{opDisabled.ID, opWrongTenant.ID, opWrongState.ID}, fx.target.ID, "tester")
 	if ok {
 		t.Fatal("expected deploy pre-check to fail")
 	}
@@ -301,7 +301,7 @@ func TestBatchDeployTenantOps_AsyncPartialFailureRecordsConditions(t *testing.T)
 		}, nil
 	})
 
-	ok, err := svc.BatchDeployTenantOps(fx.dr.ID, []uint{opOK.ID, opFail.ID}, fx.target.ID, "tester")
+	ok, err := svc.BatchDeployTenantOps(context.Background(), fx.dr.ID, []uint{opOK.ID, opFail.ID}, fx.target.ID, "tester")
 	if err != nil {
 		t.Fatalf("expected async deploy to be triggered, got %v", err)
 	}

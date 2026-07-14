@@ -264,14 +264,14 @@ func (s *Service) InsertTenantOps(ctx context.Context, drID uint, ops []db.Artif
 	for i := range ops {
 		op := &ops[i]
 
-		if err := s.DeliveryRuleCheck(op, &rule); err != nil {
+		if err := s.DeliveryRuleCheck(ctx, op, &rule); err != nil {
 			errOps[i] = err
 			continue
 		}
 
 		// check TR — skip when TR is empty (allows auto-created ops from version compare to be saved without TR)
 		if op.TransportRequestNumber != "" {
-			if _, err := s.TrExist(op, &sourceTenant); err != nil {
+			if _, err := s.TrExist(ctx, op, &sourceTenant); err != nil {
 				errOps[i] = fmt.Errorf("transport request check failed for artifact %s: %s", op.ArtifactTechID, err)
 				continue
 			}
@@ -308,7 +308,7 @@ func (s *Service) InsertTenantOps(ctx context.Context, drID uint, ops []db.Artif
 	}
 	if len(newOpIDs) > 0 {
 		go func() {
-			s.GenerateTransportRequest(context.Background(), sourceTenant.ID, drID, newOpIDs)
+			s.GenerateTransportRequest(context.WithoutCancel(ctx), sourceTenant.ID, drID, newOpIDs)
 		}()
 	}
 
@@ -352,7 +352,7 @@ func (s *Service) UpdateTenantOps(drID uint, updateItems []OpUpdateItem, user st
 				// Use existingOp's artifact identity for TrExist validation; only the TR number comes from item.
 				checkOp := existingOp
 				checkOp.TransportRequestNumber = item.TransportRequestNumber
-				if _, err := s.TrExist(&checkOp, &sourceTenant); err != nil {
+				if _, err := s.TrExist(context.Background(), &checkOp, &sourceTenant); err != nil {
 					errOps[item.ID] = fmt.Errorf("transport request check failed for artifact %s, new %s, old: %s: %s",
 						existingOp.ArtifactTechID, item.TransportRequestNumber, existingOp.TransportRequestNumber, err)
 					continue

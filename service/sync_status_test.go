@@ -121,7 +121,7 @@ func TestSyncDeliveryStatus_GuardsConcurrentUnapprovedAndCanceledRequests(t *tes
 		svc.drSyncLocks.Delete(uint(77))
 	})
 
-	if err := svc.SyncDeliveryStatus(77, "tester"); err == nil || !strings.Contains(err.Error(), "already in progress") {
+	if err := svc.SyncDeliveryStatus(context.Background(), 77, "tester"); err == nil || !strings.Contains(err.Error(), "already in progress") {
 		t.Fatalf("expected concurrent sync guard error, got %v", err)
 	}
 
@@ -135,7 +135,7 @@ func TestSyncDeliveryStatus_GuardsConcurrentUnapprovedAndCanceledRequests(t *tes
 		UpdatedBy:       "test",
 	})
 
-	if err := svc.SyncDeliveryStatus(notApproved.ID, "tester"); err == nil || !strings.Contains(err.Error(), "has not been approved yet") {
+	if err := svc.SyncDeliveryStatus(context.Background(), notApproved.ID, "tester"); err == nil || !strings.Contains(err.Error(), "has not been approved yet") {
 		t.Fatalf("expected approval guard error, got %v", err)
 	}
 
@@ -150,7 +150,7 @@ func TestSyncDeliveryStatus_GuardsConcurrentUnapprovedAndCanceledRequests(t *tes
 		UpdatedBy:       "test",
 	})
 
-	if err := svc.SyncDeliveryStatus(canceled.ID, "tester"); err == nil || !strings.Contains(err.Error(), "already canceled") {
+	if err := svc.SyncDeliveryStatus(context.Background(), canceled.ID, "tester"); err == nil || !strings.Contains(err.Error(), "already canceled") {
 		t.Fatalf("expected canceled guard error, got %v", err)
 	}
 }
@@ -205,7 +205,7 @@ func TestSyncDeployState_UpdatesRuntimeStatesAndCreatesConditions(t *testing.T) 
 		}, nil
 	})
 
-	conditions := svc.syncDeployState(fx.dr.ID, "tester")
+	conditions := svc.syncDeployState(context.Background(), fx.dr.ID, "tester")
 	if len(conditions) != 3 {
 		t.Fatalf("expected 3 conditions, got %d", len(conditions))
 	}
@@ -251,7 +251,7 @@ func TestSyncDeployState_UpdatesRuntimeStatesAndCreatesConditions(t *testing.T) 
 	}
 
 	// Second sync: mismatch op is now DeployFailed, should NOT produce duplicate condition
-	conditions2 := svc.syncDeployState(fx.dr.ID, "tester")
+	conditions2 := svc.syncDeployState(context.Background(), fx.dr.ID, "tester")
 	for _, c := range conditions2 {
 		if strings.Contains(c.Message, "is higher than expected version") {
 			t.Fatal("version mismatch condition should not repeat on second sync")
@@ -284,7 +284,7 @@ func TestSyncDeployState_PendingDeploy_SkipsWhenRuntimeVersionLower(t *testing.T
 		}, nil
 	})
 
-	conditions := svc.syncDeployState(fx.dr.ID, "tester")
+	conditions := svc.syncDeployState(context.Background(), fx.dr.ID, "tester")
 
 	// Should produce no conditions (silently skipped)
 	for _, c := range conditions {
@@ -350,7 +350,7 @@ func TestSyncImportState_CreatesTargetOpsAndWarningConditions(t *testing.T) {
 		},
 	})
 
-	conditions := svc.syncImportState(fx.dr.ID, "tester")
+	conditions := svc.syncImportState(context.Background(), fx.dr.ID, "tester")
 	if len(conditions) != 2 {
 		t.Fatalf("expected 2 conditions, got %d", len(conditions))
 	}
@@ -433,7 +433,7 @@ func TestSyncImportState_MonotonicProgression_InProgressNotDowngraded(t *testing
 		},
 	})
 
-	conditions := svc.syncImportState(fx.dr.ID, "tester")
+	conditions := svc.syncImportState(context.Background(), fx.dr.ID, "tester")
 
 	// No error conditions expected
 	for _, c := range conditions {

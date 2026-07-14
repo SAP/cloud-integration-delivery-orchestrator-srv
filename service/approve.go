@@ -27,7 +27,7 @@ func (s *Service) RequestApproval(drID uint, currentUserID string, approvers []s
 	}
 
 	// Validate all ops have valid TRs before submitting for approval
-	if _, err := s.BatchTrExist(dr.ArtifactTenantOperations, &dr.SourceTenant); err != nil {
+	if _, err := s.BatchTrExist(context.Background(), dr.ArtifactTenantOperations, &dr.SourceTenant); err != nil {
 		return err
 	}
 
@@ -93,7 +93,7 @@ func (s *Service) Approve(drID uint, approverID string) (*db.DeliveryRequest, er
 	}
 
 	// Validate all ops have valid TRs before approving
-	if _, err := s.BatchTrExist(dr.ArtifactTenantOperations, &dr.SourceTenant); err != nil {
+	if _, err := s.BatchTrExist(context.Background(), dr.ArtifactTenantOperations, &dr.SourceTenant); err != nil {
 		return nil, err
 	}
 
@@ -146,7 +146,7 @@ func (s *Service) Approve(drID uint, approverID string) (*db.DeliveryRequest, er
 	// Async — does not block Approve API response.
 	// SyncDeliveryStatus internally calls NotifyDrUpdated when state changes.
 	go func() {
-		if err := s.SyncDeliveryStatus(drID, approverID); err != nil {
+		if err := s.SyncDeliveryStatus(context.Background(), drID, approverID); err != nil {
 			s.Logger.Warnf("post-approve sync for DR %d failed (non-fatal): %s", drID, err)
 		}
 	}()

@@ -14,7 +14,7 @@ import (
 	"golang.org/x/mod/semver"
 )
 
-func (s *Service) DeliveryRuleCheck(op *db.ArtifactTenantOperation, rule *db.DeliveryRule) error {
+func (s *Service) DeliveryRuleCheck(ctx context.Context, op *db.ArtifactTenantOperation, rule *db.DeliveryRule) error {
 	// artifact version matches pattern in delivery rule
 	if err := checkVersionPattern(op, rule); err != nil {
 		return err
@@ -24,7 +24,7 @@ func (s *Service) DeliveryRuleCheck(op *db.ArtifactTenantOperation, rule *db.Del
 			continue
 		}
 		// before deliver, should check if version would cause downgrade in target tenants
-		if err := s.checkVersionDowngradeInTenant(op, &tenant); err != nil {
+		if err := s.checkVersionDowngradeInTenant(ctx, op, &tenant); err != nil {
 			return err
 		}
 	}
@@ -52,8 +52,8 @@ func checkVersionPattern(op *db.ArtifactTenantOperation, rule *db.DeliveryRule) 
 	return nil
 }
 
-func (s *Service) checkVersionDowngradeInTenant(op *db.ArtifactTenantOperation, targetTenant *db.CpiTenant) error {
-	cli, err := s.CPI(context.Background(), targetTenant.PirApiDestinationName)
+func (s *Service) checkVersionDowngradeInTenant(ctx context.Context, op *db.ArtifactTenantOperation, targetTenant *db.CpiTenant) error {
+	cli, err := s.CPI(ctx, targetTenant.PirApiDestinationName)
 	if err != nil {
 		return err
 	}
@@ -61,7 +61,7 @@ func (s *Service) checkVersionDowngradeInTenant(op *db.ArtifactTenantOperation, 
 	var targetVersion string
 	switch op.ArtifactType {
 	case consts.Artifact_Type_Iflow:
-		iflow, err := cli.GetDesignTimeIflow(context.Background(), op.ArtifactTechID, "active")
+		iflow, err := cli.GetDesignTimeIflow(ctx, op.ArtifactTechID, "active")
 		if err != nil {
 			var httpErr *env.HttpResponseError
 			if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
@@ -71,7 +71,7 @@ func (s *Service) checkVersionDowngradeInTenant(op *db.ArtifactTenantOperation, 
 		}
 		targetVersion = iflow.Version
 	case consts.Artifact_Type_Sc:
-		sc, err := cli.GetDesignTimeScriptCollection(context.Background(), op.ArtifactTechID, "active")
+		sc, err := cli.GetDesignTimeScriptCollection(ctx, op.ArtifactTechID, "active")
 		if err != nil {
 			var httpErr *env.HttpResponseError
 			if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
@@ -95,16 +95,16 @@ func (s *Service) checkVersionDowngradeInTenant(op *db.ArtifactTenantOperation, 
 }
 
 // check tr Number existence in source tenant, and check state is RELEASED
-func (s *Service) TrExist(op *db.ArtifactTenantOperation, sourceTenant *db.CpiTenant) (bool, error) {
+func (s *Service) TrExist(ctx context.Context, op *db.ArtifactTenantOperation, sourceTenant *db.CpiTenant) (bool, error) {
 	trNumber := op.TransportRequestNumber
 	if trNumber == "" {
 		return false, fmt.Errorf("artifact %s has empty transport request number", op.ArtifactTechID)
 	}
-	tmsClient, err := s.TmsSvc(context.Background())
+	tmsClient, err := s.TmsSvc(ctx)
 	if err != nil {
 		return false, fmt.Errorf("error resolving TMS client: %w", err)
 	}
-	trV1, err := tmsClient.GetTransportRequest(context.Background(), trNumber) // v1 to check state
+	trV1, err := tmsClient.GetTransportRequest(ctx, trNumber) // v1 to check state
 	if err != nil {
 		return false, fmt.Errorf("error when getting transport request %s, the tr number may not exist, error message: %s", trNumber, err)
 	}
@@ -131,11 +131,11 @@ func (s *Service) TrExist(op *db.ArtifactTenantOperation, sourceTenant *db.CpiTe
 	return true, nil
 }
 
-func (s *Service) BatchTrExist(ops []db.ArtifactTenantOperation, sourceTenant *db.CpiTenant) (bool, error) {
+func (s *Service) BatchTrExist(ctx context.Context, ops []db.ArtifactTenantOperation, sourceTenant *db.CpiTenant) (bool, error) {
 	errOps := make(map[uint]error)
 	for i := range ops {
 		op := &ops[i]
-		_, err := s.TrExist(op, sourceTenant)
+		_, err := s.TrExist(ctx, op, sourceTenant)
 		if err != nil {
 			errOps[op.ID] = err
 		}
