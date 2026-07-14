@@ -56,6 +56,13 @@ func (t *SyncTracker) StopAll() {
 	}
 }
 
+// ActiveCount returns the number of currently running sync goroutines.
+func (t *SyncTracker) ActiveCount() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return len(t.running)
+}
+
 // StartDRSync starts a per-DR sync goroutine that immediately performs one sync,
 // then continues polling every 15s until the DR reaches a terminal state.
 // Idempotent: if already running, returns immediately.

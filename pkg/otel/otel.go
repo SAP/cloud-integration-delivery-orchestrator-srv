@@ -3,12 +3,15 @@ package otel
 import (
 	"context"
 	"crypto/tls"
+	"time"
 
 	"github.com/cloudfoundry-community/go-cfenv"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 	oteltrace "go.opentelemetry.io/otel/trace"
@@ -69,10 +72,27 @@ func Init(appEnv *cfenv.App, serviceName string, logger *zap.SugaredLogger) func
 	otel.SetTracerProvider(tp)
 	otel.SetTextMapPropagator(propagation.TraceContext{})
 
-	logger.Infof("[otel] tracing enabled, exporting to %s", binding.endpoint)
+	// --- Metrics ---
+	metricExporter, err := otlpmetricgrpc.New(ctx,
+		otlpmetricgrpc.WithEndpoint(binding.endpoint),
+		otlpmetricgrpc.WithTLSCredentials(credentials.NewTLS(tlsConfig)),
+	)
+	if err != nil {
+		logger.Warnf("[otel] failed to create metric exporter (traces still active): %s", err)
+		return func() { _ = tp.Shutdown(context.Background()) }
+	}
+
+	mp := sdkmetric.NewMeterProvider(
+		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExporter, sdkmetric.WithInterval(60*time.Second))),
+		sdkmetric.WithResource(res),
+	)
+	otel.SetMeterProvider(mp)
+
+	logger.Infof("[otel] tracing and metrics enabled, exporting to %s", binding.endpoint)
 
 	return func() {
 		_ = tp.Shutdown(context.Background())
+		_ = mp.Shutdown(context.Background())
 	}
 }
 

@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
-	"go.opentelemetry.io/otel/attribute"
 	oteltrace "go.opentelemetry.io/otel/trace"
 	"gorm.io/gorm"
 
@@ -75,12 +75,9 @@ func (s *Service) BatchImportTenantOps(drID uint, opIDs []uint, targetTenantID u
 	// trigger async import in goroutine to avoid blocking
 	go func(drID uint, targetNodeID uint, targetTenantName string, trs []uint, ops []db.ArtifactTenantOperation, user string) {
 		ctx, span := cpiotel.Tracer().Start(context.Background(), "BatchImport.Async",
-			oteltrace.WithAttributes(
-				attribute.Int("dr_id", int(drID)),
-				attribute.Int("target_node_id", int(targetNodeID)),
-				attribute.Int("tr_count", len(trs)),
-			))
+			oteltrace.WithAttributes(cpiotel.ImportSpanAttrs(drID, targetNodeID, targetTenantName, trs, opsToArtifactInfo(ops))...))
 		defer span.End()
+		start := time.Now()
 		defer func() {
 			_ = s.DetermineOverallStatus(drID)
 			s.NotifyDrUpdated(drID)
@@ -92,6 +89,9 @@ func (s *Service) BatchImportTenantOps(drID uint, opIDs []uint, targetTenantID u
 			actionID, err = tmsClient.ImportTransportRequest(ctx, targetNodeID, trs)
 		}
 		if err != nil {
+			failedAttrs := cpiotel.MetricAttrs("failed", targetTenantName)
+			cpiotel.ImportDuration.Record(ctx, time.Since(start).Seconds(), failedAttrs)
+			cpiotel.ImportTotal.Add(ctx, int64(len(ops)), failedAttrs)
 			// revert ops state to ImportFailed on import error
 			for i := range ops {
 				ops[i].ImportState = lifecycle.ImportFailed
@@ -120,6 +120,9 @@ func (s *Service) BatchImportTenantOps(drID uint, opIDs []uint, targetTenantID u
 		}
 		s.BatchInsertConditions([]db.Condition{condition})
 
+		successAttrs := cpiotel.MetricAttrs("success", targetTenantName)
+		cpiotel.ImportDuration.Record(ctx, time.Since(start).Seconds(), successAttrs)
+		cpiotel.ImportTotal.Add(ctx, int64(len(ops)), successAttrs)
 		// TMS is now processing — start polling to track import progress
 		s.StartDRSync(drID)
 	}(drID, targetNodeID, targetTenant.Name, trs, ops, userID)
@@ -178,12 +181,9 @@ func (s *Service) BatchDeployTenantOps(drID uint, opIDs []uint, targetTenantID u
 	// trigger async deploy in goroutine to avoid blocking
 	go func(drID uint, tenant *db.CpiTenant, ops []db.ArtifactTenantOperation, user string) {
 		ctx, span := cpiotel.Tracer().Start(context.Background(), "BatchDeploy.Async",
-			oteltrace.WithAttributes(
-				attribute.Int("dr_id", int(drID)),
-				attribute.Int("tenant_id", int(tenant.ID)),
-				attribute.Int("op_count", len(ops)),
-			))
+			oteltrace.WithAttributes(cpiotel.DeploySpanAttrs(drID, tenant.ID, tenant.Name, opsToArtifactInfo(ops))...))
 		defer span.End()
+		start := time.Now()
 		defer func() {
 			_ = s.DetermineOverallStatus(drID)
 			s.NotifyDrUpdated(drID)
@@ -220,6 +220,7 @@ func (s *Service) BatchDeployTenantOps(drID uint, opIDs []uint, targetTenantID u
 		}
 
 		// record conditions based on results
+		duration := time.Since(start).Seconds()
 		if len(errOps) > 0 {
 			errMsg := "errors occurred during async deploy operations:\n"
 			for id, e := range errOps {
@@ -231,6 +232,10 @@ func (s *Service) BatchDeployTenantOps(drID uint, opIDs []uint, targetTenantID u
 				Message:           fmt.Sprintf("batch deploy failed in tenant %s. Error: %s", tenant.Name, errMsg),
 			}
 			s.BatchInsertConditions([]db.Condition{condition})
+
+			failedAttrs := cpiotel.MetricAttrs("failed", tenant.Name)
+			cpiotel.DeployTotal.Add(ctx, int64(len(failedOps)), failedAttrs)
+			cpiotel.DeployDuration.Record(ctx, duration, failedAttrs)
 		}
 
 		// save condition for successful deployments
@@ -246,6 +251,10 @@ func (s *Service) BatchDeployTenantOps(drID uint, opIDs []uint, targetTenantID u
 				Message:           fmt.Sprintf("batch deploy triggered in tenant %s by %s. Artifacts:\n%s", tenant.Name, userEmail, strings.Join(artifactList, "\n")),
 			}
 			s.BatchInsertConditions([]db.Condition{condition})
+
+			successAttrs := cpiotel.MetricAttrs("success", tenant.Name)
+			cpiotel.DeployTotal.Add(ctx, int64(len(successOps)), successAttrs)
+			cpiotel.DeployDuration.Record(ctx, duration, successAttrs)
 		}
 
 		// CPI is now processing — start polling to track deploy progress
@@ -314,4 +323,12 @@ func (s *Service) batchUpdateOps(ops []db.ArtifactTenantOperation) error {
 		return errors.New(errMsg)
 	}
 	return nil
+}
+
+func opsToArtifactInfo(ops []db.ArtifactTenantOperation) []cpiotel.ArtifactInfo {
+	out := make([]cpiotel.ArtifactInfo, 0, len(ops))
+	for _, op := range ops {
+		out = append(out, cpiotel.ArtifactInfo{TechID: op.ArtifactTechID, Version: op.ArtifactVersion})
+	}
+	return out
 }

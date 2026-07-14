@@ -82,6 +82,11 @@ func main() {
 	// Recover sync goroutines for DRs that were active before restart
 	svc.RecoverActiveSyncs()
 
+	// Register SyncTracker goroutine gauge for OTel metrics
+	cpiotel.RegisterSyncTrackerGauge(func() int64 {
+		return int64(svc.SyncTracker.ActiveCount())
+	})
+
 	// --- Build handler with all injected dependencies ---
 	h := handler.NewHandler(svc, database, env.Logger(), cpiManager, xsuaaClient, resolver, hub)
 
