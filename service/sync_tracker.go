@@ -9,21 +9,6 @@ import (
 	"mmt-delivery/pkg/lifecycle"
 )
 
-// TerminalDRStatuses defines aggregate statuses where the DR lifecycle is complete
-// and no further TMS/CPI polling is needed. The sync goroutine exits when the DR
-// reaches one of these states.
-//
-// Non-terminal states (AWAITING_IMPORT, IMPORTING, DEPLOYING, etc.) keep the
-// goroutine alive because TMS/CPI may still be processing (even if TMS temporarily
-// reports "INITIAL" due to processing lag).
-var TerminalDRStatuses = []lifecycle.AggregateStatus{
-	lifecycle.AggDeployed,
-	lifecycle.AggCanceled,
-	lifecycle.AggImportFailed,
-	lifecycle.AggDeployFailed,
-	lifecycle.AggWaitingDeploy,
-}
-
 // SyncTracker manages per-DR sync goroutines.
 // Each active DR gets its own goroutine that periodically calls SyncDeliveryStatus
 // until the DR reaches a terminal state.
@@ -88,7 +73,22 @@ func (s *Service) StartDRSync(drID uint) {
 	go s.runDRSync(ctx, drID)
 }
 
-// runDRSync will trigger a sync immediately, then every 15s until the DR reaches a terminal state.
+// hasActiveOps checks if any op in the DR is currently being processed by TMS/CPI.
+func (s *Service) hasActiveOps(drID uint) bool {
+	var count int64
+	if err := s.DB.Model(&db.ArtifactTenantOperation{}).
+		Where("delivery_request_id = ?", drID).
+		Where("import_state = ? OR deploy_state = ?",
+			lifecycle.ImportInProgress, lifecycle.DeployInProgress).
+		Count(&count).Error; err != nil {
+		s.Logger.Errorf("[SyncTracker] hasActiveOps query failed for DR %d: %s (keeping alive)", drID, err)
+		return true // assume active on error — avoid premature exit
+	}
+	return count > 0
+}
+
+// runDRSync will trigger a sync immediately, then every 15s until there are
+// no more active (InProgress) operations to track.
 func (s *Service) runDRSync(ctx context.Context, drID uint) {
 	defer func() {
 		s.Logger.Infof("[SyncTracker] drId=%d goroutine exiting", drID)
@@ -98,8 +98,7 @@ func (s *Service) runDRSync(ctx context.Context, drID uint) {
 	// Immediate first sync — don't wait for the first tick.
 	s.Logger.Debugf("[SyncTracker] drId=%d immediate sync", drID)
 	_ = s.SyncDeliveryStatus(drID, "system")
-	if s.isDRTerminal(drID) {
-		s.Logger.Infof("[SyncTracker] drId=%d reached terminal state after first sync", drID)
+	if !s.hasActiveOps(drID) {
 		return
 	}
 
@@ -114,48 +113,31 @@ func (s *Service) runDRSync(ctx context.Context, drID uint) {
 		case <-ticker.C:
 			s.Logger.Debugf("[SyncTracker] drId=%d tick sync", drID)
 			_ = s.SyncDeliveryStatus(drID, "system")
-			if s.isDRTerminal(drID) {
-				s.Logger.Infof("[SyncTracker] drId=%d reached terminal state", drID)
+			if !s.hasActiveOps(drID) {
+				s.Logger.Infof("[SyncTracker] drId=%d no active ops, stopping", drID)
 				return
 			}
 		}
 	}
 }
 
-// isDRTerminal checks whether the DR has reached a terminal state (deployed, canceled, or failed).
-// Only terminal states cause the sync goroutine to exit. Non-terminal states (including
-// AWAITING_IMPORT where TMS may have regressed the op state) keep the goroutine alive.
-func (s *Service) isDRTerminal(drID uint) bool {
-	var statuses []lifecycle.AggregateStatus
-	s.DB.Model(&db.DeliveryRequest{}).
-		Where("id = ?", drID).
-		Pluck("aggregate_status", &statuses)
-	if len(statuses) == 0 {
-		return true // DR not found or deleted → treat as terminal
-	}
-	for _, terminal := range TerminalDRStatuses {
-		if statuses[0] == terminal {
-			return true
-		}
-	}
-	return false
-}
-
-// RecoverActiveSyncs starts sync goroutines for all approved DRs not yet in terminal states.
-// Called once at service startup to resume polling for DRs that were being tracked before restart.
+// RecoverActiveSyncs starts sync goroutines for DRs that have active (InProgress)
+// operations. Called once at service startup to resume polling for operations that
+// were being tracked before restart.
 func (s *Service) RecoverActiveSyncs() {
-	var drs []db.DeliveryRequest
-	if err := s.DB.
-		Where("aggregate_status NOT IN ?", TerminalDRStatuses).
-		Where("approved_at IS NOT NULL").
-		Find(&drs).Error; err != nil {
-		s.Logger.Errorf("RecoverActiveSyncs: failed to query active DRs: %s", err)
+	var drIDs []uint
+	if err := s.DB.Model(&db.ArtifactTenantOperation{}).
+		Where("import_state = ? OR deploy_state = ?",
+			lifecycle.ImportInProgress, lifecycle.DeployInProgress).
+		Distinct("delivery_request_id").
+		Pluck("delivery_request_id", &drIDs).Error; err != nil {
+		s.Logger.Errorf("RecoverActiveSyncs: failed to query DRs with active ops: %s", err)
 		return
 	}
-	for _, dr := range drs {
-		s.StartDRSync(dr.ID)
+	for _, drID := range drIDs {
+		s.StartDRSync(drID)
 	}
-	if len(drs) > 0 {
-		s.Logger.Infof("recovered %d active DR sync goroutines", len(drs))
+	if len(drIDs) > 0 {
+		s.Logger.Infof("recovered %d active DR sync goroutines", len(drIDs))
 	}
 }

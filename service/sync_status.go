@@ -14,6 +14,9 @@ import (
 	"golang.org/x/mod/semver"
 )
 
+// ErrSyncAlreadyInProgress is returned when a concurrent sync is already running for the same DR.
+var ErrSyncAlreadyInProgress = fmt.Errorf("sync already in progress")
+
 // drSnapshot captures the state of a DR at a point in time for change detection.
 type drSnapshot struct {
 	Exists bool
@@ -92,7 +95,7 @@ func (s *Service) SyncDeliveryStatus(deliveryRequestID uint, user string) error 
 	// tenant, and both INSERT — producing duplicate ArtifactTenantOperation rows
 	// that permanently diverge in import state.
 	if _, loaded := s.drSyncLocks.LoadOrStore(deliveryRequestID, struct{}{}); loaded {
-		return fmt.Errorf("sync for delivery request %d is already in progress", deliveryRequestID)
+		return ErrSyncAlreadyInProgress
 	}
 	defer s.drSyncLocks.Delete(deliveryRequestID)
 
@@ -412,6 +415,15 @@ func (s *Service) syncImportState(deliveryRequestID uint, user string) []db.Cond
 			state := lifecycle.DeriveImport(nState.Status)
 			if state == curOp.ImportState { // skip if state no change
 				s.Logger.Infof("no import state change for artifact %s(#%d) in node %d, current state: %s", curOp.ArtifactTechID, curOp.ID, nID, state)
+				continue
+			}
+
+			// Monotonic state progression: never downgrade InProgress.
+			// InProgress was explicitly set by BatchImportTenantOps (import was triggered).
+			// Any "lower" state from TMS is processing delay or API anomaly, not a cancellation.
+			if curOp.ImportState == lifecycle.ImportInProgress &&
+				(state == lifecycle.ImportQueued || state == lifecycle.ImportNotStarted) {
+				s.Logger.Debugf("skipping import state downgrade for op %d: %s → %s", curOp.ID, curOp.ImportState, state)
 				continue
 			}
 

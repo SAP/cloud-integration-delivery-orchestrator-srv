@@ -1,91 +1,41 @@
 package service
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"mmt-delivery/db"
+	"mmt-delivery/pkg/cpi"
 	"mmt-delivery/pkg/lifecycle"
 )
 
-func TestIsDRTerminal_TerminalStatuses(t *testing.T) {
-	svc := newTestService(nil)
-	tc := newTestCleanup(t)
-	tenant := seedTenant(t, tc, "terminal-test-"+t.Name())
-
-	now := time.Now()
-
-	tests := []struct {
-		name     string
-		status   lifecycle.AggregateStatus
-		terminal bool
-	}{
-		{"Deployed is terminal", lifecycle.AggDeployed, true},
-		{"Canceled is terminal", lifecycle.AggCanceled, true},
-		{"ImportFailed is terminal", lifecycle.AggImportFailed, true},
-		{"DeployFailed is terminal", lifecycle.AggDeployFailed, true},
-		{"WaitingDeploy is terminal", lifecycle.AggWaitingDeploy, true},
-		{"AwaitingImport is NOT terminal", lifecycle.AggAwaitingImport, false},
-		{"Importing is NOT terminal", lifecycle.AggImporting, false},
-		{"Deploying is NOT terminal", lifecycle.AggDeploying, false},
-		{"Pending is NOT terminal", lifecycle.AggPending, false},
-		{"WaitingApproval is NOT terminal", lifecycle.AggWaitingApprove, false},
-		{"InProgress is NOT terminal", lifecycle.AggInProgress, false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			dr := seedDeliveryRequest(t, tc, db.DeliveryRequest{
-				Name:            "DR-" + tt.name,
-				SourceTenantID:  tenant.ID,
-				AggregateStatus: tt.status,
-				ApprovedBy:      "tester",
-				ApprovedAt:      &now,
-				CreatedBy:       "test",
-				UpdatedBy:       "test",
-			})
-
-			got := svc.isDRTerminal(dr.ID)
-			if got != tt.terminal {
-				t.Fatalf("isDRTerminal(%s) = %v, want %v", tt.status, got, tt.terminal)
-			}
-		})
-	}
-}
-
-func TestIsDRTerminal_NotFound(t *testing.T) {
-	svc := newTestService(nil)
-	if !svc.isDRTerminal(999999) {
-		t.Fatal("expected terminal=true for non-existent DR")
-	}
-}
-
-func TestRecoverActiveSyncs_SkipsTerminalAndUnapproved(t *testing.T) {
+func TestRecoverActiveSyncs_OnlyRecoversDRsWithActiveOps(t *testing.T) {
 	tc := newTestCleanup(t)
 	tenant := seedTenant(t, tc, "recover-test-"+t.Name())
 	now := time.Now()
 
-	// Terminal: should NOT be recovered
-	seedDeliveryRequest(t, tc, db.DeliveryRequest{
-		Name:            "deployed-dr",
+	// DR with no InProgress ops: should NOT be recovered
+	noOpsDR := seedDeliveryRequest(t, tc, db.DeliveryRequest{
+		Name:            "no-ops-dr",
 		SourceTenantID:  tenant.ID,
-		AggregateStatus: lifecycle.AggDeployed,
+		AggregateStatus: lifecycle.AggAwaitingImport,
 		ApprovedBy:      "tester",
 		ApprovedAt:      &now,
 		CreatedBy:       "test",
 		UpdatedBy:       "test",
 	})
-
-	// Not approved: should NOT be recovered
-	seedDeliveryRequest(t, tc, db.DeliveryRequest{
-		Name:            "unapproved-dr",
-		SourceTenantID:  tenant.ID,
-		AggregateStatus: lifecycle.AggAwaitingImport,
-		CreatedBy:       "test",
-		UpdatedBy:       "test",
+	// Only Queued ops — not active
+	seedOp(t, db.ArtifactTenantOperation{
+		DeliveryRequestID: noOpsDR.ID,
+		TenantID:          tenant.ID,
+		ArtifactTechID:    "queued-artifact",
+		ArtifactVersion:   "1.0.0",
+		ImportState:       lifecycle.ImportQueued,
+		DeployState:       lifecycle.DeployNotStarted,
 	})
 
-	// Active + approved: SHOULD be recovered
+	// DR with InProgress op: SHOULD be recovered
 	activeDR := seedDeliveryRequest(t, tc, db.DeliveryRequest{
 		Name:            "active-dr",
 		SourceTenantID:  tenant.ID,
@@ -95,33 +45,72 @@ func TestRecoverActiveSyncs_SkipsTerminalAndUnapproved(t *testing.T) {
 		CreatedBy:       "test",
 		UpdatedBy:       "test",
 	})
-
-	// Awaiting import + approved: SHOULD be recovered (TMS might have regressed state)
-	awaitingDR := seedDeliveryRequest(t, tc, db.DeliveryRequest{
-		Name:            "awaiting-dr",
-		SourceTenantID:  tenant.ID,
-		AggregateStatus: lifecycle.AggAwaitingImport,
-		ApprovedBy:      "tester",
-		ApprovedAt:      &now,
-		CreatedBy:       "test",
-		UpdatedBy:       "test",
+	seedOp(t, db.ArtifactTenantOperation{
+		DeliveryRequestID: activeDR.ID,
+		TenantID:          tenant.ID,
+		ArtifactTechID:    "active-artifact",
+		ArtifactVersion:   "1.0.0",
+		ImportState:       lifecycle.ImportInProgress,
+		DeployState:       lifecycle.DeployNotStarted,
 	})
 
 	svc := newTestService(nil)
 	svc.SyncTracker = NewSyncTracker()
 	svc.RecoverActiveSyncs()
 
-	// Give goroutines a moment to start (they'll fail on SyncDeliveryStatus but that's OK)
+	// Give goroutines a moment to start
 	time.Sleep(50 * time.Millisecond)
 
-	// Check that TryStart returns false for recovered DRs (already running)
+	// activeDR has InProgress ops → goroutine should be running
 	if _, started := svc.SyncTracker.TryStart(activeDR.ID); started {
 		t.Error("expected activeDR goroutine to be already running")
 		svc.SyncTracker.Finish(activeDR.ID)
 	}
-	if _, started := svc.SyncTracker.TryStart(awaitingDR.ID); started {
-		t.Error("expected awaitingDR goroutine to be already running")
-		svc.SyncTracker.Finish(awaitingDR.ID)
+	// noOpsDR has no InProgress ops → should NOT have been recovered at all
+	if _, started := svc.SyncTracker.TryStart(noOpsDR.ID); !started {
+		t.Error("expected noOpsDR to not be recovered (no active ops)")
+	} else {
+		svc.SyncTracker.Finish(noOpsDR.ID)
+	}
+
+	svc.SyncTracker.StopAll()
+}
+
+func TestRecoverActiveSyncs_RecoversDRWithDeployInProgress(t *testing.T) {
+	tc := newTestCleanup(t)
+	tenant := seedTenant(t, tc, "deploy-recover-"+t.Name())
+	now := time.Now()
+
+	deployDR := seedDeliveryRequest(t, tc, db.DeliveryRequest{
+		Name:            "deploying-dr",
+		SourceTenantID:  tenant.ID,
+		AggregateStatus: lifecycle.AggDeploying,
+		ApprovedBy:      "tester",
+		ApprovedAt:      &now,
+		CreatedBy:       "test",
+		UpdatedBy:       "test",
+	})
+	seedOp(t, db.ArtifactTenantOperation{
+		DeliveryRequestID: deployDR.ID,
+		TenantID:          tenant.ID,
+		ArtifactTechID:    "deploy-artifact",
+		ArtifactVersion:   "1.0.0",
+		ImportState:       lifecycle.ImportComplete,
+		DeployState:       lifecycle.DeployInProgress,
+	})
+
+	svc := newTestService(func(ctx context.Context, tenant string) (IntegrationService, error) {
+		return &mockRuntimeCPI{runtimeByID: map[string]cpi.RuntimeArtifact{}}, nil
+	})
+	svc.SyncTracker = NewSyncTracker()
+	svc.RecoverActiveSyncs()
+
+	time.Sleep(50 * time.Millisecond)
+
+	// DeployInProgress op → goroutine should be running
+	if _, started := svc.SyncTracker.TryStart(deployDR.ID); started {
+		t.Error("expected deployDR goroutine to be already running")
+		svc.SyncTracker.Finish(deployDR.ID)
 	}
 
 	svc.SyncTracker.StopAll()
