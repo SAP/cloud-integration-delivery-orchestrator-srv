@@ -13,6 +13,19 @@ func TestDeriveAggregateStatus_Importing(t *testing.T) {
 	}
 }
 
+func TestDeriveAggregateStatus_ImportingWithQueuedOps(t *testing.T) {
+	// When some ops are InProgress and others are Queued (multi-stage delivery),
+	// aggregate should show Importing (system is actively working).
+	agg := DeriveAggregateStatus(
+		AggAwaitingImport,
+		[]ImportState{ImportInProgress, ImportQueued},
+		[]DeployState{},
+	)
+	if agg != AggImporting {
+		t.Fatalf("expected IMPORTING when InProgress+Queued coexist, got %s", agg)
+	}
+}
+
 func TestDeriveAggregateStatus_AwaitingImport(t *testing.T) {
 	agg := DeriveAggregateStatus(
 		AggPending,

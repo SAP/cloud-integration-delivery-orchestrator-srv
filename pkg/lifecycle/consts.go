@@ -265,11 +265,11 @@ func DeriveAggregateStatus(aggStatus AggregateStatus, importStates []ImportState
 	if anyImport(importStates, ImportFailed) {
 		return AggImportFailed
 	}
-	if anyImport(importStates, ImportQueued) {
-		return AggAwaitingImport
-	}
 	if anyImport(importStates, ImportInProgress) {
 		return AggImporting
+	}
+	if anyImport(importStates, ImportQueued) {
+		return AggAwaitingImport
 	}
 
 	// Consider ImportDisabled as effectively complete for progressing to deploy
