@@ -4,11 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"mmt-delivery/db"
-	"mmt-delivery/pkg/lifecycle"
 	"strings"
 
+	"go.opentelemetry.io/otel/attribute"
+	oteltrace "go.opentelemetry.io/otel/trace"
 	"gorm.io/gorm"
+
+	"mmt-delivery/db"
+	"mmt-delivery/pkg/lifecycle"
+	cpiotel "mmt-delivery/pkg/otel"
 )
 
 // import INITIAL artifact operations under target node
@@ -70,15 +74,22 @@ func (s *Service) BatchImportTenantOps(drID uint, opIDs []uint, targetTenantID u
 
 	// trigger async import in goroutine to avoid blocking
 	go func(drID uint, targetNodeID uint, targetTenantName string, trs []uint, ops []db.ArtifactTenantOperation, user string) {
+		ctx, span := cpiotel.Tracer().Start(context.Background(), "BatchImport.Async",
+			oteltrace.WithAttributes(
+				attribute.Int("dr_id", int(drID)),
+				attribute.Int("target_node_id", int(targetNodeID)),
+				attribute.Int("tr_count", len(trs)),
+			))
+		defer span.End()
 		defer func() {
 			_ = s.DetermineOverallStatus(drID)
 			s.NotifyDrUpdated(drID)
 		}()
 
-		tmsClient, err := s.TmsSvc(context.Background())
+		tmsClient, err := s.TmsSvc(ctx)
 		var actionID uint
 		if err == nil {
-			actionID, err = tmsClient.ImportTransportRequest(context.Background(), targetNodeID, trs)
+			actionID, err = tmsClient.ImportTransportRequest(ctx, targetNodeID, trs)
 		}
 		if err != nil {
 			// revert ops state to ImportFailed on import error
@@ -166,6 +177,13 @@ func (s *Service) BatchDeployTenantOps(drID uint, opIDs []uint, targetTenantID u
 
 	// trigger async deploy in goroutine to avoid blocking
 	go func(drID uint, tenant *db.CpiTenant, ops []db.ArtifactTenantOperation, user string) {
+		ctx, span := cpiotel.Tracer().Start(context.Background(), "BatchDeploy.Async",
+			oteltrace.WithAttributes(
+				attribute.Int("dr_id", int(drID)),
+				attribute.Int("tenant_id", int(tenant.ID)),
+				attribute.Int("op_count", len(ops)),
+			))
+		defer span.End()
 		defer func() {
 			_ = s.DetermineOverallStatus(drID)
 			s.NotifyDrUpdated(drID)
@@ -177,7 +195,7 @@ func (s *Service) BatchDeployTenantOps(drID uint, opIDs []uint, targetTenantID u
 
 		for i := range ops {
 			op := &ops[i]
-			cpiCli, err := s.CPI(context.Background(), op.Tenant.PirApiDestinationName)
+			cpiCli, err := s.CPI(ctx, op.Tenant.PirApiDestinationName)
 			if err != nil {
 				errOps[op.ID] = fmt.Errorf("failed to create cpi client for tenant %s: %s", op.Tenant.Name, err)
 				// mark as failed and continue
@@ -185,7 +203,7 @@ func (s *Service) BatchDeployTenantOps(drID uint, opIDs []uint, targetTenantID u
 				failedOps = append(failedOps, *op)
 				continue
 			}
-			_, err = cpiCli.DeployArtifact(context.Background(), op.ArtifactTechID, op.ArtifactVersion, op.ArtifactType)
+			_, err = cpiCli.DeployArtifact(ctx, op.ArtifactTechID, op.ArtifactVersion, op.ArtifactType)
 			if err != nil {
 				errOps[op.ID] = fmt.Errorf("failed to deploy artifact %s:%s to tenant %s: %s", op.ArtifactTechID, op.ArtifactVersion, op.Tenant.Name, err)
 				// mark as failed and continue

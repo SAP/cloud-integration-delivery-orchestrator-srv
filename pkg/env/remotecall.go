@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"mmt-delivery/pkg/otel"
 )
 
 // HttpResponseError represents a non-2xx HTTP response from an external API.
@@ -56,7 +58,7 @@ func NewClient(ctx context.Context, clientID string, clientSecret string, authUr
 		authUrl = fmt.Sprintf("%s/oauth/token", authUrl)
 	}
 	client := &HttpClient{
-		HttpClient:   http.DefaultClient,
+		HttpClient:   &http.Client{Transport: otel.WrapTransport(nil)},
 		ApiURL:       apiUrl,
 		ClientId:     clientID,
 		ClientSecret: clientSecret,

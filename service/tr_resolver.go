@@ -27,9 +27,13 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"go.opentelemetry.io/otel/attribute"
+	oteltrace "go.opentelemetry.io/otel/trace"
+
 	"mmt-delivery/db"
 	"mmt-delivery/pkg/cas"
 	"mmt-delivery/pkg/lifecycle"
+	cpiotel "mmt-delivery/pkg/otel"
 )
 
 // TransportRequest is the result of a successful export for one artifact operation.
@@ -177,6 +181,14 @@ func (s *Service) ensureCasGUIDs(ctx context.Context, casClient CasService, ops 
 // succeeded and failed are per-op results; callers must inspect both —
 // succeeded TRs are already persisted and must not be re-created.
 func (s *Service) GenerateTransportRequest(ctx context.Context, tenantID, deliveryRequestID uint, artifactOperationIDs []uint) (map[uint]*TransportRequest, map[uint]error, error) {
+	ctx, span := cpiotel.Tracer().Start(ctx, "GenerateTransportRequest",
+		oteltrace.WithAttributes(
+			attribute.Int("dr_id", int(deliveryRequestID)),
+			attribute.Int("tenant_id", int(tenantID)),
+			attribute.Int("op_count", len(artifactOperationIDs)),
+		))
+	defer span.End()
+
 	// ── 0. Set all target ops to TR_GENERATING unconditionally.
 	//    Covers both the InsertOps path (NOT_REQUESTED) and the manual retry path (TR_FAILED).
 	if dbErr := s.DB.WithContext(ctx).Model(&db.ArtifactTenantOperation{}).

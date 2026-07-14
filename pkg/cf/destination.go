@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/cloudfoundry-community/go-cfenv"
+
+	"mmt-delivery/pkg/otel"
 )
 
 const defaultDestTTL = 5 * time.Minute
@@ -106,7 +108,7 @@ func NewDestinationServiceClient(ctx context.Context, credentials map[string]any
 	tokenURL = NormaliseTokenURL(tokenURL)
 
 	c := &DestinationServiceClient{
-		httpClient:   &http.Client{Timeout: 30 * time.Second},
+		httpClient:   &http.Client{Timeout: 30 * time.Second, Transport: otel.WrapTransport(nil)},
 		apiURL:       apiURL,
 		clientID:     clientID,
 		clientSecret: clientSecret,
@@ -145,7 +147,7 @@ func NewDestinationServiceClientFromVCAP(appEnv *cfenv.App) (*DestinationService
 	authURL = NormaliseTokenURL(authURL)
 
 	c := &DestinationServiceClient{
-		httpClient:   &http.Client{Timeout: 30 * time.Second},
+		httpClient:   &http.Client{Timeout: 30 * time.Second, Transport: otel.WrapTransport(nil)},
 		apiURL:       apiURL,
 		clientID:     clientID,
 		clientSecret: clientSecret,

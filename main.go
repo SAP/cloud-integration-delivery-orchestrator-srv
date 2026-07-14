@@ -18,11 +18,13 @@ import (
 	"mmt-delivery/pkg/cpi"
 	"mmt-delivery/pkg/env"
 	"mmt-delivery/pkg/xsuaa"
+	cpiotel "mmt-delivery/pkg/otel"
 	"mmt-delivery/service"
 	"mmt-delivery/web"
 
 	ginzap "github.com/gin-contrib/zap"
 	"github.com/gin-gonic/gin"
+	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 )
 
 func main() {
@@ -93,7 +95,11 @@ func main() {
 	oauthHandler := auth.NewOAuthHandler(oauthCfg, sessions, env.Logger())
 
 	// --- Setup Gin router ---
+	otelShutdown := cpiotel.Init(env.AppEnv(), "cpi-delivery", env.Logger())
+	defer otelShutdown()
+
 	router := gin.New()
+	router.Use(otelgin.Middleware("cpi-delivery"))
 	router.Use(ginzap.Ginzap(logger, time.RFC3339, true))
 	router.Use(ginzap.RecoveryWithZap(logger, true))
 
