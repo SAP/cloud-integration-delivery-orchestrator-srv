@@ -66,6 +66,12 @@ func NewCFClient(apiURL, bearerToken string) (*CFClient, error) {
 // The token is returned as a raw string (without "Bearer " prefix) and is
 // never persisted by this function.
 func ExchangeCfPasscode(ctx context.Context, cfApiEndpoint, passcode string) (string, error) {
+	// Validate that the endpoint is a legitimate CF API URL
+	parsed, err := url.Parse(cfApiEndpoint)
+	if err != nil || parsed.Scheme != "https" || !strings.HasSuffix(parsed.Hostname(), ".hana.ondemand.com") {
+		return "", fmt.Errorf("cf: invalid API endpoint (must be https://*.hana.ondemand.com): %s", cfApiEndpoint)
+	}
+
 	loginBase := strings.Replace(cfApiEndpoint, "https://api.", "https://login.", 1)
 	loginBase = strings.TrimRight(loginBase, "/")
 	tokenURL := loginBase + "/oauth/token"

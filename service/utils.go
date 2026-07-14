@@ -32,6 +32,6 @@ func Scope(ctx *gin.Context) []string {
 	return scope.([]string)
 }
 func ToUint(s string) (uint, error) {
-	v, err := strconv.ParseUint(s, 10, 64)
+	v, err := strconv.ParseUint(s, 10, strconv.IntSize)
 	return uint(v), err
 }

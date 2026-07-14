@@ -37,7 +37,7 @@ func (h *Handler) GetOperationsHistoryFilters(c *gin.Context) {
 
 // GetOperationConditions returns the condition timeline for a specific operation.
 func (h *Handler) GetOperationConditions(c *gin.Context) {
-	opID, err := strconv.ParseUint(c.Param("opId"), 10, 64)
+	opID, err := strconv.ParseUint(c.Param("opId"), 10, strconv.IntSize)
 	if err != nil {
 		Fail(c, http.StatusBadRequest, "invalid operation ID")
 		return

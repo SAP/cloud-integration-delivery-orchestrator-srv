@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/go-git/go-git/v5"
@@ -43,6 +44,17 @@ func gitAuth(resolver *cf.DestinationServiceClient, destName string) (*auth.Basi
 
 var Cpi_Base_Repo = "mmt-cpi-packages"
 var Artifact_Base_Dir = "./artifacts"
+
+// safePathSegment validates that a string is safe to use as a single path segment
+// (no path separators, no traversal sequences).
+func safePathSegment(s string) error {
+	if s == "" || s == "." || s == ".." ||
+		strings.ContainsAny(s, "/\\") ||
+		strings.Contains(s, "..") {
+		return fmt.Errorf("unsafe path segment: %q", s)
+	}
+	return nil
+}
 
 // temporarily disable github sync
 func init_disable() {
@@ -82,6 +94,13 @@ func (c *CpiClient) SyncToGithub(resolver *cf.DestinationServiceClient, destName
 
 // download artifact zip file, write it to the base directory
 func (c *CpiClient) DownloadArtifact(ctx context.Context, artifactId, artifactVersion, packageID, artifactType string) error {
+	if err := safePathSegment(artifactId); err != nil {
+		return fmt.Errorf("invalid artifactId: %w", err)
+	}
+	if err := safePathSegment(artifactVersion); err != nil {
+		return fmt.Errorf("invalid artifactVersion: %w", err)
+	}
+
 	childCtx, cancel := context.WithTimeout(ctx, consts.LongRequestTimeout)
 	defer cancel()
 	// Download the artifact from CPI
@@ -160,6 +179,13 @@ func (c *CpiClient) PublishToGithubRelease(ctx context.Context, artifactId, arti
 
 // upload artifact zip file to respective tenant
 func (c *CpiClient) UploadArtifact(ctx context.Context, artifactId string, artifactName string, artifactVersion string, packageId string) error {
+	if err := safePathSegment(artifactId); err != nil {
+		return fmt.Errorf("invalid artifactId: %w", err)
+	}
+	if err := safePathSegment(artifactVersion); err != nil {
+		return fmt.Errorf("invalid artifactVersion: %w", err)
+	}
+
 	childCtx, cancel := context.WithTimeout(ctx, consts.ImportTimeout)
 	defer cancel()
 
@@ -261,6 +287,16 @@ func zipSource(source, target string) (*bytes.Buffer, error) {
 
 // unzip Artifact zip file, write it to respective package directory
 func unzipSource(artifactId, artifactVersion, packageId string) error {
+	if err := safePathSegment(artifactId); err != nil {
+		return fmt.Errorf("invalid artifactId: %w", err)
+	}
+	if err := safePathSegment(artifactVersion); err != nil {
+		return fmt.Errorf("invalid artifactVersion: %w", err)
+	}
+	if err := safePathSegment(packageId); err != nil {
+		return fmt.Errorf("invalid packageId: %w", err)
+	}
+
 	source := fmt.Sprintf("%s/%s:%s.zip", Artifact_Base_Dir, artifactId, artifactVersion) // zip artifact file path
 	zipReader, err := zip.OpenReader(source)
 	if err != nil {
@@ -271,6 +307,12 @@ func unzipSource(artifactId, artifactVersion, packageId string) error {
 	for _, zippedFile := range zipReader.File {
 		artifactBaseDir := fmt.Sprintf("%s/%s/%s", Cpi_Base_Repo, packageId, artifactId)
 		targetPath := filepath.Join(artifactBaseDir, zippedFile.Name)
+
+		// Zip Slip protection: ensure extracted path stays within target directory
+		cleanBase := filepath.Clean(artifactBaseDir) + string(os.PathSeparator)
+		if !strings.HasPrefix(filepath.Clean(targetPath)+string(os.PathSeparator), cleanBase) {
+			return fmt.Errorf("illegal file path in zip (path traversal): %s", zippedFile.Name)
+		}
 
 		// Create directories if necessary
 		if zippedFile.FileInfo().IsDir() {
