@@ -394,6 +394,65 @@ func TestSyncImportState_CreatesTargetOpsAndWarningConditions(t *testing.T) {
 	}
 }
 
+func TestSyncImportState_MonotonicProgression_InProgressNotDowngraded(t *testing.T) {
+	fx := setupSyncFixture(t)
+
+	// Op is already InProgress (triggered by BatchImportTenantOps)
+	op := seedOp(t, db.ArtifactTenantOperation{
+		DeliveryRequestID:      fx.dr.ID,
+		TenantID:               fx.target.ID,
+		ArtifactTechID:         "artifact-mono",
+		ArtifactName:           "Artifact Mono",
+		ArtifactVersion:        "1.0.0",
+		ArtifactType:           consts.Artifact_Type_Iflow,
+		PackageID:              "pkg-mono",
+		PackageName:            "Package Mono",
+		PackageVersion:         "1.0.0",
+		TransportRequestNumber: "TR-7000",
+		ImportState:            lifecycle.ImportInProgress,
+		DeployState:            lifecycle.DeployNotStarted,
+	})
+
+	now := time.Now()
+	svc := newTestService(nil, testServiceOpts{
+		tms: &mockStatusTMS{
+			mockTMSClient: mockTMSClient{
+				nodeStatuses: map[string]map[uint]tms.TrNodeStatus{
+					"TR-7000": {
+						// TMS returns INITIAL — processing delay, not a real state
+						fx.target.TmsSourceNodeID: {
+							TransportRequestNumber: "TR-7000",
+							TransportNodeID:        fx.target.TmsSourceNodeID,
+							TransportNodeName:      fx.target.TmsSourceNodeName,
+							Status:                 "INITIAL",
+							UpdatedAt:              now,
+						},
+					},
+				},
+			},
+		},
+	})
+
+	conditions := svc.syncImportState(fx.dr.ID, "tester")
+
+	// No error conditions expected
+	for _, c := range conditions {
+		if c.State == lifecycle.CondError {
+			t.Fatalf("unexpected error condition: %s", c.Message)
+		}
+	}
+
+	// Verify op state was NOT downgraded from InProgress to Queued
+	var updated db.ArtifactTenantOperation
+	if err := testDB.First(&updated, op.ID).Error; err != nil {
+		t.Fatalf("reload op: %v", err)
+	}
+	if updated.ImportState != lifecycle.ImportInProgress {
+		t.Fatalf("monotonic violation: import state = %s, want %s (should not be downgraded by TMS INITIAL)",
+			updated.ImportState, lifecycle.ImportInProgress)
+	}
+}
+
 func TestExtractJiraIssueKey(t *testing.T) {
 	svc := newTestService(nil)
 
