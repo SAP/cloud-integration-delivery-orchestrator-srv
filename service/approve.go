@@ -141,6 +141,16 @@ func (s *Service) Approve(drID uint, approverID string) (*db.DeliveryRequest, er
 			})
 		}
 	}()
+
+	// One-shot sync: creates target ops so frontend can enable Import button.
+	// Async — does not block Approve API response.
+	// SyncDeliveryStatus internally calls NotifyDrUpdated when state changes.
+	go func() {
+		if err := s.SyncDeliveryStatus(drID, approverID); err != nil {
+			s.Logger.Warnf("post-approve sync for DR %d failed (non-fatal): %s", drID, err)
+		}
+	}()
+
 	return dr, nil
 }
 

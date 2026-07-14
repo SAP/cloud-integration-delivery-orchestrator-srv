@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -305,6 +306,10 @@ func (h *Handler) HandleSyncState(ctx *gin.Context) {
 		return
 	}
 	if err := h.svc.SyncDeliveryStatus(drID, user); err != nil {
+		if errors.Is(err, service.ErrSyncAlreadyInProgress) {
+			OKMsg(ctx, nil, "sync already in progress")
+			return
+		}
 		Fail(ctx, http.StatusInternalServerError, err.Error())
 		return
 	}
