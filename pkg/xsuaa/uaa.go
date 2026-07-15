@@ -65,7 +65,7 @@ func (uaa *UaaClient) UserInfo(ctx context.Context, userID string) (*db.UserInfo
 	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
 	defer cancel()
 	fullUrl := fmt.Sprintf("%s/Users/%s", uaa.ApiURL, userID)
-	logger(ctx).Infof("searching user info by sub/user_id, at %s", fullUrl)
+	logger(ctx).Infow("searching user info by sub/user_id", "url", fullUrl)
 	request := env.HttpRequest{
 		ApiURL: fullUrl,
 		Method: http.MethodGet,
@@ -110,7 +110,7 @@ func (uaa *UaaClient) SearchByEmail(ctx context.Context, email string, curUserOr
 	q := url.Values{}
 	q.Set("filter", fmt.Sprintf("email co %q", email))
 	fullURL := fmt.Sprintf("%s/Users?%s", uaa.ApiURL, q.Encode())
-	logger(ctx).Infof("Starting to get all user info: %s\n", fullURL)
+	logger(ctx).Infow("searching users by email", "url", fullURL)
 	request := env.HttpRequest{
 		ApiURL: fullURL,
 		Method: http.MethodGet,
@@ -124,7 +124,7 @@ func (uaa *UaaClient) SearchByEmail(ctx context.Context, email string, curUserOr
 	if err := json.Unmarshal(respBodyContent, &document); err != nil {
 		return []db.UserInfo{}, fmt.Errorf("SearchByEmail: unmarshal: %w", err)
 	}
-	logger(ctx).Infof("Successfully retrieved uaa users: %+v", document)
+	logger(ctx).Infow("successfully retrieved uaa users", "document", document)
 	users := make([]db.UserInfo, 0)
 	for _, u := range document.Resources {
 		if u.Origin != curUserOrigin {

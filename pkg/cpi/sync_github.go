@@ -223,7 +223,7 @@ func (c *CpiClient) UploadArtifact(ctx context.Context, artifactId string, artif
 	if err != nil {
 		return fmt.Errorf("UploadArtifact: %w", err)
 	}
-	logger(ctx).Infof("Artifact %s:%s uploaded successfully, response: %s", artifactId, artifactVersion, string(response))
+	logger(ctx).Infow("artifact uploaded successfully", "artifactId", artifactId, "artifactVersion", artifactVersion, "response", string(response))
 	return nil
 }
 
