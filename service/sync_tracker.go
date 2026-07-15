@@ -98,12 +98,12 @@ func (s *Service) hasActiveOps(drID uint) bool {
 // no more active (InProgress) operations to track.
 func (s *Service) runDRSync(ctx context.Context, drID uint) {
 	defer func() {
-		s.Logger.Infow("goroutine exiting", "component", "sync_tracker", "dr_id", drID)
+		s.L(ctx).Infow("goroutine exiting", "component", "sync_tracker", "dr_id", drID)
 		s.SyncTracker.Finish(drID)
 	}()
 
 	// Immediate first sync — don't wait for the first tick.
-	s.Logger.Debugw("immediate sync", "component", "sync_tracker", "dr_id", drID)
+	s.L(ctx).Debugw("immediate sync", "component", "sync_tracker", "dr_id", drID)
 	_ = s.SyncDeliveryStatus(ctx, drID, "system")
 	if !s.hasActiveOps(drID) {
 		return
@@ -115,13 +115,13 @@ func (s *Service) runDRSync(ctx context.Context, drID uint) {
 	for {
 		select {
 		case <-ctx.Done():
-			s.Logger.Debugw("context cancelled", "component", "sync_tracker", "dr_id", drID)
+			s.L(ctx).Debugw("context cancelled", "component", "sync_tracker", "dr_id", drID)
 			return
 		case <-ticker.C:
-			s.Logger.Debugw("tick sync", "component", "sync_tracker", "dr_id", drID)
+			s.L(ctx).Debugw("tick sync", "component", "sync_tracker", "dr_id", drID)
 			_ = s.SyncDeliveryStatus(ctx, drID, "system")
 			if !s.hasActiveOps(drID) {
-				s.Logger.Infow("no active ops, stopping", "component", "sync_tracker", "dr_id", drID)
+				s.L(ctx).Infow("no active ops, stopping", "component", "sync_tracker", "dr_id", drID)
 				return
 			}
 		}

@@ -16,8 +16,8 @@ import (
 	"go.uber.org/zap"
 )
 
-// logger returns the package logger, resolved lazily via env.Logger().
-func logger() *zap.SugaredLogger { return env.Logger() }
+// logger returns a context-aware logger that includes trace_id/span_id when OTel is active.
+func logger(ctx context.Context) *zap.SugaredLogger { return env.L(ctx) }
 
 type CPIPackage struct {
 	ID                string `json:"Id"`
@@ -87,7 +87,7 @@ func (c *CpiClient) GetPackages(ctx context.Context) ([]CPIPackage, error) {
 	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/IntegrationPackages", c.ApiURL)
-	logger().Infof("Starting to get all packages from cpi tenant %s\n", fullURL)
+	logger(ctx).Infof("Starting to get all packages from cpi tenant %s\n", fullURL)
 	request := env.HttpRequest{
 		Method: http.MethodGet,
 		ApiURL: fullURL,
@@ -96,9 +96,9 @@ func (c *CpiClient) GetPackages(ctx context.Context) ([]CPIPackage, error) {
 	respBodyContent, errReq := c.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
-			logger().Errorf("GetPackages request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
+			logger(ctx).Errorf("GetPackages request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
 		}
-		logger().Errorf("Error when getting response content, the error message is %s", errReq)
+		logger(ctx).Errorf("Error when getting response content, the error message is %s", errReq)
 		return []CPIPackage{}, errReq
 	}
 
@@ -106,7 +106,7 @@ func (c *CpiClient) GetPackages(ctx context.Context) ([]CPIPackage, error) {
 	jsonUnmarshalError := json.Unmarshal(respBodyContent, &packcageResp)
 
 	if jsonUnmarshalError != nil {
-		logger().Errorf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
+		logger(ctx).Errorf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
 		return []CPIPackage{}, jsonUnmarshalError
 	}
 
@@ -121,7 +121,7 @@ func (c *CpiClient) GetPackage(ctx context.Context, packageID string) (CPIPackag
 	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/IntegrationPackages('%s')", c.ApiURL, packageID)
-	logger().Infof("Starting to get packages %s from cpi tenant %s\n", packageID, fullURL)
+	logger(ctx).Infof("Starting to get packages %s from cpi tenant %s\n", packageID, fullURL)
 	request := env.HttpRequest{
 		Method: http.MethodGet,
 		ApiURL: fullURL,
@@ -129,16 +129,16 @@ func (c *CpiClient) GetPackage(ctx context.Context, packageID string) (CPIPackag
 	respBodyContent, errReq := c.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
-			logger().Errorf("GetPackage request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
+			logger(ctx).Errorf("GetPackage request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
 		}
-		logger().Errorf("Error when getting response content, the error message is %s", errReq)
+		logger(ctx).Errorf("Error when getting response content, the error message is %s", errReq)
 		return CPIPackage{}, errReq
 	}
 	var packcageResp PackageResponse
 	jsonUnmarshalError := json.Unmarshal(respBodyContent, &packcageResp)
 
 	if jsonUnmarshalError != nil {
-		logger().Errorf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
+		logger(ctx).Errorf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
 		return CPIPackage{}, jsonUnmarshalError
 	}
 
@@ -163,7 +163,7 @@ func (c *CpiClient) ImportPackage(ctx context.Context, cpiPackage importPackageR
 	childCtx, cancel := context.WithTimeout(ctx, consts.ImportTimeout)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/IntegrationPackages", c.ApiURL)
-	logger().Infof("Starting to import package to cpi tenant %s\n", fullURL)
+	logger(ctx).Infof("Starting to import package to cpi tenant %s\n", fullURL)
 	requestBodyJson, _ := json.Marshal(cpiPackage)
 	request := env.HttpRequest{
 		Method:      http.MethodPost,
@@ -173,9 +173,9 @@ func (c *CpiClient) ImportPackage(ctx context.Context, cpiPackage importPackageR
 	respBodyContent, errReq := c.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
-			logger().Errorf("ImportPackage request timeout after %v: %s", consts.ImportTimeout, fullURL)
+			logger(ctx).Errorf("ImportPackage request timeout after %v: %s", consts.ImportTimeout, fullURL)
 		}
-		logger().Errorf("Error when getting response content, the error message is %s", errReq)
+		logger(ctx).Errorf("Error when getting response content, the error message is %s", errReq)
 		return CPIPackage{}, errReq
 	}
 
@@ -183,7 +183,7 @@ func (c *CpiClient) ImportPackage(ctx context.Context, cpiPackage importPackageR
 	jsonUnmarshalError := json.Unmarshal(respBodyContent, &packcageResp)
 
 	if jsonUnmarshalError != nil {
-		logger().Errorf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
+		logger(ctx).Errorf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
 		return CPIPackage{}, jsonUnmarshalError
 	}
 	return packcageResp.D, nil
@@ -234,7 +234,7 @@ func (c *CpiClient) GetPackageIflows(ctx context.Context, packageID string) ([]I
 	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/IntegrationPackages('%s')/IntegrationDesigntimeArtifacts", c.ApiURL, packageID)
-	logger().Infof("Starting to get all iflows in package %s from cpi tenant %s\n", packageID, fullURL)
+	logger(ctx).Infof("Starting to get all iflows in package %s from cpi tenant %s\n", packageID, fullURL)
 	request := env.HttpRequest{
 		Method: http.MethodGet,
 		ApiURL: fullURL,
@@ -242,9 +242,9 @@ func (c *CpiClient) GetPackageIflows(ctx context.Context, packageID string) ([]I
 	respBodyContent, errReq := c.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
-			logger().Errorf("GetPackageIflows request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
+			logger(ctx).Errorf("GetPackageIflows request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
 		}
-		logger().Errorf("Error when getting response content, the error message is %s", errReq)
+		logger(ctx).Errorf("Error when getting response content, the error message is %s", errReq)
 		return []IflowItem{}, errReq
 	}
 	var iflowsResp PackageIflowsResp
@@ -264,7 +264,7 @@ func (c *CpiClient) GetPackageIflow(ctx context.Context, packageID string, iflow
 	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/IntegrationPackages('%s')/IntegrationDesigntimeArtifacts(Id='%s',Version='%s')", c.ApiURL, packageID, iflowID, iflowVersion)
-	logger().Infof("Starting to get iflow %s in package %s from cpi tenant %s\n", iflowID, packageID, fullURL)
+	logger(ctx).Infof("Starting to get iflow %s in package %s from cpi tenant %s\n", iflowID, packageID, fullURL)
 	request := env.HttpRequest{
 		Method: http.MethodGet,
 		ApiURL: fullURL,
@@ -272,16 +272,16 @@ func (c *CpiClient) GetPackageIflow(ctx context.Context, packageID string, iflow
 	respBodyContent, errReq := c.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
-			logger().Errorf("GetPackageIflow request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
+			logger(ctx).Errorf("GetPackageIflow request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
 		}
-		logger().Errorf("Error when getting response content: %s", errReq)
+		logger(ctx).Errorf("Error when getting response content: %s", errReq)
 		return IflowItem{}, errReq
 	}
 	var iflowResp IflowResp
 	jsonUnmarshalError := json.Unmarshal(respBodyContent, &iflowResp)
 
 	if jsonUnmarshalError != nil {
-		logger().Errorf("Error when unmarshal from json, error message %s\n", jsonUnmarshalError)
+		logger(ctx).Errorf("Error when unmarshal from json, error message %s\n", jsonUnmarshalError)
 		return IflowItem{}, jsonUnmarshalError
 	}
 
@@ -298,7 +298,7 @@ func (c *CpiClient) GetDesignTimeIflow(ctx context.Context, iflowID string, iflo
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/IntegrationDesigntimeArtifacts(Id='%s',Version='%s')", c.ApiURL, iflowID, iflowVersion)
 
-	logger().Infof("Starting to get iflow %s from cpi tenant %s\n", iflowID, fullURL)
+	logger(ctx).Infof("Starting to get iflow %s from cpi tenant %s\n", iflowID, fullURL)
 	request := env.HttpRequest{
 		Method: http.MethodGet,
 		ApiURL: fullURL,
@@ -306,16 +306,16 @@ func (c *CpiClient) GetDesignTimeIflow(ctx context.Context, iflowID string, iflo
 	respBodyContent, errReq := c.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
-			logger().Errorf("GetDesignTimeIflow request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
+			logger(ctx).Errorf("GetDesignTimeIflow request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
 		}
-		logger().Errorf("Error when getting response content, the error message is %s", errReq)
+		logger(ctx).Errorf("Error when getting response content, the error message is %s", errReq)
 		return IflowItem{}, errReq
 	}
 	var iflowResp IflowResp
 	jsonUnmarshalError := json.Unmarshal(respBodyContent, &iflowResp)
 
 	if jsonUnmarshalError != nil {
-		logger().Errorf("Error when unmarshal from json, error message %s\n", jsonUnmarshalError)
+		logger(ctx).Errorf("Error when unmarshal from json, error message %s\n", jsonUnmarshalError)
 		return IflowItem{}, jsonUnmarshalError
 	}
 
@@ -328,7 +328,7 @@ func (c *CpiClient) DeployIflow(ctx context.Context, iflowID string, iflowVersio
 	defer cancel()
 	var taskID string
 	fullURL := fmt.Sprintf("%s/DeployIntegrationDesigntimeArtifact?Id='%s'&Version='%s'", c.ApiURL, iflowID, iflowVersion)
-	logger().Infof("Starting to deploy iflow %s on tenant %s\n", iflowID, fullURL)
+	logger(ctx).Infof("Starting to deploy iflow %s on tenant %s\n", iflowID, fullURL)
 	request := env.HttpRequest{
 		Method: http.MethodPost,
 		ApiURL: fullURL,
@@ -336,9 +336,9 @@ func (c *CpiClient) DeployIflow(ctx context.Context, iflowID string, iflowVersio
 	respBodyContent, errReq := c.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
-			logger().Errorf("DeployIflow request timeout after %v: %s", consts.ImportTimeout, fullURL)
+			logger(ctx).Errorf("DeployIflow request timeout after %v: %s", consts.ImportTimeout, fullURL)
 		}
-		logger().Errorf("Error when getting response content, the error message is %s", errReq)
+		logger(ctx).Errorf("Error when getting response content, the error message is %s", errReq)
 		return taskID, errReq
 	}
 	taskID = string(respBodyContent)
@@ -351,7 +351,7 @@ func (c *CpiClient) DeployScriptCollection(ctx context.Context, scriptCollection
 	defer cancel()
 	var taskID string
 	fullURL := fmt.Sprintf("%s/DeployScriptCollectionDesigntimeArtifact?Id='%s'&Version='%s'", c.ApiURL, scriptCollectionID, scriptCollectionVersion)
-	logger().Infof("Starting to deploy script collection %s in package from cpi tenant %s\n", scriptCollectionID, fullURL)
+	logger(ctx).Infof("Starting to deploy script collection %s in package from cpi tenant %s\n", scriptCollectionID, fullURL)
 	request := env.HttpRequest{
 		Method: http.MethodPost,
 		ApiURL: fullURL,
@@ -359,9 +359,9 @@ func (c *CpiClient) DeployScriptCollection(ctx context.Context, scriptCollection
 	respBodyContent, errReq := c.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
-			logger().Errorf("DeployScriptCollection request timeout after %v: %s", consts.ImportTimeout, fullURL)
+			logger(ctx).Errorf("DeployScriptCollection request timeout after %v: %s", consts.ImportTimeout, fullURL)
 		}
-		logger().Errorf("Error when getting response content, the error message is %s", errReq)
+		logger(ctx).Errorf("Error when getting response content, the error message is %s", errReq)
 		return "", errReq
 	}
 	taskID = string(respBodyContent)
@@ -398,7 +398,7 @@ func (c *CpiClient) CheckDeployStatusByTaskID(ctx context.Context, taskID string
 	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/BuildAndDeployStatus(TaskId='%s')", c.ApiURL, taskID)
-	logger().Infof("Checking the deploy status for task id  %s on tenant %s\n", taskID, fullURL)
+	logger(ctx).Infof("Checking the deploy status for task id  %s on tenant %s\n", taskID, fullURL)
 	request := env.HttpRequest{
 		Method: http.MethodGet,
 		ApiURL: fullURL,
@@ -406,16 +406,16 @@ func (c *CpiClient) CheckDeployStatusByTaskID(ctx context.Context, taskID string
 	respBodyContent, errReq := c.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
-			logger().Errorf("CheckDeployStatusByTaskID request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
+			logger(ctx).Errorf("CheckDeployStatusByTaskID request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
 		}
-		logger().Errorf("Error when getting response content, the error message is %s", errReq)
+		logger(ctx).Errorf("Error when getting response content, the error message is %s", errReq)
 		return "", fmt.Errorf("error when getting response from %s: %s", fullURL, errReq)
 	}
 	var deployStatus DeployStatus
 	jsonUnmarshalError := json.Unmarshal(respBodyContent, &deployStatus)
 
 	if jsonUnmarshalError != nil {
-		logger().Errorf("Error when unmarshal from json, error message %s\n", jsonUnmarshalError)
+		logger(ctx).Errorf("Error when unmarshal from json, error message %s\n", jsonUnmarshalError)
 		return "", jsonUnmarshalError
 	}
 	return deployStatus.D.Status, nil
@@ -425,7 +425,7 @@ func (c *CpiClient) DeleteIflow(ctx context.Context, iflowID string, iflowVersio
 	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/IntegrationDesigntimeArtifacts(Id='%s',Version='%s')", c.ApiURL, iflowID, iflowVersion)
-	logger().Infof("Starting to delete iflow %s on tenant %s\n", iflowID, fullURL)
+	logger(ctx).Infof("Starting to delete iflow %s on tenant %s\n", iflowID, fullURL)
 	request := env.HttpRequest{
 		Method: http.MethodGet,
 		ApiURL: fullURL,
@@ -433,9 +433,9 @@ func (c *CpiClient) DeleteIflow(ctx context.Context, iflowID string, iflowVersio
 	_, errReq := c.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
-			logger().Errorf("DeleteIflow request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
+			logger(ctx).Errorf("DeleteIflow request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
 		}
-		logger().Errorf("Error when getting response content, the error message is %s", errReq)
+		logger(ctx).Errorf("Error when getting response content, the error message is %s", errReq)
 		return errReq
 	}
 
@@ -465,7 +465,7 @@ func (c *CpiClient) GetPackageScriptcollections(ctx context.Context, packageID s
 	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/IntegrationPackages('%s')/ScriptCollectionDesigntimeArtifacts", c.ApiURL, packageID)
-	logger().Infof("Starting to get all iflows in package %s from cpi tenant %s\n", packageID, fullURL)
+	logger(ctx).Infof("Starting to get all iflows in package %s from cpi tenant %s\n", packageID, fullURL)
 	request := env.HttpRequest{
 		Method: http.MethodGet,
 		ApiURL: fullURL,
@@ -473,9 +473,9 @@ func (c *CpiClient) GetPackageScriptcollections(ctx context.Context, packageID s
 	respBodyContent, errReq := c.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
-			logger().Errorf("GetPackageScriptcollections request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
+			logger(ctx).Errorf("GetPackageScriptcollections request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
 		}
-		logger().Errorf("Error when getting response content, the error message is %s", errReq)
+		logger(ctx).Errorf("Error when getting response content, the error message is %s", errReq)
 		return []ScriptCollectionItem{}, errReq
 	}
 	var scriptCollectionsResp ScriptCollectionsResp
@@ -495,7 +495,7 @@ func (c *CpiClient) GetDesignTimeScriptCollection(ctx context.Context, scriptCol
 	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/ScriptCollectionDesigntimeArtifacts(Id='%s',Version='%s')", c.ApiURL, scriptCollectionID, scriptCollectionVersion)
-	logger().Infof("Starting to get script collection %s in package from cpi tenant %s\n", scriptCollectionID, fullURL)
+	logger(ctx).Infof("Starting to get script collection %s in package from cpi tenant %s\n", scriptCollectionID, fullURL)
 	request := env.HttpRequest{
 		Method: http.MethodGet,
 		ApiURL: fullURL,
@@ -503,16 +503,16 @@ func (c *CpiClient) GetDesignTimeScriptCollection(ctx context.Context, scriptCol
 	respBodyContent, errReq := c.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
-			logger().Errorf("GetDesignTimeScriptCollection request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
+			logger(ctx).Errorf("GetDesignTimeScriptCollection request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
 		}
-		logger().Errorf("Error when getting response content, the error message is %s", errReq)
+		logger(ctx).Errorf("Error when getting response content, the error message is %s", errReq)
 		return ScriptCollectionItem{}, errReq
 	}
 	var scriptCollectionResp ScriptCollectionResp
 	jsonUnmarshalError := json.Unmarshal(respBodyContent, &scriptCollectionResp)
 
 	if jsonUnmarshalError != nil {
-		logger().Errorf("Error when unmarshal from json, error message %s\n", jsonUnmarshalError)
+		logger(ctx).Errorf("Error when unmarshal from json, error message %s\n", jsonUnmarshalError)
 		return ScriptCollectionItem{}, jsonUnmarshalError
 	}
 
@@ -527,7 +527,7 @@ func (c *CpiClient) DeleteScriptCollection(ctx context.Context, scriptCollection
 	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/ScriptCollectionDesigntimeArtifacts(Id='%s',Version='%s')", c.ApiURL, scriptCollectionID, scriptCollectionVersion)
-	logger().Infof("Starting to delete script collection %s on tenant %s\n", scriptCollectionID, fullURL)
+	logger(ctx).Infof("Starting to delete script collection %s on tenant %s\n", scriptCollectionID, fullURL)
 	request := env.HttpRequest{
 		Method: http.MethodGet,
 		ApiURL: fullURL,
@@ -535,9 +535,9 @@ func (c *CpiClient) DeleteScriptCollection(ctx context.Context, scriptCollection
 	_, errReq := c.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
-			logger().Errorf("DeleteScriptCollection request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
+			logger(ctx).Errorf("DeleteScriptCollection request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
 		}
-		logger().Errorf("Error when getting response content, the error message is %s", errReq)
+		logger(ctx).Errorf("Error when getting response content, the error message is %s", errReq)
 		return errReq
 	}
 	return nil
@@ -548,7 +548,7 @@ func (c *CpiClient) UndeployRuntimeArtifacts(ctx context.Context, artifactID str
 	childCtx, cancel := context.WithTimeout(ctx, consts.ImportTimeout)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/IntegrationRuntimeArtifacts('%s')", c.ApiURL, artifactID)
-	logger().Infof("Starting to undeploy artifact %s on tenant %s\n", artifactID, fullURL)
+	logger(ctx).Infof("Starting to undeploy artifact %s on tenant %s\n", artifactID, fullURL)
 	request := env.HttpRequest{
 		Method: http.MethodDelete,
 		ApiURL: fullURL,
@@ -556,9 +556,9 @@ func (c *CpiClient) UndeployRuntimeArtifacts(ctx context.Context, artifactID str
 	_, errReq := c.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
-			logger().Errorf("UndeployRuntimeArtifacts request timeout after %v: %s", consts.ImportTimeout, fullURL)
+			logger(ctx).Errorf("UndeployRuntimeArtifacts request timeout after %v: %s", consts.ImportTimeout, fullURL)
 		}
-		logger().Errorf("Error when getting response content, the error message is %s", errReq)
+		logger(ctx).Errorf("Error when getting response content, the error message is %s", errReq)
 		return errReq
 	}
 	return nil
@@ -585,7 +585,7 @@ func (c *CpiClient) GetRuntimeArtifacts(ctx context.Context) ([]RuntimeArtifact,
 	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/IntegrationRuntimeArtifacts", c.ApiURL)
-	logger().Infof("Starting to Get all deployed integration artifacts from cpi tenant %s\n", fullURL)
+	logger(ctx).Infof("Starting to Get all deployed integration artifacts from cpi tenant %s\n", fullURL)
 	request := env.HttpRequest{
 		Method: http.MethodGet,
 		ApiURL: fullURL,
@@ -593,7 +593,7 @@ func (c *CpiClient) GetRuntimeArtifacts(ctx context.Context) ([]RuntimeArtifact,
 	response, err := c.Do(childCtx, &request)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
-			logger().Errorf("GetRuntimeArtifacts request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
+			logger(ctx).Errorf("GetRuntimeArtifacts request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
 		}
 		return nil, err
 	}
@@ -610,7 +610,7 @@ func (c *CpiClient) CheckUndeployStatus(ctx context.Context, artifactId string) 
 	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
 	defer cancel()
 	fullUrl := fmt.Sprintf("%s/IntegrationRuntimeArtifacts('%s')", c.ApiURL, artifactId)
-	logger().Infof("Starting to check undeploy status of artifact %s on tenant %s\n", artifactId, fullUrl)
+	logger(ctx).Infof("Starting to check undeploy status of artifact %s on tenant %s\n", artifactId, fullUrl)
 	request := env.HttpRequest{
 		Method: http.MethodGet,
 		ApiURL: fullUrl,
@@ -619,7 +619,7 @@ func (c *CpiClient) CheckUndeployStatus(ctx context.Context, artifactId string) 
 	var err error
 	if response, err = c.Do(childCtx, &request); err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
-			logger().Errorf("CheckUndeployStatus request timeout after %v: %s", consts.DefaultRequestTimeout, fullUrl)
+			logger(ctx).Errorf("CheckUndeployStatus request timeout after %v: %s", consts.DefaultRequestTimeout, fullUrl)
 		}
 		return "", fmt.Errorf("failed to get undeploy stauts from %s: %s", fullUrl, err)
 	}
@@ -628,10 +628,10 @@ func (c *CpiClient) CheckUndeployStatus(ctx context.Context, artifactId string) 
 		return "", fmt.Errorf("failed to unmarshal response: %s", err)
 	}
 	if runtimeArtifact.ID == "" {
-		logger().Infof("Artifact %s has been successfully undeployed", artifactId)
+		logger(ctx).Infof("Artifact %s has been successfully undeployed", artifactId)
 		return "SUCCESS", nil
 	}
-	logger().Warnf("artifact %s is still in runtime", artifactId)
+	logger(ctx).Warnf("artifact %s is still in runtime", artifactId)
 	return "UNDEPLOYING", nil
 }
 
@@ -641,7 +641,7 @@ func (c *CpiClient) RuntimeArtifact(ctx context.Context, artifactId string) (Run
 	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
 	defer cancel()
 	fullUrl := fmt.Sprintf("%s/IntegrationRuntimeArtifacts('%s')", c.ApiURL, artifactId)
-	logger().Infof("Starting to get runtime artifact %s on tenant %s\n", artifactId, fullUrl)
+	logger(ctx).Infof("Starting to get runtime artifact %s on tenant %s\n", artifactId, fullUrl)
 	request := env.HttpRequest{
 		Method: http.MethodGet,
 		ApiURL: fullUrl,
@@ -649,7 +649,7 @@ func (c *CpiClient) RuntimeArtifact(ctx context.Context, artifactId string) (Run
 	response, err := c.Do(childCtx, &request)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
-			logger().Errorf("RuntimeArtifact request timeout after %v: %s", consts.DefaultRequestTimeout, fullUrl)
+			logger(ctx).Errorf("RuntimeArtifact request timeout after %v: %s", consts.DefaultRequestTimeout, fullUrl)
 		}
 		var httpErr *env.HttpResponseError
 		if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {

@@ -92,7 +92,7 @@ func (s *Service) ApplyBootstrap(ctx context.Context, tenantID uint, cfToken str
 		"content_assembly_dest_status":     lifecycle.PrereqMissing,
 		"transport_management_dest_status": lifecycle.PrereqMissing,
 	}).Error; err != nil {
-		s.Logger.Warnw("failed to reset prereq statuses", "component", "bootstrap", "tenant_id", tenantID, "error", err)
+		s.L(ctx).Warnw("failed to reset prereq statuses", "component", "bootstrap", "tenant_id", tenantID, "error", err)
 	}
 
 	// ── Phase 2: Synchronous inspect ─────────────────────────────────────────
@@ -239,14 +239,14 @@ func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string,
 			}
 			return s.transitionLifecycleWithTx(tx, tenant.ID, EventBootstrapFailed)
 		}); err != nil {
-			s.Logger.Errorw("failed to record job failure; tenant may be stuck in readying",
+			s.L(ctx).Errorw("failed to record job failure; tenant may be stuck in readying",
 				"component", "bootstrap", "tenant_id", tenant.ID, "jobID", jobID, "error", err)
 		}
 		// blocking_reason is display-only; persist best-effort outside the
 		// transaction so its failure cannot roll back the critical state writes above.
 		if err := s.DB.Model(&db.CpiTenant{}).Where("id = ?", tenant.ID).
 			Update("blocking_reason", reason).Error; err != nil {
-			s.Logger.Errorw("failed to persist blocking_reason",
+			s.L(ctx).Errorw("failed to persist blocking_reason",
 				"component", "bootstrap", "tenant_id", tenant.ID, "jobID", jobID, "error", err)
 		}
 	}
@@ -262,7 +262,7 @@ func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string,
 			}
 			return s.transitionLifecycleWithTx(tx, tenant.ID, EventBootstrapFinished)
 		}); err != nil {
-			s.Logger.Errorw("failed to record job completion; tenant may be stuck in readying",
+			s.L(ctx).Errorw("failed to record job completion; tenant may be stuck in readying",
 				"component", "bootstrap", "tenant_id", tenant.ID, "jobID", jobID, "error", err)
 		}
 	}
@@ -270,7 +270,7 @@ func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string,
 	setStep := func(step string) {
 		if err := s.DB.Model(&db.TenantBootstrapJob{}).Where("id = ?", jobID).
 			Update("current_step", step).Error; err != nil {
-			s.Logger.Errorw("failed to update job step",
+			s.L(ctx).Errorw("failed to update job step",
 				"component", "bootstrap", "tenant_id", tenant.ID, "jobID", jobID, "step", step, "error", err)
 		}
 	}
@@ -278,7 +278,7 @@ func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string,
 	markReady := func(field string) {
 		if err := s.DB.Model(&db.CpiTenant{}).Where("id = ?", tenant.ID).
 			Update(field, lifecycle.PrereqReady).Error; err != nil {
-			s.Logger.Errorw("failed to update prereq status",
+			s.L(ctx).Errorw("failed to update prereq status",
 				"component", "bootstrap", "tenant_id", tenant.ID, "field", field, "error", err)
 		}
 	}
@@ -416,7 +416,7 @@ func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string,
 	actsJSON, _ := json.Marshal(credentialActions)
 	if err := s.DB.Model(&db.TenantBootstrapJob{}).Where("id = ?", jobID).
 		Update("credential_actions", actsJSON).Error; err != nil {
-		s.Logger.Errorw("failed to persist credential_actions",
+		s.L(ctx).Errorw("failed to persist credential_actions",
 			"component", "bootstrap", "tenant_id", tenant.ID, "jobID", jobID, "error", err)
 	}
 

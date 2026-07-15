@@ -24,7 +24,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func logger() *zap.SugaredLogger { return env.Logger() }
+func logger(ctx context.Context) *zap.SugaredLogger { return env.L(ctx) }
 
 // ── Client ────────────────────────────────────────────────────────────────────
 
@@ -262,7 +262,7 @@ func (c *CasClient) TriggerExport(ctx context.Context, req ExportRequest) (*Expo
 	if resp.ProcessID == "" {
 		return nil, fmt.Errorf("TriggerExport: response missing processId: %s", string(body))
 	}
-	logger().Infow("CAS export triggered", "processId", resp.ProcessID, "activityId", resp.ActivityID)
+	logger(ctx).Infow("CAS export triggered", "processId", resp.ProcessID, "activityId", resp.ActivityID)
 	return &resp, nil
 }
 

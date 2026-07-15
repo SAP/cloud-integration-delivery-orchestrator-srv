@@ -3,7 +3,6 @@ package tms
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	. "mmt-delivery/consts"
 	"mmt-delivery/pkg/env"
@@ -97,17 +96,14 @@ func (t *TmsClient) GetTransportRequest(ctx context.Context, TrNumber string) (*
 	defer cancel()
 
 	fullURL := fmt.Sprintf("%s/v1/transportRequests/%s?expand=logs,landscape", t.ApiURL, TrNumber)
-	logger().Infof("Starting to get tr info: %s\n", fullURL)
+	logger(ctx).Infof("Starting to get tr info: %s\n", fullURL)
 	request := env.HttpRequest{
 		ApiURL: fullURL,
 		Method: http.MethodGet,
 	}
 	body, err := t.Do(childCtx, &request)
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			logger().Errorf("GetTransportRequest timeout after %v: %s", DefaultRequestTimeout, fullURL)
-		}
-		return nil, fmt.Errorf("error when getting transport request %s, error message %s", TrNumber, err)
+		return nil, fmt.Errorf("get transport request %s: %w", TrNumber, err)
 	}
 	var tr TransportRequestV1
 	if err := json.Unmarshal(body, &tr); err != nil {

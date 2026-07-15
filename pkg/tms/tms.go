@@ -16,9 +16,8 @@ import (
 	"go.uber.org/zap"
 )
 
-// logger returns the package logger, resolved lazily via env.Logger().
-// Safe to call before env.Init() — returns a fallback logger.
-func logger() *zap.SugaredLogger { return env.Logger() }
+// logger returns a context-aware logger that includes trace_id/span_id when OTel is active.
+func logger(ctx context.Context) *zap.SugaredLogger { return env.L(ctx) }
 
 type TMSNodesResp struct {
 	Nodes []db.TransportNode `json:"nodes"`
@@ -42,7 +41,7 @@ func (t *TmsClient) GetNodes(ctx context.Context) ([]db.TransportNode, error) {
 	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/v2/nodes", t.ApiURL)
-	logger().Infof("Starting to get all tms nodes from %s\n", fullURL)
+	logger(ctx).Infof("Starting to get all tms nodes from %s\n", fullURL)
 	request := env.HttpRequest{
 		ApiURL: fullURL,
 		Method: http.MethodGet,
@@ -50,9 +49,9 @@ func (t *TmsClient) GetNodes(ctx context.Context) ([]db.TransportNode, error) {
 	respBodyContent, errReq := t.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
-			logger().Errorf("GetNodes request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
+			logger(ctx).Errorf("GetNodes request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
 		}
-		logger().Errorf("Error when getting response content, the error message is %s", errReq)
+		logger(ctx).Errorf("Error when getting response content, the error message is %s", errReq)
 		return []db.TransportNode{}, errReq
 	}
 
@@ -60,7 +59,7 @@ func (t *TmsClient) GetNodes(ctx context.Context) ([]db.TransportNode, error) {
 	jsonUnmarshalError := json.Unmarshal(respBodyContent, &tmsNodesResp)
 
 	if jsonUnmarshalError != nil {
-		logger().Errorf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
+		logger(ctx).Errorf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
 		return []db.TransportNode{}, jsonUnmarshalError
 	}
 
@@ -72,7 +71,7 @@ func (t *TmsClient) GetNodeID(ctx context.Context, nodeName string) uint {
 	var nodeID uint
 	nodes, err := t.GetNodes(ctx)
 	if err != nil {
-		logger().Errorf("Error when getting nodes, the error message is %s", err)
+		logger(ctx).Errorf("Error when getting nodes, the error message is %s", err)
 		return nodeID
 	}
 
@@ -89,7 +88,7 @@ func (t *TmsClient) GetNode(ctx context.Context, nodeID uint) (db.TransportNode,
 	defer cancel()
 
 	fullURL := fmt.Sprintf("%s/v2/nodes/%d", t.ApiURL, nodeID)
-	logger().Infof("Starting to get tms node from %s\n", fullURL)
+	logger(ctx).Infof("Starting to get tms node from %s\n", fullURL)
 	request := env.HttpRequest{
 		ApiURL: fullURL,
 		Method: http.MethodGet,
@@ -97,9 +96,9 @@ func (t *TmsClient) GetNode(ctx context.Context, nodeID uint) (db.TransportNode,
 	respBodyContent, errReq := t.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
-			logger().Errorf("GetNode request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
+			logger(ctx).Errorf("GetNode request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
 		}
-		logger().Errorf("Error when getting response content, the error message is %s", errReq)
+		logger(ctx).Errorf("Error when getting response content, the error message is %s", errReq)
 		return db.TransportNode{}, errReq
 	}
 
@@ -107,7 +106,7 @@ func (t *TmsClient) GetNode(ctx context.Context, nodeID uint) (db.TransportNode,
 	jsonUnmarshalError := json.Unmarshal(respBodyContent, &tmsNodeResp)
 
 	if jsonUnmarshalError != nil {
-		logger().Errorf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
+		logger(ctx).Errorf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
 		return db.TransportNode{}, jsonUnmarshalError
 	}
 
@@ -118,7 +117,7 @@ func (t *TmsClient) GetNodeName(ctx context.Context, nodeID uint) string {
 	var nodeName string
 	node, err := t.GetNode(ctx, nodeID)
 	if err != nil {
-		logger().Errorf("Error when getting node by id, the error message is %s", err)
+		logger(ctx).Errorf("Error when getting node by id, the error message is %s", err)
 		return nodeName
 	}
 	nodeName = node.Name
@@ -135,7 +134,7 @@ func (t *TmsClient) GetRoutes(ctx context.Context) ([]db.TransportRoute, error) 
 	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/v2/routes", t.ApiURL)
-	logger().Infof("Starting to get all tms routes from %s\n", fullURL)
+	logger(ctx).Infof("Starting to get all tms routes from %s\n", fullURL)
 	request := env.HttpRequest{
 		ApiURL: fullURL,
 		Method: http.MethodGet,
@@ -143,15 +142,15 @@ func (t *TmsClient) GetRoutes(ctx context.Context) ([]db.TransportRoute, error) 
 	respBodyContent, errReq := t.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
-			logger().Errorf("GetRoutes request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
+			logger(ctx).Errorf("GetRoutes request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
 		}
-		logger().Errorf("Error when getting response content of tms routes, the error message is %s", errReq)
+		logger(ctx).Errorf("Error when getting response content of tms routes, the error message is %s", errReq)
 		return []db.TransportRoute{}, errReq
 	}
 
 	var tmsRoutesResp TMSRoutesResp
 	if err := json.Unmarshal(respBodyContent, &tmsRoutesResp); err != nil {
-		logger().Errorf("Error when unmarshal from json, error message %s", err)
+		logger(ctx).Errorf("Error when unmarshal from json, error message %s", err)
 		return []db.TransportRoute{}, err
 	}
 	return tmsRoutesResp.Routes, nil
@@ -185,7 +184,7 @@ func (t *TmsClient) GetNodeTransportRequests(ctx context.Context, nodeID uint) (
 	defer cancel()
 
 	fullURL := fmt.Sprintf("%s/v2/nodes/%d/transportRequests?status=in,re,er,fa", t.ApiURL, nodeID)
-	logger().Infof("Starting to get transport requests for node %d from %s\n", nodeID, fullURL)
+	logger(ctx).Infof("Starting to get transport requests for node %d from %s\n", nodeID, fullURL)
 
 	request := env.HttpRequest{
 		ApiURL: fullURL,
@@ -194,9 +193,9 @@ func (t *TmsClient) GetNodeTransportRequests(ctx context.Context, nodeID uint) (
 	respBodyContent, errReq := t.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
-			logger().Errorf("GetNodeTransportRequests request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
+			logger(ctx).Errorf("GetNodeTransportRequests request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
 		}
-		logger().Errorf("Error when getting response content, the error message is %s", errReq)
+		logger(ctx).Errorf("Error when getting response content, the error message is %s", errReq)
 		return []NodeTransportRequest{}, errReq
 	}
 
@@ -204,7 +203,7 @@ func (t *TmsClient) GetNodeTransportRequests(ctx context.Context, nodeID uint) (
 	jsonUnmarshalError := json.Unmarshal(respBodyContent, &nodeTransportRequestsResp)
 
 	if jsonUnmarshalError != nil {
-		logger().Errorf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
+		logger(ctx).Errorf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
 		return []NodeTransportRequest{}, jsonUnmarshalError
 	}
 
@@ -231,7 +230,7 @@ func (t *TmsClient) ImportTransportRequest(ctx context.Context, nodeID uint, tra
 	}
 
 	requestBodyJson, _ := json.Marshal(requestBodyContent)
-	logger().Infof("Starting to import transport requests to node %d: %s\n", nodeID, fullURL)
+	logger(ctx).Infof("Starting to import transport requests to node %d: %s\n", nodeID, fullURL)
 
 	request := env.HttpRequest{
 		ApiURL:      fullURL,
@@ -242,9 +241,9 @@ func (t *TmsClient) ImportTransportRequest(ctx context.Context, nodeID uint, tra
 
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
-			logger().Errorf("Import request timeout after %v: %s", consts.ImportTimeout, fullURL)
+			logger(ctx).Errorf("Import request timeout after %v: %s", consts.ImportTimeout, fullURL)
 		}
-		logger().Errorf("Error when getting response content, the error message is %s", errReq)
+		logger(ctx).Errorf("Error when getting response content, the error message is %s", errReq)
 		return actionID, errReq
 	}
 
@@ -252,11 +251,11 @@ func (t *TmsClient) ImportTransportRequest(ctx context.Context, nodeID uint, tra
 	jsonUnmarshalError := json.Unmarshal(respBodyContent, &reqImportTransportResp)
 
 	if jsonUnmarshalError != nil {
-		logger().Errorf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
+		logger(ctx).Errorf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
 		return actionID, jsonUnmarshalError
 	}
 	if reqImportTransportResp.ActionID == 0 {
-		logger().Errorf("Error when getting action id, the response is %s", reqImportTransportResp)
+		logger(ctx).Errorf("Error when getting action id, the response is %s", reqImportTransportResp)
 		return actionID, fmt.Errorf("failed to trigger import: %s", string(respBodyContent))
 	}
 	actionID = uint(reqImportTransportResp.ActionID)
@@ -297,15 +296,15 @@ func (t *TmsClient) GetActionResult(ctx context.Context, actionID uint) (string,
 	respBodyContent, errReq := t.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
-			logger().Errorf("GetActionResult request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
+			logger(ctx).Errorf("GetActionResult request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
 		}
-		logger().Errorf("Error when getting response content, the error message is %s", errReq)
+		logger(ctx).Errorf("Error when getting response content, the error message is %s", errReq)
 		return "", "", errReq
 	}
 	var actionResultResp ActionResultResp
 	jsonUnmarshalError := json.Unmarshal(respBodyContent, &actionResultResp)
 	if jsonUnmarshalError != nil {
-		logger().Errorf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
+		logger(ctx).Errorf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
 		return "", "", jsonUnmarshalError
 	}
 	return actionResultResp.Status, actionResultResp.EndedAt, nil
@@ -349,15 +348,15 @@ func (t *TmsClient) GetActionResultLog(ctx context.Context, actionID uint) (Acti
 	respBodyContent, errReq := t.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
-			logger().Errorf("GetActionResultLog request timeout after %v: %s", consts.LongRequestTimeout, fullURL)
+			logger(ctx).Errorf("GetActionResultLog request timeout after %v: %s", consts.LongRequestTimeout, fullURL)
 		}
-		logger().Errorf("Error when getting response content, the error message is %s", errReq)
+		logger(ctx).Errorf("Error when getting response content, the error message is %s", errReq)
 		return ActionLogResp{}, errReq
 	}
 	var actionLogResp ActionLogResp
 	jsonUnmarshalError := json.Unmarshal(respBodyContent, &actionLogResp)
 	if jsonUnmarshalError != nil {
-		logger().Errorf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
+		logger(ctx).Errorf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
 		return ActionLogResp{}, jsonUnmarshalError
 	}
 	return actionLogResp, nil
@@ -404,15 +403,15 @@ func (t *TmsClient) getTransportLogs(ctx context.Context, trNumber string, nodeI
 	respBodyContent, errReq := t.Do(childCtx, &request)
 	if errReq != nil {
 		if errors.Is(errReq, context.DeadlineExceeded) {
-			logger().Errorf("getTransportLogs request timeout after %v: %s", consts.LongRequestTimeout, fullURL)
+			logger(ctx).Errorf("getTransportLogs request timeout after %v: %s", consts.LongRequestTimeout, fullURL)
 		}
-		logger().Errorf("Error when getting response content, the error message is %s", errReq)
+		logger(ctx).Errorf("Error when getting response content, the error message is %s", errReq)
 		return TransportLog{}, errReq
 	}
 	var transportLogResp TransportLog
 	jsonUnmarshalError := json.Unmarshal(respBodyContent, &transportLogResp)
 	if jsonUnmarshalError != nil {
-		logger().Errorf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
+		logger(ctx).Errorf("Error when unmarshal from json, error message %s", jsonUnmarshalError)
 		return TransportLog{}, jsonUnmarshalError
 	}
 	return transportLogResp, nil

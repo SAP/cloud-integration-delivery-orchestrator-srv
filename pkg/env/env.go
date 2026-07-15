@@ -1,10 +1,12 @@
 package env
 
 import (
+	"context"
 	"fmt"
 	"os"
 
 	"github.com/cloudfoundry-community/go-cfenv"
+	cpiotel "mmt-delivery/pkg/otel"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -21,6 +23,12 @@ func Logger() *zap.SugaredLogger {
 		logger = NewLogger()
 	}
 	return logger
+}
+
+// L returns a logger enriched with trace_id and span_id from ctx.
+// When ctx has no active span, returns the plain logger unchanged.
+func L(ctx context.Context) *zap.SugaredLogger {
+	return cpiotel.WithTrace(ctx, Logger())
 }
 
 // Init initializes the env package: loads CF environment and creates logger.

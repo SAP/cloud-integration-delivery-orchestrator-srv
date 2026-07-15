@@ -216,7 +216,7 @@ func (s *Service) syncDeployState(ctx context.Context, deliveryRequestID uint, u
 				opV = "v" + opV
 			}
 			if !semver.IsValid(rtV) || !semver.IsValid(opV) {
-				s.Logger.Warnw("invalid semver in deploy sync", append(cpiotel.TraceFields(ctx), "runtime_version", rt.Version, "expected_version", op.ArtifactVersion, "artifact", op.ArtifactTechID, "tenant", op.Tenant.Name)...)
+				s.L(ctx).Warnw("invalid semver in deploy sync", "runtime_version", rt.Version, "expected_version", op.ArtifactVersion, "artifact", op.ArtifactTechID, "tenant", op.Tenant.Name)
 				conditions = append(conditions, db.Condition{
 					DeliveryRequestID:         deliveryRequestID,
 					ArtifactTenantOperationID: op.ID,
@@ -374,7 +374,7 @@ func (s *Service) syncImportState(ctx context.Context, deliveryRequestID uint, u
 		for nID, nState := range trNodeStatus[trNumber] {
 			// Skip nodes not in delivery rule - only process target nodes defined in the rule
 			if _, ok := ruleTargetNodeIDs[nID]; !ok {
-				s.Logger.Debugw("skipping node not in delivery rule target", "node_id", nID, "tr_number", trNumber)
+				s.L(ctx).Debugw("skipping node not in delivery rule target", "node_id", nID, "tr_number", trNumber)
 				continue
 			}
 
@@ -422,7 +422,7 @@ func (s *Service) syncImportState(ctx context.Context, deliveryRequestID uint, u
 			// NOTE: determine import state
 			state := lifecycle.DeriveImport(nState.Status)
 			if state == curOp.ImportState { // skip if state no change
-				s.Logger.Debugw("no import state change", "artifact", curOp.ArtifactTechID, "op_id", curOp.ID, "node_id", nID, "state", state)
+				s.L(ctx).Debugw("no import state change", "artifact", curOp.ArtifactTechID, "op_id", curOp.ID, "node_id", nID, "state", state)
 				continue
 			}
 
@@ -431,7 +431,7 @@ func (s *Service) syncImportState(ctx context.Context, deliveryRequestID uint, u
 			// Any "lower" state from TMS is processing delay or API anomaly, not a cancellation.
 			if curOp.ImportState == lifecycle.ImportInProgress &&
 				(state == lifecycle.ImportQueued || state == lifecycle.ImportNotStarted) {
-				s.Logger.Debugw("skipping import state downgrade", append(cpiotel.TraceFields(ctx), "op_id", curOp.ID, "from", curOp.ImportState, "to", state)...)
+				s.L(ctx).Debugw("skipping import state downgrade", "op_id", curOp.ID, "from", curOp.ImportState, "to", state)
 				continue
 			}
 

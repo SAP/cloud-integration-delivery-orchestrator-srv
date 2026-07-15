@@ -10,6 +10,7 @@ import (
 	"mmt-delivery/pkg/cf"
 	"mmt-delivery/pkg/cpi"
 	"mmt-delivery/pkg/notify"
+	cpiotel "mmt-delivery/pkg/otel"
 	"mmt-delivery/pkg/tms"
 
 	"go.uber.org/zap"
@@ -88,6 +89,12 @@ type Service struct {
 	// and each INSERT a new ArtifactTenantOperation, producing duplicate rows that
 	// then permanently diverge in import state.
 	drSyncLocks sync.Map // key: deliveryRequestID (uint), value: struct{}
+}
+
+// L returns a child logger enriched with trace_id and span_id from ctx.
+// When ctx has no active span (e.g. CLS not enabled), returns s.Logger unchanged.
+func (s *Service) L(ctx context.Context) *zap.SugaredLogger {
+	return cpiotel.WithTrace(ctx, s.Logger)
 }
 
 // --- Default Notifier implementation (wraps pkg/notify package functions) ---

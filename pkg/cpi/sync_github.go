@@ -112,7 +112,7 @@ func (c *CpiClient) DownloadArtifact(ctx context.Context, artifactId, artifactVe
 	artifactContent, err := c.Do(childCtx, &request) // zip content
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
-			logger().Errorf("DownloadArtifact request timeout after %v: %s", consts.LongRequestTimeout, fullURL)
+			logger(ctx).Errorf("DownloadArtifact request timeout after %v: %s", consts.LongRequestTimeout, fullURL)
 		}
 		return fmt.Errorf("failed to download artifact: %w", err)
 	}
@@ -226,11 +226,11 @@ func (c *CpiClient) UploadArtifact(ctx context.Context, artifactId string, artif
 	response, err := c.Do(childCtx, &request)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
-			logger().Errorf("UploadArtifact request timeout after %v: %s/IntegrationDesigntimeArtifacts", consts.ImportTimeout, c.ApiURL)
+			logger(ctx).Errorf("UploadArtifact request timeout after %v: %s/IntegrationDesigntimeArtifacts", consts.ImportTimeout, c.ApiURL)
 		}
 		return fmt.Errorf("error while uploading artifact: %s", err)
 	}
-	logger().Infof("Artifact %s:%s uploaded successfully, response: %s", artifactId, artifactVersion, string(response))
+	logger(ctx).Infof("Artifact %s:%s uploaded successfully, response: %s", artifactId, artifactVersion, string(response))
 	return nil
 }
 

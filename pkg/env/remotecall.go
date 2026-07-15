@@ -78,20 +78,20 @@ func (c *HttpClient) fetchToken(ctx context.Context) error {
 
 	res, errReq := c.HttpClient.Do(req)
 	if errReq != nil {
-		logger.Errorf("Error when getting the response: %s", errReq)
+		L(ctx).Errorf("Error when getting the response: %s", errReq)
 		return errReq
 	}
 	defer res.Body.Close()
 	body, errIOReader := io.ReadAll(res.Body)
 	if errIOReader != nil {
-		logger.Errorf("Error when reading body from response, %s", errIOReader)
+		L(ctx).Errorf("Error when reading body from response, %s", errIOReader)
 		return errIOReader
 	}
 
 	var oauthResp OauthResp
 	jsonUnmarshalErr := json.Unmarshal(body, &oauthResp)
 	if jsonUnmarshalErr != nil {
-		logger.Errorf("Error when extract json data from response, %s", jsonUnmarshalErr)
+		L(ctx).Errorf("Error when extract json data from response, %s", jsonUnmarshalErr)
 		return jsonUnmarshalErr
 	}
 
@@ -124,9 +124,9 @@ func (c *HttpClient) Do(ctx context.Context, request *HttpRequest) ([]byte, erro
 
 	// 401: refresh token and retry once
 	if statusCode == 401 {
-		logger.Error("Unauthorized. refreshing token")
+		L(ctx).Error("Unauthorized. refreshing token")
 		if err := c.fetchToken(ctx); err != nil {
-			logger.Errorf("Error when refreshing token: %s", err)
+			L(ctx).Errorf("Error when refreshing token: %s", err)
 			return nil, err
 		}
 		body, statusCode, err = c.doRequest(ctx, request)
@@ -138,7 +138,7 @@ func (c *HttpClient) Do(ctx context.Context, request *HttpRequest) ([]byte, erro
 	// 429: retry with backoff (max 2 retries, 1s then 2s)
 	for attempt := 0; statusCode == 429 && attempt < 2; attempt++ {
 		wait := time.Duration(attempt+1) * time.Second
-		logger.Warnf("Rate limited (429) from %s, retrying in %v (attempt %d/2)", request.ApiURL, wait, attempt+1)
+		L(ctx).Warnf("Rate limited (429) from %s, retrying in %v (attempt %d/2)", request.ApiURL, wait, attempt+1)
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
@@ -176,7 +176,7 @@ func (c *HttpClient) doRequest(ctx context.Context, request *HttpRequest) ([]byt
 	resp, errReq := c.HttpClient.Do(req)
 
 	if errReq != nil {
-		logger.Errorf("Error when getting response from api, the error message is %s", errReq)
+		L(ctx).Errorf("Error when getting response from api, the error message is %s", errReq)
 		return nil, 0, errReq
 	}
 	defer resp.Body.Close()
@@ -184,7 +184,7 @@ func (c *HttpClient) doRequest(ctx context.Context, request *HttpRequest) ([]byt
 	respBody, errIOreader := io.ReadAll(resp.Body)
 
 	if errIOreader != nil {
-		logger.Errorf("Error when getting content from response, the error message is %s", errIOreader)
+		L(ctx).Errorf("Error when getting content from response, the error message is %s", errIOreader)
 		return nil, 0, errIOreader
 	}
 	return respBody, resp.StatusCode, nil

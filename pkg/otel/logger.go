@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"go.opentelemetry.io/otel/trace"
+	"go.uber.org/zap"
 )
 
 // TraceFields extracts trace_id and span_id from the context and returns them
@@ -18,4 +19,15 @@ func TraceFields(ctx context.Context) []interface{} {
 		"trace_id", span.SpanContext().TraceID().String(),
 		"span_id", span.SpanContext().SpanID().String(),
 	}
+}
+
+// WithTrace returns a child logger that automatically includes trace_id and
+// span_id from the context. If ctx has no active span, the original logger
+// is returned unchanged (zero allocation).
+func WithTrace(ctx context.Context, logger *zap.SugaredLogger) *zap.SugaredLogger {
+	fields := TraceFields(ctx)
+	if len(fields) == 0 {
+		return logger
+	}
+	return logger.With(fields...)
 }

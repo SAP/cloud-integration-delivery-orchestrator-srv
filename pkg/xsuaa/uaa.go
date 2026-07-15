@@ -26,8 +26,8 @@ type cacheEntry struct {
 	expiresAt time.Time
 }
 
-// logger returns the package logger, resolved lazily via env.Logger().
-func logger() *zap.SugaredLogger { return env.Logger() }
+// logger returns a context-aware logger that includes trace_id/span_id when OTel is active.
+func logger(ctx context.Context) *zap.SugaredLogger { return env.L(ctx) }
 
 const cacheTTL = 30 * time.Hour
 
@@ -66,7 +66,7 @@ func (uaa *UaaClient) UserInfo(ctx context.Context, userID string) (*db.UserInfo
 	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
 	defer cancel()
 	fullUrl := fmt.Sprintf("%s/Users/%s", uaa.ApiURL, userID)
-	logger().Infof("searching user info by sub/user_id, at %s", fullUrl)
+	logger(ctx).Infof("searching user info by sub/user_id, at %s", fullUrl)
 	request := env.HttpRequest{
 		ApiURL: fullUrl,
 		Method: http.MethodGet,
@@ -74,14 +74,14 @@ func (uaa *UaaClient) UserInfo(ctx context.Context, userID string) (*db.UserInfo
 	body, err := uaa.Do(childCtx, &request)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
-			logger().Errorf("UserInfo request timeout after %v: %s", consts.DefaultRequestTimeout, fullUrl)
+			logger(ctx).Errorf("UserInfo request timeout after %v: %s", consts.DefaultRequestTimeout, fullUrl)
 		}
-		logger().Errorf("Error when getting uaa user by id, %s", err)
+		logger(ctx).Errorf("Error when getting uaa user by id, %s", err)
 		return nil, err
 	}
 	var resource Resource
 	if err := json.Unmarshal(body, &resource); err != nil {
-		logger().Errorf("Error when unmarshal uaa user response, %s", err)
+		logger(ctx).Errorf("Error when unmarshal uaa user response, %s", err)
 		return nil, err
 	}
 	user := db.UserInfo{
@@ -116,7 +116,7 @@ func (uaa *UaaClient) SearchByEmail(ctx context.Context, email string, curUserOr
 	q := url.Values{}
 	q.Set("filter", fmt.Sprintf("email co %q", email))
 	fullURL := fmt.Sprintf("%s/Users?%s", uaa.ApiURL, q.Encode())
-	logger().Infof("Starting to get all user info: %s\n", fullURL)
+	logger(ctx).Infof("Starting to get all user info: %s\n", fullURL)
 	request := env.HttpRequest{
 		ApiURL: fullURL,
 		Method: http.MethodGet,
@@ -125,17 +125,17 @@ func (uaa *UaaClient) SearchByEmail(ctx context.Context, email string, curUserOr
 	respBodyContent, err := uaa.Do(childCtx, &request)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
-			logger().Errorf("SearchByEmail request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
+			logger(ctx).Errorf("SearchByEmail request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
 		}
-		logger().Errorf("Error when getting uaa users by email, %s", err)
+		logger(ctx).Errorf("Error when getting uaa users by email, %s", err)
 		return []db.UserInfo{}, err
 	}
 	var document Document
 	if err := json.Unmarshal(respBodyContent, &document); err != nil {
-		logger().Errorf("Error when unmarshal uaa users response, %s", err)
+		logger(ctx).Errorf("Error when unmarshal uaa users response, %s", err)
 		return []db.UserInfo{}, err
 	}
-	logger().Infof("Successfully retrieved uaa users: %+v", document)
+	logger(ctx).Infof("Successfully retrieved uaa users: %+v", document)
 	users := make([]db.UserInfo, 0)
 	for _, u := range document.Resources {
 		if u.Origin != curUserOrigin {
