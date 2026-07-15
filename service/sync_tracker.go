@@ -134,6 +134,7 @@ func (s *Service) runDRSync(ctx context.Context, drID uint) {
 func (s *Service) RecoverActiveSyncs() {
 	var drIDs []uint
 	if err := s.DB.Model(&db.ArtifactTenantOperation{}).
+		Joins("JOIN delivery_requests ON delivery_requests.id = artifact_tenant_operations.delivery_request_id AND delivery_requests.deleted_at IS NULL").
 		Where("import_state = ? OR deploy_state = ?",
 			lifecycle.ImportInProgress, lifecycle.DeployInProgress).
 		Distinct("delivery_request_id").

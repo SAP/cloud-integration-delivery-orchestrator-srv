@@ -24,6 +24,7 @@ func Conn() *gorm.DB {
 // Must be called explicitly in main().
 func Connect() (*gorm.DB, error) {
 	logger := zapgorm2.New(env.Logger().Desugar())
+	logger.IgnoreRecordNotFoundError = true // ErrRecordNotFound is normal (e.g. 404), log as Warn not Error
 
 	var conn *sql.DB
 	var err error
