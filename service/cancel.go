@@ -80,7 +80,7 @@ func (s *Service) CancelDeliveryRequest(drID uint, userID string, reason string)
 			recipients = append(recipients, dr.ApprovedBy)
 		}
 		if err := s.Notifier.SendDeliveryNotification(recipients, drID, "Canceled", message); err != nil {
-			s.Logger.Errorf("Failed to send cancellation notification email: %s", err)
+			s.Logger.Errorw("failed to send cancellation notification email", "dr_id", drID, "error", err)
 		}
 	}()
 

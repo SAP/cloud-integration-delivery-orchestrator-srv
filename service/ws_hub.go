@@ -49,7 +49,7 @@ func NewWSHub(logger *zap.SugaredLogger) *WSHub {
 
 // NewConn creates a WSConn managed by this hub.
 func (h *WSHub) NewConn(conn *websocket.Conn) *WSConn {
-	h.logger.Debugf("[WS] new connection established")
+	h.logger.Debugw("new connection", "component", "ws")
 	return &WSConn{
 		conn:     conn,
 		hub:      h,
@@ -62,7 +62,7 @@ func (h *WSHub) NewConn(conn *websocket.Conn) *WSConn {
 // Safe to call multiple times.
 func (c *WSConn) Disconnect() {
 	c.closeOnce.Do(func() {
-		c.hub.logger.Infof("[WS] connection disconnected, cleaning up subscriptions")
+		c.hub.logger.Infow("connection disconnected", "component", "ws")
 		h := c.hub
 		h.mu.Lock()
 		c.mu.Lock()
@@ -83,7 +83,7 @@ func (c *WSConn) Disconnect() {
 
 // Subscribe registers interest in a specific DR for this connection.
 func (h *WSHub) Subscribe(c *WSConn, drID uint) {
-	h.logger.Debugf("[WS] subscribe drId=%d", drID)
+	h.logger.Debugw("subscribe", "component", "ws", "dr_id", drID)
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -99,7 +99,7 @@ func (h *WSHub) Subscribe(c *WSConn, drID uint) {
 
 // Unsubscribe removes interest in a specific DR for this connection.
 func (h *WSHub) Unsubscribe(c *WSConn, drID uint) {
-	h.logger.Debugf("[WS] unsubscribe drId=%d", drID)
+	h.logger.Debugw("unsubscribe", "component", "ws", "dr_id", drID)
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -122,11 +122,11 @@ func (h *WSHub) PublishDrEvent(drID uint, eventType string, payload json.RawMess
 	watchers := h.drWatchers[drID]
 	if len(watchers) == 0 {
 		h.mu.RUnlock()
-		h.logger.Debugf("[WS] publish drId=%d event=%s — no watchers, skipped", drID, eventType)
+		h.logger.Debugw("publish — no watchers, skipped", "component", "ws", "dr_id", drID, "event", eventType)
 		return
 	}
 
-	h.logger.Debugf("[WS] publish drId=%d event=%s to %d watcher(s)", drID, eventType, len(watchers))
+	h.logger.Debugw("publish", "component", "ws", "dr_id", drID, "event", eventType, "watchers", len(watchers))
 
 	evt := wsEvent{Event: eventType, Data: payload}
 	data, err := json.Marshal(evt)

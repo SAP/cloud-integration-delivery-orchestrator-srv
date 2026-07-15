@@ -216,7 +216,7 @@ func (s *Service) syncDeployState(ctx context.Context, deliveryRequestID uint, u
 				opV = "v" + opV
 			}
 			if !semver.IsValid(rtV) || !semver.IsValid(opV) {
-				s.Logger.Warnf("invalid semver in deploy sync: runtime=%s, expected=%s for artifact %s in tenant %s", rt.Version, op.ArtifactVersion, op.ArtifactTechID, op.Tenant.Name)
+				s.Logger.Warnw("invalid semver in deploy sync", append(cpiotel.TraceFields(ctx), "runtime_version", rt.Version, "expected_version", op.ArtifactVersion, "artifact", op.ArtifactTechID, "tenant", op.Tenant.Name)...)
 				conditions = append(conditions, db.Condition{
 					DeliveryRequestID:         deliveryRequestID,
 					ArtifactTenantOperationID: op.ID,
@@ -374,7 +374,7 @@ func (s *Service) syncImportState(ctx context.Context, deliveryRequestID uint, u
 		for nID, nState := range trNodeStatus[trNumber] {
 			// Skip nodes not in delivery rule - only process target nodes defined in the rule
 			if _, ok := ruleTargetNodeIDs[nID]; !ok {
-				s.Logger.Debugf("skipping node %d for transport request %s: not in delivery rule target nodes", nID, trNumber)
+				s.Logger.Debugw("skipping node not in delivery rule target", "node_id", nID, "tr_number", trNumber)
 				continue
 			}
 
@@ -422,7 +422,7 @@ func (s *Service) syncImportState(ctx context.Context, deliveryRequestID uint, u
 			// NOTE: determine import state
 			state := lifecycle.DeriveImport(nState.Status)
 			if state == curOp.ImportState { // skip if state no change
-				s.Logger.Debugf("no import state change for artifact %s(#%d) in node %d, current state: %s", curOp.ArtifactTechID, curOp.ID, nID, state)
+				s.Logger.Debugw("no import state change", "artifact", curOp.ArtifactTechID, "op_id", curOp.ID, "node_id", nID, "state", state)
 				continue
 			}
 
@@ -431,7 +431,7 @@ func (s *Service) syncImportState(ctx context.Context, deliveryRequestID uint, u
 			// Any "lower" state from TMS is processing delay or API anomaly, not a cancellation.
 			if curOp.ImportState == lifecycle.ImportInProgress &&
 				(state == lifecycle.ImportQueued || state == lifecycle.ImportNotStarted) {
-				s.Logger.Debugf("skipping import state downgrade for op %d: %s → %s", curOp.ID, curOp.ImportState, state)
+				s.Logger.Debugw("skipping import state downgrade", append(cpiotel.TraceFields(ctx), "op_id", curOp.ID, "from", curOp.ImportState, "to", state)...)
 				continue
 			}
 
@@ -522,7 +522,7 @@ func (s *Service) extractJiraIssueKey(jiraURL string) string {
 		return matches[1]
 	}
 
-	s.Logger.Warnf("Failed to extract JIRA issue key from URL: %s", jiraURL)
+	s.Logger.Warnw("failed to extract JIRA issue key from URL", "jira_url", jiraURL)
 	return ""
 }
 
@@ -543,7 +543,7 @@ func (s *Service) PostJiraComment(jiraLink string, drID uint, message string, st
 	}
 	go func() {
 		if err := s.Notifier.AddDeliveryComment(issueKey, drID, message, status); err != nil {
-			s.Logger.Errorf("Failed to post JIRA comment (DR #%d, status=%s): %s", drID, status, err)
+			s.Logger.Errorw("failed to post JIRA comment", "dr_id", drID, "status", status, "error", err)
 		}
 	}()
 }

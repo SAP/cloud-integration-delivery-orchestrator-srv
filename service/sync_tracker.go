@@ -73,10 +73,10 @@ func (s *Service) StartDRSync(drID uint) {
 	}
 	ctx, started := s.SyncTracker.TryStart(drID)
 	if !started {
-		s.Logger.Debugf("[SyncTracker] drId=%d already running, skipped", drID)
+		s.Logger.Debugw("already running, skipped", "component", "sync_tracker", "dr_id", drID)
 		return
 	}
-	s.Logger.Infof("[SyncTracker] drId=%d started", drID)
+	s.Logger.Infow("started", "component", "sync_tracker", "dr_id", drID)
 	go s.runDRSync(ctx, drID)
 }
 
@@ -88,7 +88,7 @@ func (s *Service) hasActiveOps(drID uint) bool {
 		Where("import_state = ? OR deploy_state = ?",
 			lifecycle.ImportInProgress, lifecycle.DeployInProgress).
 		Count(&count).Error; err != nil {
-		s.Logger.Errorf("[SyncTracker] hasActiveOps query failed for DR %d: %s (keeping alive)", drID, err)
+		s.Logger.Errorw("hasActiveOps query failed, keeping alive", "component", "sync_tracker", "dr_id", drID, "error", err)
 		return true // assume active on error — avoid premature exit
 	}
 	return count > 0
@@ -98,12 +98,12 @@ func (s *Service) hasActiveOps(drID uint) bool {
 // no more active (InProgress) operations to track.
 func (s *Service) runDRSync(ctx context.Context, drID uint) {
 	defer func() {
-		s.Logger.Infof("[SyncTracker] drId=%d goroutine exiting", drID)
+		s.Logger.Infow("goroutine exiting", "component", "sync_tracker", "dr_id", drID)
 		s.SyncTracker.Finish(drID)
 	}()
 
 	// Immediate first sync — don't wait for the first tick.
-	s.Logger.Debugf("[SyncTracker] drId=%d immediate sync", drID)
+	s.Logger.Debugw("immediate sync", "component", "sync_tracker", "dr_id", drID)
 	_ = s.SyncDeliveryStatus(ctx, drID, "system")
 	if !s.hasActiveOps(drID) {
 		return
@@ -115,13 +115,13 @@ func (s *Service) runDRSync(ctx context.Context, drID uint) {
 	for {
 		select {
 		case <-ctx.Done():
-			s.Logger.Debugf("[SyncTracker] drId=%d context cancelled", drID)
+			s.Logger.Debugw("context cancelled", "component", "sync_tracker", "dr_id", drID)
 			return
 		case <-ticker.C:
-			s.Logger.Debugf("[SyncTracker] drId=%d tick sync", drID)
+			s.Logger.Debugw("tick sync", "component", "sync_tracker", "dr_id", drID)
 			_ = s.SyncDeliveryStatus(ctx, drID, "system")
 			if !s.hasActiveOps(drID) {
-				s.Logger.Infof("[SyncTracker] drId=%d no active ops, stopping", drID)
+				s.Logger.Infow("no active ops, stopping", "component", "sync_tracker", "dr_id", drID)
 				return
 			}
 		}
@@ -138,13 +138,13 @@ func (s *Service) RecoverActiveSyncs() {
 			lifecycle.ImportInProgress, lifecycle.DeployInProgress).
 		Distinct("delivery_request_id").
 		Pluck("delivery_request_id", &drIDs).Error; err != nil {
-		s.Logger.Errorf("RecoverActiveSyncs: failed to query DRs with active ops: %s", err)
+		s.Logger.Errorw("failed to query DRs with active ops", "component", "sync_tracker", "error", err)
 		return
 	}
 	for _, drID := range drIDs {
 		s.StartDRSync(drID)
 	}
 	if len(drIDs) > 0 {
-		s.Logger.Infof("recovered %d active DR sync goroutines", len(drIDs))
+		s.Logger.Infow("recovered active DR sync goroutines", "component", "sync_tracker", "count", len(drIDs))
 	}
 }

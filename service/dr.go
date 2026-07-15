@@ -391,5 +391,14 @@ func (s *Service) BatchInsertConditions(conditions []db.Condition) error {
 	if err := s.DB.Create(&conditions).Error; err != nil {
 		return fmt.Errorf("error when inserting conditions: %w", err)
 	}
+	// Dual-write: output conditions as structured log for CLS analysis.
+	// DB remains the UI data source; this enables cross-DR trend analysis and alerting in CLS.
+	for _, c := range conditions {
+		s.Logger.Infow("condition",
+			"dr_id", c.DeliveryRequestID,
+			"state", c.State,
+			"message", c.Message,
+		)
+	}
 	return nil
 }

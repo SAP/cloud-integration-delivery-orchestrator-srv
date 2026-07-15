@@ -207,8 +207,7 @@ func (s *Service) fetchRuntimeIndex(ctx context.Context, tenants []db.CpiTenant)
 		rtGroup.Go(func() error {
 			client, err := s.CPI(rtCtx, tenant.PirApiDestinationName)
 			if err != nil {
-				s.Logger.Warnf("version-compare: failed to get CPI client for tenant %s (ID=%d): %s",
-					tenant.PirApiDestinationName, tenant.ID, err)
+				s.Logger.Warnw("failed to get CPI client", "component", "version_compare", "tenant", tenant.PirApiDestinationName, "tenant_id", tenant.ID, "error", err)
 				// Store empty map, don't fail entire operation
 				rtMu.Lock()
 				runtimeIndex[tenant.ID] = make(map[string]cpi.RuntimeArtifact)
@@ -217,8 +216,7 @@ func (s *Service) fetchRuntimeIndex(ctx context.Context, tenants []db.CpiTenant)
 			}
 			artifacts, err := client.GetRuntimeArtifacts(rtCtx)
 			if err != nil {
-				s.Logger.Warnf("version-compare: failed to get runtime artifacts for tenant %s (ID=%d): %s",
-					tenant.PirApiDestinationName, tenant.ID, err)
+				s.Logger.Warnw("failed to get runtime artifacts", "component", "version_compare", "tenant", tenant.PirApiDestinationName, "tenant_id", tenant.ID, "error", err)
 				rtMu.Lock()
 				runtimeIndex[tenant.ID] = make(map[string]cpi.RuntimeArtifact)
 				rtMu.Unlock()
@@ -252,7 +250,7 @@ func (s *Service) collectAllPackageSnapshots(ctx context.Context, packages []cpi
 		pkgGroup.Go(func() error {
 			pkgSnapshot, err := s.collectPackageSnapshot(pkgCtx, pkg.ID, tenants, runtimeIndex)
 			if err != nil {
-				s.Logger.Warnf("version-compare: failed to collect package %s: %s", pkg.ID, err)
+				s.Logger.Warnw("failed to collect package", "component", "version_compare", "package_id", pkg.ID, "error", err)
 				// Don't fail the whole operation, skip this package
 				return nil
 			}
@@ -342,8 +340,7 @@ func (s *Service) collectPackageSnapshot(
 		if result.err != nil {
 			// If we got an error but no artifacts, still record it
 			// We create a synthetic entry if needed
-			s.Logger.Warnf("version-compare: tenant %d error for package %s: %s",
-				result.tenantID, packageID, result.err)
+			s.Logger.Warnw("tenant error for package", "component", "version_compare", "tenant_id", result.tenantID, "package_id", packageID, "error", result.err)
 		}
 	}
 
