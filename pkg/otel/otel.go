@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/cloudfoundry-community/go-cfenv"
@@ -128,7 +127,7 @@ type clsBinding struct {
 	serverCA string
 }
 
-// findCLSBinding extracts cloud-logging mTLS credentials from VCAP_SERVICES.
+// findCLSBinding extracts cloud-logging OTLP/gRPC credentials from VCAP_SERVICES.
 func findCLSBinding(appEnv *cfenv.App) (*clsBinding, error) {
 	services, err := appEnv.Services.WithLabel("cloud-logging")
 	if err != nil || len(services) == 0 {
@@ -136,19 +135,14 @@ func findCLSBinding(appEnv *cfenv.App) (*clsBinding, error) {
 	}
 
 	svc := services[0]
-	endpoint, _ := svc.CredentialString("ingest-mtls-endpoint")
-	cert, _ := svc.CredentialString("ingest-mtls-cert")
-	key, _ := svc.CredentialString("ingest-mtls-key")
+	endpoint, _ := svc.CredentialString("ingest-otlp-endpoint")
+	cert, _ := svc.CredentialString("ingest-otlp-cert")
+	key, _ := svc.CredentialString("ingest-otlp-key")
 	serverCA, _ := svc.CredentialString("server-ca")
 
 	if endpoint == "" || cert == "" || key == "" {
-		return nil, fmt.Errorf("cloud-logging service bound but missing mTLS credentials (endpoint=%q, cert=%v, key=%v)",
+		return nil, fmt.Errorf("cloud-logging service bound but missing OTLP credentials (endpoint=%q, cert=%v, key=%v); ensure ingest_otlp is enabled in service config",
 			endpoint, cert != "", key != "")
-	}
-
-	// gRPC requires host:port — append default HTTPS port if not present
-	if !strings.Contains(endpoint, ":") {
-		endpoint = endpoint + ":443"
 	}
 
 	return &clsBinding{
