@@ -3,6 +3,7 @@ package tms
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	. "mmt-delivery/consts"
 	"mmt-delivery/pkg/env"
@@ -103,6 +104,9 @@ func (t *TmsClient) GetTransportRequest(ctx context.Context, TrNumber string) (*
 	}
 	body, err := t.Do(childCtx, &request)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return nil, fmt.Errorf("get transport request %s: timeout after %v: %w", TrNumber, DefaultRequestTimeout, err)
+		}
 		return nil, fmt.Errorf("get transport request %s: %w", TrNumber, err)
 	}
 	var tr TransportRequestV1
