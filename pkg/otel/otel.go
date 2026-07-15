@@ -3,6 +3,9 @@ package otel
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/cloudfoundry-community/go-cfenv"
@@ -26,11 +29,16 @@ func Init(appEnv *cfenv.App, serviceName string, logger *zap.SugaredLogger) func
 	noop := func() {}
 
 	if appEnv == nil {
+		logger.Infof("[otel] not running in CF environment, observability disabled")
 		return noop
 	}
 
 	binding, err := findCLSBinding(appEnv)
-	if err != nil || binding == nil {
+	if err != nil {
+		logger.Warnf("[otel] %s — tracing disabled", err)
+		return noop
+	}
+	if binding == nil {
 		logger.Infof("[otel] cloud-logging service not bound, tracing disabled")
 		return noop
 	}
@@ -44,6 +52,16 @@ func Init(appEnv *cfenv.App, serviceName string, logger *zap.SugaredLogger) func
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{tlsCert},
 		MinVersion:   tls.VersionTLS12,
+	}
+
+	if binding.serverCA != "" {
+		pool := x509.NewCertPool()
+		if pool.AppendCertsFromPEM([]byte(binding.serverCA)) {
+			tlsConfig.RootCAs = pool
+			logger.Infof("[otel] server-ca loaded for TLS verification")
+		} else {
+			logger.Warnf("[otel] failed to parse server-ca, falling back to system roots")
+		}
 	}
 
 	ctx := context.Background()
@@ -88,7 +106,7 @@ func Init(appEnv *cfenv.App, serviceName string, logger *zap.SugaredLogger) func
 	)
 	otel.SetMeterProvider(mp)
 
-	logger.Infof("[otel] tracing and metrics enabled, exporting to %s", binding.endpoint)
+	logger.Infof("[otel] initialized: service=%s, endpoint=%s, traces=enabled, metrics=enabled (interval=60s)", serviceName, binding.endpoint)
 
 	return func() {
 		_ = tp.Shutdown(context.Background())
@@ -107,9 +125,10 @@ type clsBinding struct {
 	endpoint string
 	cert     string
 	key      string
+	serverCA string
 }
 
-// findCLSBinding extracts cloud-logging OTLP credentials from VCAP_SERVICES.
+// findCLSBinding extracts cloud-logging mTLS credentials from VCAP_SERVICES.
 func findCLSBinding(appEnv *cfenv.App) (*clsBinding, error) {
 	services, err := appEnv.Services.WithLabel("cloud-logging")
 	if err != nil || len(services) == 0 {
@@ -117,17 +136,25 @@ func findCLSBinding(appEnv *cfenv.App) (*clsBinding, error) {
 	}
 
 	svc := services[0]
-	endpoint, _ := svc.CredentialString("ingest-otlp-endpoint")
-	cert, _ := svc.CredentialString("ingest-otlp-cert")
-	key, _ := svc.CredentialString("ingest-otlp-key")
+	endpoint, _ := svc.CredentialString("ingest-mtls-endpoint")
+	cert, _ := svc.CredentialString("ingest-mtls-cert")
+	key, _ := svc.CredentialString("ingest-mtls-key")
+	serverCA, _ := svc.CredentialString("server-ca")
 
 	if endpoint == "" || cert == "" || key == "" {
-		return nil, nil
+		return nil, fmt.Errorf("cloud-logging service bound but missing mTLS credentials (endpoint=%q, cert=%v, key=%v)",
+			endpoint, cert != "", key != "")
+	}
+
+	// gRPC requires host:port — append default HTTPS port if not present
+	if !strings.Contains(endpoint, ":") {
+		endpoint = endpoint + ":443"
 	}
 
 	return &clsBinding{
 		endpoint: endpoint,
 		cert:     cert,
 		key:      key,
+		serverCA: serverCA,
 	}, nil
 }
