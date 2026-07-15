@@ -3,7 +3,6 @@ package xsuaa
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"mmt-delivery/consts"
 	"mmt-delivery/db"
@@ -73,16 +72,11 @@ func (uaa *UaaClient) UserInfo(ctx context.Context, userID string) (*db.UserInfo
 	}
 	body, err := uaa.Do(childCtx, &request)
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			logger(ctx).Errorf("UserInfo request timeout after %v: %s", consts.DefaultRequestTimeout, fullUrl)
-		}
-		logger(ctx).Errorf("Error when getting uaa user by id, %s", err)
-		return nil, err
+		return nil, fmt.Errorf("UserInfo: %w", err)
 	}
 	var resource Resource
 	if err := json.Unmarshal(body, &resource); err != nil {
-		logger(ctx).Errorf("Error when unmarshal uaa user response, %s", err)
-		return nil, err
+		return nil, fmt.Errorf("UserInfo: unmarshal: %w", err)
 	}
 	user := db.UserInfo{
 		ID:       resource.ID,
@@ -124,16 +118,11 @@ func (uaa *UaaClient) SearchByEmail(ctx context.Context, email string, curUserOr
 
 	respBodyContent, err := uaa.Do(childCtx, &request)
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			logger(ctx).Errorf("SearchByEmail request timeout after %v: %s", consts.DefaultRequestTimeout, fullURL)
-		}
-		logger(ctx).Errorf("Error when getting uaa users by email, %s", err)
-		return []db.UserInfo{}, err
+		return []db.UserInfo{}, fmt.Errorf("SearchByEmail: %w", err)
 	}
 	var document Document
 	if err := json.Unmarshal(respBodyContent, &document); err != nil {
-		logger(ctx).Errorf("Error when unmarshal uaa users response, %s", err)
-		return []db.UserInfo{}, err
+		return []db.UserInfo{}, fmt.Errorf("SearchByEmail: unmarshal: %w", err)
 	}
 	logger(ctx).Infof("Successfully retrieved uaa users: %+v", document)
 	users := make([]db.UserInfo, 0)

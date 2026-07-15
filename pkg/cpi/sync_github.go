@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"mmt-delivery/consts"
@@ -111,10 +110,7 @@ func (c *CpiClient) DownloadArtifact(ctx context.Context, artifactId, artifactVe
 	}
 	artifactContent, err := c.Do(childCtx, &request) // zip content
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			logger(ctx).Errorf("DownloadArtifact request timeout after %v: %s", consts.LongRequestTimeout, fullURL)
-		}
-		return fmt.Errorf("failed to download artifact: %w", err)
+		return fmt.Errorf("DownloadArtifact: %w", err)
 	}
 
 	// Write the artifact content to a file in the base directory
@@ -225,10 +221,7 @@ func (c *CpiClient) UploadArtifact(ctx context.Context, artifactId string, artif
 	}
 	response, err := c.Do(childCtx, &request)
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			logger(ctx).Errorf("UploadArtifact request timeout after %v: %s/IntegrationDesigntimeArtifacts", consts.ImportTimeout, c.ApiURL)
-		}
-		return fmt.Errorf("error while uploading artifact: %s", err)
+		return fmt.Errorf("UploadArtifact: %w", err)
 	}
 	logger(ctx).Infof("Artifact %s:%s uploaded successfully, response: %s", artifactId, artifactVersion, string(response))
 	return nil
