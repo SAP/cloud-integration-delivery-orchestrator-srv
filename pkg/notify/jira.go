@@ -301,6 +301,6 @@ func AddDeliveryComment(resolver *cf.DestinationServiceClient, destName string, 
 		return err
 	}
 
-	env.Logger().Infof("Successfully added comment to JIRA issue %s for delivery request #%d", issueKey, deliveryRequestID)
+	env.Logger().Infow("added comment to JIRA issue", "issue_key", issueKey, "dr_id", deliveryRequestID)
 	return nil
 }

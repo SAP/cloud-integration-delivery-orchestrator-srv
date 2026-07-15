@@ -95,7 +95,7 @@ func (s *Service) DetermineOverallStatus(drID uint) error {
 
 func (s *Service) SyncDeliveryStatus(ctx context.Context, deliveryRequestID uint, user string) error {
 	ctx, span := cpiotel.Tracer().Start(ctx, "SyncDeliveryStatus",
-		oteltrace.WithAttributes(attribute.Int("dr_id", int(deliveryRequestID))))
+		oteltrace.WithAttributes(attribute.Int64("dr_id", int64(deliveryRequestID))))
 	defer span.End()
 
 	// Guard against concurrent sync for the same DR.

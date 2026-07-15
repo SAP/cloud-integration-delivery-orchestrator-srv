@@ -16,11 +16,11 @@ type ArtifactInfo struct {
 // ImportSpanAttrs builds trace span attributes for a batch import operation.
 func ImportSpanAttrs(drID uint, targetNodeID uint, tenantName string, trs []uint, artifacts []ArtifactInfo) []attribute.KeyValue {
 	return []attribute.KeyValue{
-		attribute.Int("dr_id", int(drID)),
-		attribute.Int("target_node_id", int(targetNodeID)),
+		attribute.Int64("dr_id", int64(drID)),
+		attribute.Int64("target_node_id", int64(targetNodeID)),
 		attribute.String("tenant", tenantName),
 		attribute.Int("tr_count", len(trs)),
-		attribute.IntSlice("tr_numbers", uintsToInts(trs)),
+		attribute.Int64Slice("tr_numbers", uintsToInt64s(trs)),
 		attribute.StringSlice("artifacts", artifactStrings(artifacts)),
 	}
 }
@@ -28,8 +28,8 @@ func ImportSpanAttrs(drID uint, targetNodeID uint, tenantName string, trs []uint
 // DeploySpanAttrs builds trace span attributes for a batch deploy operation.
 func DeploySpanAttrs(drID uint, tenantID uint, tenantName string, artifacts []ArtifactInfo) []attribute.KeyValue {
 	return []attribute.KeyValue{
-		attribute.Int("dr_id", int(drID)),
-		attribute.Int("tenant_id", int(tenantID)),
+		attribute.Int64("dr_id", int64(drID)),
+		attribute.Int64("tenant_id", int64(tenantID)),
 		attribute.String("tenant", tenantName),
 		attribute.Int("op_count", len(artifacts)),
 		attribute.StringSlice("artifacts", artifactStrings(artifacts)),
@@ -48,15 +48,15 @@ func MetricAttrs(result string, tenantName string) metric.MeasurementOption {
 func ImportTRAttrs(trs []uint) []attribute.KeyValue {
 	return []attribute.KeyValue{
 		attribute.Int("tr_count", len(trs)),
-		attribute.IntSlice("tr_numbers", uintsToInts(trs)),
+		attribute.Int64Slice("tr_numbers", uintsToInt64s(trs)),
 	}
 }
 
 // GenerateTRSpanAttrs builds trace span attributes for transport request generation.
 func GenerateTRSpanAttrs(drID uint, tenantID uint, tenantName string, opCount int) []attribute.KeyValue {
 	return []attribute.KeyValue{
-		attribute.Int("dr_id", int(drID)),
-		attribute.Int("tenant_id", int(tenantID)),
+		attribute.Int64("dr_id", int64(drID)),
+		attribute.Int64("tenant_id", int64(tenantID)),
 		attribute.String("tenant", tenantName),
 		attribute.Int("op_count", opCount),
 	}
@@ -70,10 +70,10 @@ func artifactStrings(arts []ArtifactInfo) []string {
 	return out
 }
 
-func uintsToInts(vals []uint) []int {
-	out := make([]int, 0, len(vals))
+func uintsToInt64s(vals []uint) []int64 {
+	out := make([]int64, 0, len(vals))
 	for _, v := range vals {
-		out = append(out, int(v))
+		out = append(out, int64(v))
 	}
 	return out
 }
