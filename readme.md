@@ -1,79 +1,87 @@
 ## Local Development
-1. prerequisites
-    - make sure golang and make are installed
-    - make sure to config env  `GOPROXY` to an accessible site, such as `https://goproxy.cn`
-    - make sure docker engine and docker-compose or podman-desktop are installed
-2. start postgresql locally with [docker-compose-db.yml](./docker-compose-db.yml)
-  ```
-  docker compose -f docker-compose-db.yml up -d
-  ```
-  ```
-  podman compose -f docker-compose-db.yml up -d
-  ```
-3. connect to db, and create required tables from [schema.sql](./sqlc/schema.sql)
-4. add sample data
-4. start application locally, it will listen at `0.0.0.0:9000`
-    ```
-    make
-    ```
 
-## APIs
-- config api
-  - /api/v1/config, method `GET`, return all cpi configs
-  - /api/v1/config, method `POST`, create config using data like [cpi-config.json](testData/cpi-create-config.json)
-  - /api/v1/config/id, method `GET`, return  config with id `id`
-  - /api/v1/config/id, method `PUT`, update the config  with `id` using data like [cpi-update-config.json](./testData/cpi-update-config.json)
-  - /api/v1/config/id, method `DELETE`, will delete the config `id`, return the deleted config id
-- job api
-  - /api/v1/job, method `GET`, get all jobs
-  - /api/v1/job, method `POST`, create job using data like [create-job.json](testData/create-job.json)
-  - /api/v1/job/:id, method `GET`, get job with `id`
-  - /api/v1/job/:id, method `PUT`, update job using data like  [update.json](testData/update-job.json)
-  - /api/v1/job/:id, method `DELETE`, delete job with `id¸`
+### Prerequisites
 
-## URL
+- Go 1.24+ and `make` installed
+- Docker engine (or Podman) for local PostgreSQL
+- CF CLI logged in (for `make sync-env`)
+- `jq` installed (for `make sync-env`)
+- Configure `GOPROXY` if needed: `export GOPROXY=https://goproxy.cn`
 
-- https://permify.co/post/implement-oauth-2-golang-app/
-- https://developer.okta.com/blog/2021/02/17/building-and-securing-a-go-and-gin-web-application
-- https://github.com/markbates/goth
-- https://github.com/crewjam/saml
-- https://github.com/russellhaering/gosaml2
-- github.com/appleboy/gin-jwt/v2
+### 1. Start PostgreSQL locally
 
-
-## default-env.json
-provide environment variables: VCAP_SERVICES. need three service bindings:
-- postgresql-db
-- destination
-- transport
-put the file in root directory of the repo
-
-## TODO List
-Frontend:
-[x] status check display in step Component(success, failed, running).
-[x] datatable should support search.
-
-Backend:
-- maco400 authentications
-- optimize job execution log display
-- undeploy artifacts
-- cache for oauth tokens
-- ppms and blackduck change request(further feature)
-- disable status for a delivery request: this status will terminate and forbid any import/deploy operations in this delivery request
-
-
-## user provided environment variables
-PORT = 9000
-
-## Deploy to CF
-```sh
-cf login -a https://api.cf.sap.hana.ondemand.com/ -o MaCo-devops -s DEVOPS
-cf push
+```bash
+docker compose -f docker-compose-db.yml up -d
 ```
 
-## connect to remote DB locally
-Since pgsql cannot directly be connected locally, can only connect via cf runtime.
-So firstly run cf application that binds pgsql service instance, then use this command to start a proxy via cf app runtime:
+### 2. Generate `.env` from CF service keys
+
+The application reads `VCAP_SERVICES` environment variable at startup (via `go-cfenv`).
+For local development, VS Code loads `.env` via `launch.json`.
+
+To generate a stable `.env` (credentials survive CF redeploys):
+
+```bash
+make sync-env
 ```
-cf ssh -L localhost:8866:postgres-d8fb591a-f9bb-4cfc-9314-4e1dda274f27.cxxzc36no8yr.eu-central-1.rds.amazonaws.com:8828 mmt.devops.srv.cpi.delivery -N
+
+This creates CF service keys (once) and assembles `.env` from their credentials.
+Service keys are independent of app bindings — they don't change when you `cf deploy`.
+
+### 3. Run with VS Code (recommended)
+
+The project uses `.vscode/launch.json` with `envFile` pointing to `.env`:
+
+```jsonc
+// .vscode/launch.json (already configured)
+{
+  "configurations": [
+    {
+      "name": "Launch Package",
+      "type": "go",
+      "request": "launch",
+      "mode": "debug",
+      "program": "${workspaceFolder}/main.go",
+      "envFile": "${workspaceFolder}/.env"
+    }
+  ]
+}
 ```
+
+Press F5 to start with debugger. The application listens at `0.0.0.0:9000`.
+
+### 4. Frontend (optional)
+
+If developing frontend locally alongside backend:
+
+```bash
+# In mmt-devops-ui-cpi-delivery/
+npm run dev
+```
+
+Vite dev server starts at `http://localhost:5173`, proxied through Go backend via `VITE_DEV_URL` in `.env`.
+
+---
+
+## Makefile Targets
+
+| Target | Description |
+|--------|-------------|
+| `make build` | Compile Go binary to `build/` |
+| `make fmt` | Format all Go source files |
+| `make test` | Run all tests |
+| `make sync-env` | Generate `.env` from CF service keys (stable credentials) |
+| `make prepare` | Install dev tools (migrate, sqlc) |
+| `make clean` | Remove build artifacts |
+
+---
+
+## Connect to Remote DB Locally
+
+PostgreSQL on CF cannot be connected to directly. Use CF SSH tunnel:
+
+```bash
+cf ssh -L localhost:8866:<db-hostname>:<db-port> cpi-delivery -N
+```
+
+Then connect to `localhost:8866` with the credentials from your service key.
