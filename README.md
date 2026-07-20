@@ -3,7 +3,7 @@
 ### Prerequisites
 
 - Go 1.24+ and `make` installed
-- Docker engine (or Podman) for local PostgreSQL
+- Docker or Podman (for local PostgreSQL)
 - CF CLI logged in (for `make sync-env`)
 - `jq` installed (for `make sync-env`)
 - Configure `GOPROXY` if needed: `export GOPROXY=https://goproxy.cn`
@@ -11,8 +11,13 @@
 ### 1. Start PostgreSQL locally
 
 ```bash
-docker compose -f docker-compose-db.yml up -d
+make run-db
+
+# If using Podman:
+make run-db DOCKER=podman
 ```
+
+Idempotent — if the container already exists, it just starts it. Data persists in a named Docker volume.
 
 ### 2. Generate `.env` from CF service keys
 
@@ -67,12 +72,14 @@ Vite dev server starts at `http://localhost:5173`, proxied through Go backend vi
 
 | Target | Description |
 |--------|-------------|
-| `make build` | Compile Go binary to `build/` |
+| `make build` | Compile Go binary (verify compilation) |
 | `make fmt` | Format all Go source files |
 | `make test` | Run all tests |
+| `make run-db` | Start local PostgreSQL (one-time, idempotent) |
 | `make sync-env` | Generate `.env` from CF service keys (stable credentials) |
-| `make prepare` | Install dev tools (migrate, sqlc) |
 | `make clean` | Remove build artifacts |
+
+Use `DOCKER=podman` with any target that uses containers (e.g., `make run-db DOCKER=podman`).
 
 ---
 

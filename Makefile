@@ -3,6 +3,7 @@
 
 GO           ?= go
 GOFMT        ?= $(GO)fmt
+DOCKER       ?= docker
 BIN_DIR      ?= $(shell pwd)/build
 
 # --- CF service instance names (must match your CF space) ---
@@ -12,6 +13,10 @@ SVC_DB       ?= mmt-devops-pgsql
 SVC_DEST     ?= mmt_devops_destination
 SVC_CONN     ?= mmt_devops_connectivity
 SK_NAME      ?= local-dev
+
+# --- Local PostgreSQL ---
+DB_CONTAINER ?= cpi-delivery-db
+DB_IMAGE     ?= postgres:15
 
 all: fmt build
 
@@ -26,12 +31,29 @@ fmt:
 clean:
 	rm -rf $(BIN_DIR)
 
-prepare:
-	$(GO) install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
-	$(GO) install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
-
 test:
 	$(GO) test ./... -v
+
+# --- run-db: start local PostgreSQL (one-time setup) ---
+# Data persists in named volume "cpi-delivery-pgdata" across container restarts.
+# Idempotent: skips if container already exists.
+# Use DOCKER=podman if using Podman.
+
+run-db:
+	@if $(DOCKER) ps -a --format '{{.Names}}' | grep -q '^$(DB_CONTAINER)$$'; then \
+		$(DOCKER) start $(DB_CONTAINER) 2>/dev/null || true; \
+		echo ">> $(DB_CONTAINER) already exists, started"; \
+	else \
+		$(DOCKER) run -d --name $(DB_CONTAINER) \
+			-e POSTGRES_USER=postgres \
+			-e POSTGRES_PASSWORD=passw0rd \
+			-e POSTGRES_DB=macodeploy \
+			-p 5432:5432 \
+			-v cpi-delivery-pgdata:/var/lib/postgresql/data \
+			--restart=unless-stopped \
+			$(DB_IMAGE) && \
+		echo ">> $(DB_CONTAINER) created and started"; \
+	fi
 
 # --- sync-env: assemble .env from CF service keys (stable credentials) ---
 #
@@ -85,4 +107,4 @@ _ensure-keys:
 	@cf service-key $(SVC_DEST) $(SK_NAME) >/dev/null 2>&1 || cf create-service-key $(SVC_DEST) $(SK_NAME)
 	@cf service-key $(SVC_CONN) $(SK_NAME) >/dev/null 2>&1 || cf create-service-key $(SVC_CONN) $(SK_NAME)
 
-.PHONY: all fmt build clean prepare test sync-env _check-cf _ensure-keys
+.PHONY: all fmt build clean test run-db sync-env _check-cf _ensure-keys
