@@ -10,19 +10,19 @@ import (
 	"mmt-delivery/consts"
 	"mmt-delivery/db"
 	"mmt-delivery/pkg/env"
-
-	"go.uber.org/zap"
 )
-
-// logger returns a context-aware logger that includes trace_id/span_id when OTel is active.
-func logger(ctx context.Context) *zap.SugaredLogger { return env.L(ctx) }
 
 type TMSNodesResp struct {
 	Nodes []db.TransportNode `json:"nodes"`
 }
 type TmsClient struct {
 	*env.HttpClient
+	sem chan struct{} // global concurrency limit for TMS requests
 }
+
+// maxConcurrentTMSRequests limits parallel outgoing requests to the shared TMS endpoint.
+// TMS is a central SAP service with strict rate limiting; keep this conservative.
+const maxConcurrentTMSRequests = 3
 
 // NewTmsClient constructs a TmsClient from explicit OAuth credentials resolved
 // at runtime from the provider Destination Service (CentralTmsContext.TmsApiDestinationName).
@@ -32,14 +32,24 @@ func NewTmsClient(ctx context.Context, apiEndpoint, tokenURL, clientID, clientSe
 	if err != nil {
 		return nil, err
 	}
-	return &TmsClient{client}, nil
+	return &TmsClient{HttpClient: client, sem: make(chan struct{}, maxConcurrentTMSRequests)}, nil
+}
+
+// Do wraps HttpClient.Do with global concurrency limiting.
+func (t *TmsClient) Do(ctx context.Context, request *env.HttpRequest) ([]byte, error) {
+	select {
+	case t.sem <- struct{}{}:
+		defer func() { <-t.sem }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return t.HttpClient.Do(ctx, request)
 }
 
 func (t *TmsClient) GetNodes(ctx context.Context) ([]db.TransportNode, error) {
 	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/v2/nodes", t.ApiURL)
-	logger(ctx).Infof("Starting to get all tms nodes from %s\n", fullURL)
 	request := env.HttpRequest{
 		ApiURL: fullURL,
 		Method: http.MethodGet,
@@ -62,7 +72,6 @@ func (t *TmsClient) GetNodeID(ctx context.Context, nodeName string) uint {
 	var nodeID uint
 	nodes, err := t.GetNodes(ctx)
 	if err != nil {
-		logger(ctx).Errorf("Error when getting nodes, the error message is %s", err)
 		return nodeID
 	}
 
@@ -79,7 +88,6 @@ func (t *TmsClient) GetNode(ctx context.Context, nodeID uint) (db.TransportNode,
 	defer cancel()
 
 	fullURL := fmt.Sprintf("%s/v2/nodes/%d", t.ApiURL, nodeID)
-	logger(ctx).Infof("Starting to get tms node from %s\n", fullURL)
 	request := env.HttpRequest{
 		ApiURL: fullURL,
 		Method: http.MethodGet,
@@ -101,7 +109,6 @@ func (t *TmsClient) GetNodeName(ctx context.Context, nodeID uint) string {
 	var nodeName string
 	node, err := t.GetNode(ctx, nodeID)
 	if err != nil {
-		logger(ctx).Errorf("Error when getting node by id, the error message is %s", err)
 		return nodeName
 	}
 	nodeName = node.Name
@@ -118,7 +125,6 @@ func (t *TmsClient) GetRoutes(ctx context.Context) ([]db.TransportRoute, error) 
 	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/v2/routes", t.ApiURL)
-	logger(ctx).Infof("Starting to get all tms routes from %s\n", fullURL)
 	request := env.HttpRequest{
 		ApiURL: fullURL,
 		Method: http.MethodGet,
@@ -163,7 +169,6 @@ func (t *TmsClient) GetNodeTransportRequests(ctx context.Context, nodeID uint) (
 	defer cancel()
 
 	fullURL := fmt.Sprintf("%s/v2/nodes/%d/transportRequests?status=in,re,er,fa", t.ApiURL, nodeID)
-	logger(ctx).Infof("Starting to get transport requests for node %d from %s\n", nodeID, fullURL)
 
 	request := env.HttpRequest{
 		ApiURL: fullURL,
@@ -202,7 +207,6 @@ func (t *TmsClient) ImportTransportRequest(ctx context.Context, nodeID uint, tra
 	}
 
 	requestBodyJson, _ := json.Marshal(requestBodyContent)
-	logger(ctx).Infof("Starting to import transport requests to node %d: %s\n", nodeID, fullURL)
 
 	request := env.HttpRequest{
 		ApiURL:      fullURL,

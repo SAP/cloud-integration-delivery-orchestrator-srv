@@ -32,6 +32,7 @@ func createTestClient(apiURL string) *TmsClient {
 			ApiURL:      apiURL,
 			TokenExp:    time.Now().Add(24 * time.Hour),
 		},
+		sem: make(chan struct{}, maxConcurrentTMSRequests),
 	}
 }
 

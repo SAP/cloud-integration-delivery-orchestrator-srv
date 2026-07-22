@@ -107,7 +107,11 @@ func (c *HttpClient) fetchToken(ctx context.Context) error {
 // On 401 (e.g. clock skew), it refreshes the token once and retries.
 // On 429 (rate limit), it waits and retries up to 2 times with exponential backoff.
 // Non-2xx responses are returned as *HttpResponseError.
+// A single structured log entry is emitted per logical operation (including retries).
 func (c *HttpClient) Do(ctx context.Context, request *HttpRequest) ([]byte, error) {
+	start := time.Now()
+	attempts := 1
+
 	c.mu.Lock()
 	needsToken := c.AccessToken == "" || time.Now().After(c.TokenExp)
 	c.mu.Unlock()
@@ -119,18 +123,29 @@ func (c *HttpClient) Do(ctx context.Context, request *HttpRequest) ([]byte, erro
 
 	body, statusCode, err := c.doRequest(ctx, request)
 	if err != nil {
+		L(ctx).Errorw("http call",
+			"method", request.Method, "url", request.ApiURL,
+			"error", err.Error(), "attempts", attempts,
+			"duration_ms", time.Since(start).Milliseconds())
 		return nil, err
 	}
 
 	// 401: refresh token and retry once
 	if statusCode == 401 {
-		L(ctx).Error("Unauthorized. refreshing token")
 		if err := c.fetchToken(ctx); err != nil {
-			L(ctx).Errorw("error refreshing token", "error", err)
+			L(ctx).Errorw("http call",
+				"method", request.Method, "url", request.ApiURL,
+				"status", 401, "error", "token refresh failed: "+err.Error(),
+				"attempts", attempts, "duration_ms", time.Since(start).Milliseconds())
 			return nil, err
 		}
+		attempts++
 		body, statusCode, err = c.doRequest(ctx, request)
 		if err != nil {
+			L(ctx).Errorw("http call",
+				"method", request.Method, "url", request.ApiURL,
+				"error", err.Error(), "attempts", attempts,
+				"duration_ms", time.Since(start).Milliseconds())
 			return nil, err
 		}
 	}
@@ -138,17 +153,34 @@ func (c *HttpClient) Do(ctx context.Context, request *HttpRequest) ([]byte, erro
 	// 429: retry with backoff (max 2 retries, 1s then 2s)
 	for attempt := 0; statusCode == 429 && attempt < 2; attempt++ {
 		wait := time.Duration(attempt+1) * time.Second
-		L(ctx).Warnw("rate limited (429), retrying", "url", request.ApiURL, "wait", wait, "attempt", attempt+1)
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-time.After(wait):
 		}
+		attempts++
 		body, statusCode, err = c.doRequest(ctx, request)
 		if err != nil {
+			L(ctx).Errorw("http call",
+				"method", request.Method, "url", request.ApiURL,
+				"error", err.Error(), "attempts", attempts,
+				"duration_ms", time.Since(start).Milliseconds())
 			return nil, err
 		}
 	}
+
+	// Emit one structured log per logical operation
+	logFn := L(ctx).Infow
+	if statusCode >= 500 {
+		logFn = L(ctx).Errorw
+	} else if statusCode >= 400 {
+		logFn = L(ctx).Warnw
+	}
+	logFn("http call",
+		"method", request.Method, "url", request.ApiURL,
+		"status", statusCode, "attempts", attempts,
+		"duration_ms", time.Since(start).Milliseconds(),
+		"resp_size", len(body))
 
 	// Non-2xx → error
 	if statusCode < 200 || statusCode >= 300 {
@@ -176,16 +208,14 @@ func (c *HttpClient) doRequest(ctx context.Context, request *HttpRequest) ([]byt
 	resp, errReq := c.HttpClient.Do(req)
 
 	if errReq != nil {
-		L(ctx).Errorw("error getting response from api", "error", errReq)
 		return nil, 0, errReq
 	}
 	defer resp.Body.Close()
 
 	respBody, errIOreader := io.ReadAll(resp.Body)
-
 	if errIOreader != nil {
-		L(ctx).Errorw("error reading response body", "error", errIOreader)
 		return nil, 0, errIOreader
 	}
+
 	return respBody, resp.StatusCode, nil
 }

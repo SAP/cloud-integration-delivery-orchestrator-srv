@@ -97,7 +97,6 @@ func (t *TmsClient) GetTransportRequest(ctx context.Context, TrNumber string) (*
 	defer cancel()
 
 	fullURL := fmt.Sprintf("%s/v1/transportRequests/%s?expand=logs,landscape", t.ApiURL, TrNumber)
-	logger(ctx).Infof("Starting to get tr info: %s\n", fullURL)
 	request := env.HttpRequest{
 		ApiURL: fullURL,
 		Method: http.MethodGet,

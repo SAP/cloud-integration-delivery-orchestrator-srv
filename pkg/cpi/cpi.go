@@ -86,7 +86,6 @@ func (c *CpiClient) GetPackages(ctx context.Context) ([]CPIPackage, error) {
 	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/IntegrationPackages", c.ApiURL)
-	logger(ctx).Infow("get packages", "url", fullURL)
 	request := env.HttpRequest{
 		Method: http.MethodGet,
 		ApiURL: fullURL,
@@ -113,7 +112,7 @@ func (c *CpiClient) GetPackage(ctx context.Context, packageID string) (CPIPackag
 	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/IntegrationPackages('%s')", c.ApiURL, packageID)
-	logger(ctx).Infow("get package", "package_id", packageID, "url", fullURL)
+	logger(ctx).Infow("get package", "package_id", packageID)
 	request := env.HttpRequest{
 		Method: http.MethodGet,
 		ApiURL: fullURL,
@@ -148,7 +147,6 @@ func (c *CpiClient) ImportPackage(ctx context.Context, cpiPackage importPackageR
 	childCtx, cancel := context.WithTimeout(ctx, consts.ImportTimeout)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/IntegrationPackages", c.ApiURL)
-	logger(ctx).Infow("import package", "url", fullURL)
 	requestBodyJson, _ := json.Marshal(cpiPackage)
 	request := env.HttpRequest{
 		Method:      http.MethodPost,
@@ -212,7 +210,7 @@ func (c *CpiClient) GetPackageIflows(ctx context.Context, packageID string) ([]I
 	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/IntegrationPackages('%s')/IntegrationDesigntimeArtifacts", c.ApiURL, packageID)
-	logger(ctx).Infow("get package iflows", "package_id", packageID, "url", fullURL)
+	logger(ctx).Infow("get package iflows", "package_id", packageID)
 	request := env.HttpRequest{
 		Method: http.MethodGet,
 		ApiURL: fullURL,
@@ -238,7 +236,7 @@ func (c *CpiClient) GetPackageIflow(ctx context.Context, packageID string, iflow
 	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/IntegrationPackages('%s')/IntegrationDesigntimeArtifacts(Id='%s',Version='%s')", c.ApiURL, packageID, iflowID, iflowVersion)
-	logger(ctx).Infow("get package iflow", "iflow_id", iflowID, "package_id", packageID, "url", fullURL)
+	logger(ctx).Infow("get package iflow", "iflow_id", iflowID, "package_id", packageID)
 	request := env.HttpRequest{
 		Method: http.MethodGet,
 		ApiURL: fullURL,
@@ -265,7 +263,7 @@ func (c *CpiClient) GetDesignTimeIflow(ctx context.Context, iflowID string, iflo
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/IntegrationDesigntimeArtifacts(Id='%s',Version='%s')", c.ApiURL, iflowID, iflowVersion)
 
-	logger(ctx).Infow("get design time iflow", "iflow_id", iflowID, "url", fullURL)
+	logger(ctx).Infow("get design time iflow", "iflow_id", iflowID)
 	request := env.HttpRequest{
 		Method: http.MethodGet,
 		ApiURL: fullURL,
@@ -288,7 +286,7 @@ func (c *CpiClient) DeployIflow(ctx context.Context, iflowID string, iflowVersio
 	defer cancel()
 	var taskID string
 	fullURL := fmt.Sprintf("%s/DeployIntegrationDesigntimeArtifact?Id='%s'&Version='%s'", c.ApiURL, iflowID, iflowVersion)
-	logger(ctx).Infow("deploy iflow", "iflow_id", iflowID, "url", fullURL)
+	logger(ctx).Infow("deploy iflow", "iflow_id", iflowID)
 	request := env.HttpRequest{
 		Method: http.MethodPost,
 		ApiURL: fullURL,
@@ -307,7 +305,7 @@ func (c *CpiClient) DeployScriptCollection(ctx context.Context, scriptCollection
 	defer cancel()
 	var taskID string
 	fullURL := fmt.Sprintf("%s/DeployScriptCollectionDesigntimeArtifact?Id='%s'&Version='%s'", c.ApiURL, scriptCollectionID, scriptCollectionVersion)
-	logger(ctx).Infow("deploy script collection", "script_collection_id", scriptCollectionID, "url", fullURL)
+	logger(ctx).Infow("deploy script collection", "script_collection_id", scriptCollectionID)
 	request := env.HttpRequest{
 		Method: http.MethodPost,
 		ApiURL: fullURL,
@@ -350,7 +348,7 @@ func (c *CpiClient) CheckDeployStatusByTaskID(ctx context.Context, taskID string
 	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/BuildAndDeployStatus(TaskId='%s')", c.ApiURL, taskID)
-	logger(ctx).Infow("check deploy status", "task_id", taskID, "url", fullURL)
+	logger(ctx).Infow("check deploy status", "task_id", taskID)
 	request := env.HttpRequest{
 		Method: http.MethodGet,
 		ApiURL: fullURL,
@@ -370,7 +368,7 @@ func (c *CpiClient) DeleteIflow(ctx context.Context, iflowID string, iflowVersio
 	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/IntegrationDesigntimeArtifacts(Id='%s',Version='%s')", c.ApiURL, iflowID, iflowVersion)
-	logger(ctx).Infow("delete iflow", "iflow_id", iflowID, "url", fullURL)
+	logger(ctx).Infow("delete iflow", "iflow_id", iflowID)
 	request := env.HttpRequest{
 		Method: http.MethodGet,
 		ApiURL: fullURL,
@@ -406,7 +404,7 @@ func (c *CpiClient) GetPackageScriptcollections(ctx context.Context, packageID s
 	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/IntegrationPackages('%s')/ScriptCollectionDesigntimeArtifacts", c.ApiURL, packageID)
-	logger(ctx).Infow("get package script collections", "package_id", packageID, "url", fullURL)
+	logger(ctx).Infow("get package script collections", "package_id", packageID)
 	request := env.HttpRequest{
 		Method: http.MethodGet,
 		ApiURL: fullURL,
@@ -432,7 +430,7 @@ func (c *CpiClient) GetDesignTimeScriptCollection(ctx context.Context, scriptCol
 	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/ScriptCollectionDesigntimeArtifacts(Id='%s',Version='%s')", c.ApiURL, scriptCollectionID, scriptCollectionVersion)
-	logger(ctx).Infow("get design time script collection", "script_collection_id", scriptCollectionID, "url", fullURL)
+	logger(ctx).Infow("get design time script collection", "script_collection_id", scriptCollectionID)
 	request := env.HttpRequest{
 		Method: http.MethodGet,
 		ApiURL: fullURL,
@@ -457,7 +455,7 @@ func (c *CpiClient) DeleteScriptCollection(ctx context.Context, scriptCollection
 	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/ScriptCollectionDesigntimeArtifacts(Id='%s',Version='%s')", c.ApiURL, scriptCollectionID, scriptCollectionVersion)
-	logger(ctx).Infow("delete script collection", "script_collection_id", scriptCollectionID, "url", fullURL)
+	logger(ctx).Infow("delete script collection", "script_collection_id", scriptCollectionID)
 	request := env.HttpRequest{
 		Method: http.MethodGet,
 		ApiURL: fullURL,
@@ -474,7 +472,7 @@ func (c *CpiClient) UndeployRuntimeArtifacts(ctx context.Context, artifactID str
 	childCtx, cancel := context.WithTimeout(ctx, consts.ImportTimeout)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/IntegrationRuntimeArtifacts('%s')", c.ApiURL, artifactID)
-	logger(ctx).Infow("undeploy runtime artifact", "artifact_id", artifactID, "url", fullURL)
+	logger(ctx).Infow("undeploy runtime artifact", "artifact_id", artifactID)
 	request := env.HttpRequest{
 		Method: http.MethodDelete,
 		ApiURL: fullURL,
@@ -507,7 +505,6 @@ func (c *CpiClient) GetRuntimeArtifacts(ctx context.Context) ([]RuntimeArtifact,
 	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
 	defer cancel()
 	fullURL := fmt.Sprintf("%s/IntegrationRuntimeArtifacts", c.ApiURL)
-	logger(ctx).Infow("get runtime artifacts", "url", fullURL)
 	request := env.HttpRequest{
 		Method: http.MethodGet,
 		ApiURL: fullURL,
@@ -529,7 +526,7 @@ func (c *CpiClient) CheckUndeployStatus(ctx context.Context, artifactId string) 
 	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
 	defer cancel()
 	fullUrl := fmt.Sprintf("%s/IntegrationRuntimeArtifacts('%s')", c.ApiURL, artifactId)
-	logger(ctx).Infow("check undeploy status", "artifact_id", artifactId, "url", fullUrl)
+	logger(ctx).Infow("check undeploy status", "artifact_id", artifactId)
 	request := env.HttpRequest{
 		Method: http.MethodGet,
 		ApiURL: fullUrl,
@@ -557,7 +554,7 @@ func (c *CpiClient) RuntimeArtifact(ctx context.Context, artifactId string) (Run
 	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
 	defer cancel()
 	fullUrl := fmt.Sprintf("%s/IntegrationRuntimeArtifacts('%s')", c.ApiURL, artifactId)
-	logger(ctx).Infow("get runtime artifact", "artifact_id", artifactId, "url", fullUrl)
+	logger(ctx).Infow("get runtime artifact", "artifact_id", artifactId)
 	request := env.HttpRequest{
 		Method: http.MethodGet,
 		ApiURL: fullUrl,
