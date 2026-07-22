@@ -31,6 +31,7 @@ func (s *Service) BatchImportTenantOps(ctx context.Context, drID uint, opIDs []u
 
 	trs := make([]uint, 0)
 	errOps := make(map[uint]error)
+	validOps := make([]db.ArtifactTenantOperation, 0, len(ops))
 	// pre-check before import
 	for i := range ops {
 		op := &ops[i]
@@ -56,16 +57,28 @@ func (s *Service) BatchImportTenantOps(ctx context.Context, drID uint, opIDs []u
 		trs = append(trs, trNumber)
 		op.ImportState = lifecycle.ImportInProgress
 		op.UpdatedBy = userID
+		validOps = append(validOps, *op)
 	}
+
+	var skipErr error
 	if len(errOps) > 0 {
-		errMsg := "errors occurred during preparing import operations:\n"
+		errMsg := "skipped operations during import pre-check:\n"
 		for id, e := range errOps {
 			errMsg += fmt.Sprintf("\toperation #%d: %s\n", id, e)
 		}
-		return false, errors.New(errMsg)
+		condition := db.Condition{
+			DeliveryRequestID: drID,
+			State:             lifecycle.CondWarn,
+			Message:           errMsg,
+		}
+		s.BatchInsertConditions([]db.Condition{condition})
+		skipErr = errors.New(errMsg)
+	}
+	if len(validOps) == 0 {
+		return false, fmt.Errorf("all operations failed pre-check, none can be imported")
 	}
 	// update ops state to InProgress first
-	err = s.batchUpdateOps(ops)
+	err = s.batchUpdateOps(validOps)
 	if err != nil {
 		return false, err
 	}
@@ -125,9 +138,9 @@ func (s *Service) BatchImportTenantOps(ctx context.Context, drID uint, opIDs []u
 		cpiotel.ImportTotal.Add(ctx, int64(len(ops)), successAttrs)
 		// TMS is now processing — start polling to track import progress
 		s.StartDRSync(drID)
-	}(context.WithoutCancel(ctx), drID, targetNodeID, targetTenant.Name, trs, ops, userID)
+	}(context.WithoutCancel(ctx), drID, targetNodeID, targetTenant.Name, trs, validOps, userID)
 
-	return true, nil
+	return true, skipErr
 }
 
 // when trggered deploy, the artifact operation will be set to DeployInProgress
@@ -163,12 +176,22 @@ func (s *Service) BatchDeployTenantOps(ctx context.Context, drID uint, opIDs []u
 		op.UpdatedBy = userID
 		validOps = append(validOps, *op)
 	}
+	var skipErr error
 	if len(errOps) > 0 {
-		errMsg := "errors occurred during preparing deploy operations:\n"
+		errMsg := "skipped operations during deploy pre-check:\n"
 		for id, e := range errOps {
 			errMsg += fmt.Sprintf("\toperation #%d: %s\n", id, e)
 		}
-		return false, errors.New(errMsg)
+		condition := db.Condition{
+			DeliveryRequestID: drID,
+			State:             lifecycle.CondWarn,
+			Message:           errMsg,
+		}
+		s.BatchInsertConditions([]db.Condition{condition})
+		skipErr = errors.New(errMsg)
+	}
+	if len(validOps) == 0 {
+		return false, fmt.Errorf("all operations failed pre-check, none can be deployed")
 	}
 
 	// update ops state to InProgress
@@ -262,7 +285,7 @@ func (s *Service) BatchDeployTenantOps(ctx context.Context, drID uint, opIDs []u
 		s.StartDRSync(drID)
 	}(context.WithoutCancel(ctx), drID, tenant, validOps, userID)
 
-	return true, nil
+	return true, skipErr
 }
 
 func (s *Service) queryTenant(tenantID uint) (*db.CpiTenant, error) {

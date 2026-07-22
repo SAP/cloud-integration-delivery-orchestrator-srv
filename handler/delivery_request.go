@@ -267,11 +267,15 @@ func (h *Handler) HandleImportOps(c *gin.Context) {
 	}
 	user := service.UserID(c)
 	success, err := h.svc.BatchImportTenantOps(c.Request.Context(), req.DeliveryRequestID, req.OpIDs, req.TargetTenant, user)
-	if err != nil {
-		Fail(c, http.StatusInternalServerError, err.Error())
+	if !success {
+		Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	OKMsg(c, success, "Import triggered")
+	msg := "Import triggered"
+	if err != nil {
+		msg = err.Error()
+	}
+	OKMsg(c, success, msg)
 }
 
 func (h *Handler) HandleDeployOps(c *gin.Context) {
@@ -286,11 +290,15 @@ func (h *Handler) HandleDeployOps(c *gin.Context) {
 	}
 	user := service.UserID(c)
 	success, err := h.svc.BatchDeployTenantOps(c.Request.Context(), req.DeliveryRequestID, req.OpIDs, req.TargetTenant, user)
-	if err != nil {
-		Fail(c, http.StatusInternalServerError, err.Error())
+	if !success {
+		Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	OKMsg(c, success, "Deploy triggered")
+	msg := "Deploy triggered"
+	if err != nil {
+		msg = err.Error()
+	}
+	OKMsg(c, success, msg)
 }
 
 func (h *Handler) HandleSyncState(ctx *gin.Context) {

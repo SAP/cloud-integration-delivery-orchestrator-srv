@@ -146,11 +146,21 @@ func TestBatchImportTenantOps_PrecheckAggregatesErrors(t *testing.T) {
 		t.Fatal("expected batch import pre-check to fail")
 	}
 	if err == nil {
-		t.Fatal("expected aggregated pre-check error, got nil")
+		t.Fatal("expected error when all ops fail pre-check, got nil")
+	}
+	if !strings.Contains(err.Error(), "all operations failed pre-check") {
+		t.Fatalf("expected 'all operations failed' error, got %v", err)
+	}
+
+	// verify a warning condition was recorded with skipped operation details
+	var conditions []db.Condition
+	testDB.Where("delivery_request_id = ? AND state = ?", fx.dr.ID, lifecycle.CondWarn).Find(&conditions)
+	if len(conditions) == 0 {
+		t.Fatal("expected warning condition for skipped ops")
 	}
 	for _, opID := range []uint{opWrongState.ID, opWrongNode.ID, opBadTR.ID, opDowngrade.ID} {
-		if !strings.Contains(err.Error(), fmt.Sprintf("operation #%d", opID)) {
-			t.Fatalf("expected error to include operation #%d, got %v", opID, err)
+		if !strings.Contains(conditions[0].Message, fmt.Sprintf("operation #%d", opID)) {
+			t.Fatalf("expected warning condition to include operation #%d", opID)
 		}
 	}
 
@@ -160,6 +170,87 @@ func TestBatchImportTenantOps_PrecheckAggregatesErrors(t *testing.T) {
 	}
 	if unchanged.ImportState != lifecycle.ImportQueued {
 		t.Fatalf("expected downgrade op to remain queued, got %s", unchanged.ImportState)
+	}
+}
+
+func TestBatchImportTenantOps_PartialSkipProceedsWithValidOps(t *testing.T) {
+	fx := setupDeliverFixture(t)
+
+	// This op will fail pre-check (version downgrade)
+	opDowngrade := seedOp(t, db.ArtifactTenantOperation{
+		DeliveryRequestID:      fx.dr.ID,
+		TenantID:               fx.target.ID,
+		ArtifactTechID:         "artifact-downgrade",
+		ArtifactName:           "Downgrade",
+		ArtifactVersion:        "1.0.0",
+		ArtifactType:           consts.Artifact_Type_Iflow,
+		TransportRequestNumber: "2001",
+		ImportState:            lifecycle.ImportQueued,
+	})
+	// This op will pass pre-check (no existing version in target → no downgrade)
+	opValid := seedOp(t, db.ArtifactTenantOperation{
+		DeliveryRequestID:      fx.dr.ID,
+		TenantID:               fx.target.ID,
+		ArtifactTechID:         "artifact-valid",
+		ArtifactName:           "Valid",
+		ArtifactVersion:        "1.0.0",
+		ArtifactType:           consts.Artifact_Type_Iflow,
+		TransportRequestNumber: "2002",
+		ImportState:            lifecycle.ImportQueued,
+	})
+
+	svc := newTestService(func(ctx context.Context, tenant string) (IntegrationService, error) {
+		return &mockCPIClientWithDesignTime{
+			iflowVersions: map[string]string{
+				"artifact-downgrade": "2.0.0", // target has higher version → downgrade error
+				// "artifact-valid" not present → mock returns 404 → no downgrade risk
+			},
+			notFoundAs404: true,
+		}, nil
+	}, testServiceOpts{
+		tms: &mockTMSClient{importTRResult: 999},
+	})
+
+	ok, err := svc.BatchImportTenantOps(context.Background(), fx.dr.ID, []uint{opDowngrade.ID, opValid.ID}, fx.target.ID, "tester")
+
+	// Should succeed (import triggered for valid op)
+	if !ok {
+		t.Fatalf("expected import to proceed with valid ops, got ok=false, err=%v", err)
+	}
+	// Should return skip error describing the skipped op
+	if err == nil {
+		t.Fatal("expected skip error for downgrade op, got nil")
+	}
+	if !strings.Contains(err.Error(), fmt.Sprintf("operation #%d", opDowngrade.ID)) {
+		t.Fatalf("expected skip error to mention op #%d, got: %s", opDowngrade.ID, err.Error())
+	}
+
+	// Verify: valid op moved to InProgress
+	waitFor(t, "valid op imported", func() error {
+		var validOp db.ArtifactTenantOperation
+		if err := testDB.First(&validOp, opValid.ID).Error; err != nil {
+			return err
+		}
+		if validOp.ImportState != lifecycle.ImportInProgress {
+			return fmt.Errorf("valid op state = %s, want InProgress", validOp.ImportState)
+		}
+		return nil
+	})
+
+	// Verify: downgrade op remains Queued (untouched)
+	var downgradeOp db.ArtifactTenantOperation
+	if err := testDB.First(&downgradeOp, opDowngrade.ID).Error; err != nil {
+		t.Fatalf("reload downgrade op: %v", err)
+	}
+	if downgradeOp.ImportState != lifecycle.ImportQueued {
+		t.Fatalf("expected downgrade op to remain Queued, got %s", downgradeOp.ImportState)
+	}
+
+	// Verify: warning condition recorded
+	var conditions []db.Condition
+	testDB.Where("delivery_request_id = ? AND state = ?", fx.dr.ID, lifecycle.CondWarn).Find(&conditions)
+	if len(conditions) == 0 {
+		t.Fatal("expected warning condition for skipped op")
 	}
 }
 
@@ -256,11 +347,21 @@ func TestBatchDeployTenantOps_PrecheckAggregatesErrorsAndSkipsDisabled(t *testin
 		t.Fatal("expected deploy pre-check to fail")
 	}
 	if err == nil {
-		t.Fatal("expected aggregated deploy error, got nil")
+		t.Fatal("expected error when all ops fail pre-check, got nil")
+	}
+	if !strings.Contains(err.Error(), "all operations failed pre-check") {
+		t.Fatalf("expected 'all operations failed' error, got %v", err)
+	}
+
+	// verify a warning condition was recorded with skipped operation details
+	var conditions []db.Condition
+	testDB.Where("delivery_request_id = ? AND state = ?", fx.dr.ID, lifecycle.CondWarn).Find(&conditions)
+	if len(conditions) == 0 {
+		t.Fatal("expected warning condition for skipped ops")
 	}
 	for _, opID := range []uint{opWrongTenant.ID, opWrongState.ID} {
-		if !strings.Contains(err.Error(), fmt.Sprintf("operation #%d", opID)) {
-			t.Fatalf("expected error to include operation #%d, got %v", opID, err)
+		if !strings.Contains(conditions[0].Message, fmt.Sprintf("operation #%d", opID)) {
+			t.Fatalf("expected warning condition to include operation #%d", opID)
 		}
 	}
 
@@ -270,6 +371,75 @@ func TestBatchDeployTenantOps_PrecheckAggregatesErrorsAndSkipsDisabled(t *testin
 	}
 	if unchanged.DeployState != lifecycle.DeployDisabled {
 		t.Fatalf("expected disabled op to remain DEPLOY_DISABLED, got %s", unchanged.DeployState)
+	}
+}
+
+func TestBatchDeployTenantOps_PartialSkipProceedsWithValidOps(t *testing.T) {
+	fx := setupDeliverFixture(t)
+
+	// This op will fail pre-check (wrong tenant)
+	opWrongTenant := seedOp(t, db.ArtifactTenantOperation{
+		DeliveryRequestID: fx.dr.ID,
+		TenantID:          fx.other.ID,
+		ArtifactTechID:    "artifact-wrong-tenant",
+		ArtifactVersion:   "1.0.0",
+		ArtifactType:      consts.Artifact_Type_Iflow,
+		DeployState:       lifecycle.DeployQueued,
+	})
+	// This op will pass pre-check
+	opValid := seedOp(t, db.ArtifactTenantOperation{
+		DeliveryRequestID: fx.dr.ID,
+		TenantID:          fx.target.ID,
+		ArtifactTechID:    "artifact-deploy-ok",
+		ArtifactVersion:   "1.0.0",
+		ArtifactType:      consts.Artifact_Type_Iflow,
+		DeployState:       lifecycle.DeployQueued,
+	})
+
+	svc := newTestService(func(ctx context.Context, tenant string) (IntegrationService, error) {
+		return &mockRuntimeCPI{}, nil
+	})
+
+	ok, err := svc.BatchDeployTenantOps(context.Background(), fx.dr.ID, []uint{opWrongTenant.ID, opValid.ID}, fx.target.ID, "tester")
+
+	// Should succeed (deploy triggered for valid op)
+	if !ok {
+		t.Fatalf("expected deploy to proceed with valid ops, got ok=false, err=%v", err)
+	}
+	// Should return skip error describing the skipped op
+	if err == nil {
+		t.Fatal("expected skip error for wrong-tenant op, got nil")
+	}
+	if !strings.Contains(err.Error(), fmt.Sprintf("operation #%d", opWrongTenant.ID)) {
+		t.Fatalf("expected skip error to mention op #%d, got: %s", opWrongTenant.ID, err.Error())
+	}
+
+	// Verify: valid op moved to DeployInProgress
+	waitFor(t, "valid op deployed", func() error {
+		var validOp db.ArtifactTenantOperation
+		if err := testDB.First(&validOp, opValid.ID).Error; err != nil {
+			return err
+		}
+		if validOp.DeployState != lifecycle.DeployInProgress {
+			return fmt.Errorf("valid op state = %s, want DeployInProgress", validOp.DeployState)
+		}
+		return nil
+	})
+
+	// Verify: wrong-tenant op remains Queued (untouched)
+	var wrongOp db.ArtifactTenantOperation
+	if err := testDB.First(&wrongOp, opWrongTenant.ID).Error; err != nil {
+		t.Fatalf("reload wrong-tenant op: %v", err)
+	}
+	if wrongOp.DeployState != lifecycle.DeployQueued {
+		t.Fatalf("expected wrong-tenant op to remain Queued, got %s", wrongOp.DeployState)
+	}
+
+	// Verify: warning condition recorded
+	var conditions []db.Condition
+	testDB.Where("delivery_request_id = ? AND state = ?", fx.dr.ID, lifecycle.CondWarn).Find(&conditions)
+	if len(conditions) == 0 {
+		t.Fatal("expected warning condition for skipped op")
 	}
 }
 

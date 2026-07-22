@@ -12,6 +12,7 @@ import (
 	"mmt-delivery/db"
 	"mmt-delivery/pkg/cas"
 	"mmt-delivery/pkg/cpi"
+	"mmt-delivery/pkg/env"
 	"mmt-delivery/pkg/tms"
 
 	"go.uber.org/zap"
@@ -247,11 +248,15 @@ type mockCPIClientWithDesignTime struct {
 	mockCPIClient
 	iflowVersions            map[string]string // artifactID → version
 	scriptCollectionVersions map[string]string
+	notFoundAs404            bool // when true, missing artifacts return HttpResponseError{404}
 }
 
 func (m *mockCPIClientWithDesignTime) GetDesignTimeIflow(ctx context.Context, iflowID string, iflowVersion string) (cpi.IflowItem, error) {
 	if v, ok := m.iflowVersions[iflowID]; ok {
 		return cpi.IflowItem{ArtifactCommonItem: cpi.ArtifactCommonItem{ID: iflowID, Version: v}}, nil
+	}
+	if m.notFoundAs404 {
+		return cpi.IflowItem{}, &env.HttpResponseError{StatusCode: 404}
 	}
 	return cpi.IflowItem{}, fmt.Errorf("iflow %s not found", iflowID)
 }
@@ -259,6 +264,9 @@ func (m *mockCPIClientWithDesignTime) GetDesignTimeIflow(ctx context.Context, if
 func (m *mockCPIClientWithDesignTime) GetDesignTimeScriptCollection(ctx context.Context, scID string, scVersion string) (cpi.ScriptCollectionItem, error) {
 	if v, ok := m.scriptCollectionVersions[scID]; ok {
 		return cpi.ScriptCollectionItem{ArtifactCommonItem: cpi.ArtifactCommonItem{ID: scID, Version: v}}, nil
+	}
+	if m.notFoundAs404 {
+		return cpi.ScriptCollectionItem{}, &env.HttpResponseError{StatusCode: 404}
 	}
 	return cpi.ScriptCollectionItem{}, fmt.Errorf("script collection %s not found", scID)
 }
