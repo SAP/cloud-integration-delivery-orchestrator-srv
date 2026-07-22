@@ -1,7 +1,6 @@
 package tms
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -208,7 +207,7 @@ func (t *TmsClient) ImportTransportRequest(ctx context.Context, nodeID uint, tra
 	request := env.HttpRequest{
 		ApiURL:      fullURL,
 		Method:      http.MethodPost,
-		RequestBody: bytes.NewBuffer(requestBodyJson),
+		RequestBody: requestBodyJson,
 	}
 	respBodyContent, errReq := t.Do(childCtx, &request)
 

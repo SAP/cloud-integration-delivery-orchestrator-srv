@@ -11,7 +11,6 @@ package cas
 // and 401 auto-retry — no separate OAuth implementation here.
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -247,7 +246,7 @@ func (c *CasClient) TriggerExport(ctx context.Context, req ExportRequest) (*Expo
 	httpReq := &env.HttpRequest{
 		ApiURL:      fullURL,
 		Method:      http.MethodPost,
-		RequestBody: bytes.NewBuffer(payload),
+		RequestBody: payload,
 	}
 
 	body, err := c.Do(childCtx, httpReq)

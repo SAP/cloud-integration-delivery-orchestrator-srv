@@ -50,7 +50,7 @@ type OauthResp struct {
 type HttpRequest struct {
 	ApiURL      string
 	Method      string
-	RequestBody *bytes.Buffer
+	RequestBody []byte // raw body bytes; safe to reuse across retries
 }
 
 func NewClient(ctx context.Context, clientID string, clientSecret string, authUrl string, apiUrl string) (*HttpClient, error) {
@@ -160,10 +160,10 @@ func (c *HttpClient) Do(ctx context.Context, request *HttpRequest) ([]byte, erro
 
 func (c *HttpClient) doRequest(ctx context.Context, request *HttpRequest) ([]byte, int, error) {
 	var req *http.Request
-	if request.RequestBody == nil || request.RequestBody.String() == "<nil>" {
+	if len(request.RequestBody) == 0 {
 		req, _ = http.NewRequestWithContext(ctx, request.Method, request.ApiURL, nil)
 	} else {
-		req, _ = http.NewRequestWithContext(ctx, request.Method, request.ApiURL, request.RequestBody)
+		req, _ = http.NewRequestWithContext(ctx, request.Method, request.ApiURL, bytes.NewReader(request.RequestBody))
 		req.Header.Set("Content-Type", "application/json;charset=UTF-8")
 	}
 

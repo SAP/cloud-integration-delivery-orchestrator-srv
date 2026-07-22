@@ -1,7 +1,6 @@
 package cpi
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -154,7 +153,7 @@ func (c *CpiClient) ImportPackage(ctx context.Context, cpiPackage importPackageR
 	request := env.HttpRequest{
 		Method:      http.MethodPost,
 		ApiURL:      fullURL,
-		RequestBody: bytes.NewBuffer(requestBodyJson),
+		RequestBody: requestBodyJson,
 	}
 	respBodyContent, errReq := c.Do(childCtx, &request)
 	if errReq != nil {

@@ -217,7 +217,7 @@ func (c *CpiClient) UploadArtifact(ctx context.Context, artifactId string, artif
 	request := env.HttpRequest{
 		Method:      http.MethodPost,
 		ApiURL:      fmt.Sprintf("%s/IntegrationDesigntimeArtifacts", c.ApiURL),
-		RequestBody: bytes.NewBuffer(requestBody),
+		RequestBody: requestBody,
 	}
 	response, err := c.Do(childCtx, &request)
 	if err != nil {
