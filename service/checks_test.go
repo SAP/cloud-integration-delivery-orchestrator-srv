@@ -280,3 +280,91 @@ func TestDeliveryRuleCheck_RejectsDowngradeInTargetTenant(t *testing.T) {
 		t.Fatalf("expected error to mention target tenant %q, got %v", target.Name, err)
 	}
 }
+
+// =============================================================================
+// compareCPIVersion — CPI version comparison with qualifier support
+// =============================================================================
+
+func TestCompareCPIVersion(t *testing.T) {
+	tests := []struct {
+		a, b string
+		want int
+	}{
+		// Basic numeric comparison
+		{"1.0.0", "1.0.0", 0},
+		{"1.0.0", "1.0.1", -1},
+		{"1.0.1", "1.0.0", 1},
+		{"1.0.0", "1.1.0", -1},
+		{"1.1.0", "1.0.0", 1},
+		{"1.0.0", "2.0.0", -1},
+		{"2.0.0", "1.0.0", 1},
+
+		// Multi-digit numeric segments
+		{"1.0.9", "1.0.10", -1},
+		{"1.0.10", "1.0.9", 1},
+		{"1.10.0", "1.9.0", 1},
+
+		// Numeric qualifier: compare as integer
+		{"1.2.3.2", "1.2.3.3", -1},
+		{"1.2.3.3", "1.2.3.2", 1},
+		{"1.2.3.9", "1.2.3.10", -1},
+		{"1.2.3.10", "1.2.3.9", 1},
+		{"1.2.3.0", "1.2.3.0", 0},
+
+		// Non-numeric qualifier: treat as equal (no deterministic ordering)
+		{"1.2.3.q1", "1.2.3.q1231231", 0},
+		{"1.2.3.alpha", "1.2.3.beta", 0},
+		{"1.2.3.rc1", "1.2.3.rc2", 0},
+		{"1.2.3.qualifier001", "1.2.3.qualifier999", 0},
+
+		// Mixed: one numeric, one non-numeric → treat as equal
+		{"1.2.3.5", "1.2.3.q1", 0},
+		{"1.2.3.q1", "1.2.3.5", 0},
+
+		// No qualifier vs qualifier → no qualifier = empty string, not numeric → equal
+		{"1.0.0", "1.0.0.qualifier001", 0},
+		{"1.0.0", "1.0.0.5", 0},
+
+		// Qualifier doesn't override numeric comparison
+		{"1.0.1", "1.0.0.qualifier999", 1},
+		{"1.0.0.qualifier999", "1.0.1", -1},
+
+		// Real-world CPI versions
+		{"6.2.8", "6.2.9", -1},
+		{"6.2.9", "6.2.8", 1},
+		{"6.2.9", "6.2.9", 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.a+"_vs_"+tt.b, func(t *testing.T) {
+			got := compareCPIVersion(tt.a, tt.b)
+			if got != tt.want {
+				t.Errorf("compareCPIVersion(%q, %q) = %d, want %d", tt.a, tt.b, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseCPIVersion(t *testing.T) {
+	tests := []struct {
+		input string
+		want  cpiVersion
+	}{
+		{"1.2.3", cpiVersion{1, 2, 3, ""}},
+		{"1.2.3.qualifier001", cpiVersion{1, 2, 3, "qualifier001"}},
+		{"6.8.9", cpiVersion{6, 8, 9, ""}},
+		{"0.0.0", cpiVersion{0, 0, 0, ""}},
+		{"1.2.3.alpha123", cpiVersion{1, 2, 3, "alpha123"}},
+		// Invalid: non-numeric major → fallback to raw string as qualifier
+		{"abc.1.2", cpiVersion{0, 0, 0, "abc.1.2"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := parseCPIVersion(tt.input)
+			if got != tt.want {
+				t.Errorf("parseCPIVersion(%q) = %+v, want %+v", tt.input, got, tt.want)
+			}
+		})
+	}
+}

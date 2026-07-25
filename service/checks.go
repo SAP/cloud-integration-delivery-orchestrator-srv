@@ -8,10 +8,10 @@ import (
 	"mmt-delivery/db"
 	"mmt-delivery/pkg/env"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gobwas/glob"
-	"golang.org/x/mod/semver"
 )
 
 func (s *Service) DeliveryRuleCheck(ctx context.Context, op *db.ArtifactTenantOperation, rule *db.DeliveryRule) error {
@@ -81,17 +81,100 @@ func (s *Service) checkVersionDowngradeInTenant(ctx context.Context, op *db.Arti
 		}
 		targetVersion = sc.Version
 	}
-	if !strings.HasPrefix(targetVersion, "v") {
-		targetVersion = "v" + targetVersion
-	}
-	if !strings.HasPrefix(sourceVersion, "v") {
-		sourceVersion = "v" + sourceVersion
-	}
-	if semver.Compare(sourceVersion, targetVersion) < 0 {
+	if compareCPIVersion(sourceVersion, targetVersion) < 0 {
 		return fmt.Errorf("artifact %s: delivering version %s to tenant %s would downgrade existing version %s, please confirm",
 			op.ArtifactTechID, sourceVersion, targetTenant.Name, targetVersion)
 	}
 	return nil
+}
+
+// cpiVersion represents a parsed CPI artifact version: major.minor.micro[.qualifier]
+// Format defined by OSGi Bundle-Version spec, enforced by CPI UI.
+type cpiVersion struct {
+	Major     int
+	Minor     int
+	Micro     int
+	Qualifier string
+}
+
+// parseCPIVersion parses a version string in the format "major.minor.micro[.qualifier]".
+// If parsing fails (non-numeric segments), it returns a zero version with the raw string as qualifier
+// to ensure graceful degradation to string comparison.
+func parseCPIVersion(v string) cpiVersion {
+	parts := strings.SplitN(v, ".", 4)
+
+	var cv cpiVersion
+	if len(parts) >= 1 {
+		if n, err := strconv.Atoi(parts[0]); err == nil {
+			cv.Major = n
+		} else {
+			return cpiVersion{Qualifier: v}
+		}
+	}
+	if len(parts) >= 2 {
+		if n, err := strconv.Atoi(parts[1]); err == nil {
+			cv.Minor = n
+		} else {
+			return cpiVersion{Qualifier: v}
+		}
+	}
+	if len(parts) >= 3 {
+		if n, err := strconv.Atoi(parts[2]); err == nil {
+			cv.Micro = n
+		} else {
+			return cpiVersion{Qualifier: v}
+		}
+	}
+	if len(parts) >= 4 {
+		cv.Qualifier = parts[3]
+	}
+	return cv
+}
+
+// compareCPIVersion compares two CPI artifact version strings.
+// Returns -1 if a < b, 0 if a == b, +1 if a > b.
+// Comparison order: Major (int) → Minor (int) → Micro (int) → Qualifier.
+// Qualifier rules:
+//   - Both pure numeric: compare as integers (e.g., 3 > 2)
+//   - Otherwise: treat as equal (non-numeric qualifiers have no deterministic ordering)
+func compareCPIVersion(a, b string) int {
+	va := parseCPIVersion(a)
+	vb := parseCPIVersion(b)
+
+	if va.Major != vb.Major {
+		return intCmp(va.Major, vb.Major)
+	}
+	if va.Minor != vb.Minor {
+		return intCmp(va.Minor, vb.Minor)
+	}
+	if va.Micro != vb.Micro {
+		return intCmp(va.Micro, vb.Micro)
+	}
+	return compareQualifier(va.Qualifier, vb.Qualifier)
+}
+
+// compareQualifier compares two qualifier strings.
+// If both are pure numeric, compare as integers; otherwise treat as equal.
+func compareQualifier(a, b string) int {
+	if a == b {
+		return 0
+	}
+	na, errA := strconv.Atoi(a)
+	nb, errB := strconv.Atoi(b)
+	if errA == nil && errB == nil {
+		return intCmp(na, nb)
+	}
+	return 0
+}
+
+func intCmp(a, b int) int {
+	if a < b {
+		return -1
+	}
+	if a > b {
+		return 1
+	}
+	return 0
 }
 
 // check tr Number existence in source tenant, and check state is RELEASED
