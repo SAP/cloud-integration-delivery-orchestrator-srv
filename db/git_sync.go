@@ -3,41 +3,37 @@ package db
 import (
 	"time"
 
+	"mmt-delivery/consts"
+
 	"gorm.io/gorm"
 )
 
-// GitRepositoryConfig stores the GitHub / GitHub Enterprise repository configuration
-// for artifact code sync. At most one active config per deployment.
-type GitRepositoryConfig struct {
+// GitRepoConfig stores the Git repository business configuration for artifact code sync.
+// Auth credentials are resolved via BTP Destination Service using DestinationName.
+type GitRepoConfig struct {
 	gorm.Model
-	Provider   string `gorm:"not null" json:"provider"`   // GITHUB | GITHUB_ENTERPRISE
-	BaseURL    string `gorm:"not null" json:"baseURL"`    // repo web URL (e.g. https://github.com/org/repo)
-	APIBaseURL string `gorm:"not null" json:"apiBaseURL"` // API endpoint (e.g. https://api.github.com)
-	Owner      string `gorm:"not null" json:"owner"`
-	Repo       string `gorm:"not null" json:"repo"`
-	AuthToken  string `gorm:"not null" json:"-"` // service principal token, never exposed in JSON
-	Enabled    bool   `gorm:"default:false" json:"enabled"`
+	Provider        string `gorm:"not null" json:"provider"`        // github | github_enterprise
+	DestinationName string `gorm:"not null" json:"destinationName"` // BTP Destination → resolves to API URL + credentials
+	Owner           string `gorm:"not null" json:"owner"`           // GitHub org or user
+	Repo            string `gorm:"not null" json:"repo"`            // repository name
+	Enabled         bool   `gorm:"default:false" json:"enabled"`
 }
 
 // GitArtifactSnapshot records a single sync event — one artifact version pushed to GitHub.
 // It serves as the authoritative pointer for code compare (CommitSHA + TreePath).
 type GitArtifactSnapshot struct {
 	gorm.Model
-	ArtifactID   string `gorm:"not null;index:idx_git_snapshot_artifact_version,unique" json:"artifactId"`
-	Version      string `gorm:"not null;index:idx_git_snapshot_artifact_version,unique" json:"version"`
-	CpiTenantID  uint   `gorm:"not null;index:idx_git_snapshot_artifact_version,unique" json:"cpiTenantId"`
-	PackageID    string `gorm:"not null" json:"packageId"`
-	ArtifactType string `gorm:"not null" json:"artifactType"` // iflow | script_collection
+	ArtifactID   string              `gorm:"not null;index:idx_git_snapshot_artifact_version,unique" json:"artifactId"`
+	Version      string              `gorm:"not null;index:idx_git_snapshot_artifact_version,unique" json:"version"`
+	CpiTenantID  uint                `gorm:"not null;index:idx_git_snapshot_artifact_version,unique" json:"cpiTenantId"`
+	PackageID    string              `gorm:"not null" json:"packageId"`
+	ArtifactType consts.ArtifactType `gorm:"not null" json:"artifactType"`
 
 	// Git references
 	BranchName string `gorm:"not null" json:"branchName"` // tenant/cpi-dev
 	TreePath   string `gorm:"not null" json:"treePath"`   // packages/<pkg>/<artifact>
 	CommitSHA  string `json:"commitSHA"`                  // 40-char hex, populated on completion
 	TagName    string `json:"tagName"`                    // tenant/<tenant>/<pkg>/<artifact>/<version>
-
-	// Observation context (from CPI API at sync time)
-	ObservedModifiedBy string `json:"observedModifiedBy,omitempty"`
-	ObservedModifiedAt string `json:"observedModifiedAt,omitempty"`
 
 	// Trigger context
 	TriggerSource     string `gorm:"not null" json:"triggerSource"` // DR | CRON | IMPORT | MANUAL
