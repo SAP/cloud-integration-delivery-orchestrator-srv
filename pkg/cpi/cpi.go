@@ -575,3 +575,29 @@ func (c *CpiClient) RuntimeArtifact(ctx context.Context, artifactId string) (Run
 	}
 	return t.D, nil
 }
+
+// DownloadArtifactZip downloads the artifact content as a ZIP file from CPI design-time API.
+func (c *CpiClient) DownloadArtifactZip(ctx context.Context, artifactID, version string, artifactType consts.ArtifactType) ([]byte, error) {
+	childCtx, cancel := context.WithTimeout(ctx, consts.LongRequestTimeout)
+	defer cancel()
+
+	var endpoint string
+	switch artifactType {
+	case consts.Artifact_Type_Iflow:
+		endpoint = fmt.Sprintf("%s/IntegrationDesigntimeArtifacts(Id='%s',Version='%s')/$value", c.ApiURL, artifactID, version)
+	case consts.Artifact_Type_Sc:
+		endpoint = fmt.Sprintf("%s/ScriptCollectionDesigntimeArtifacts(Id='%s',Version='%s')/$value", c.ApiURL, artifactID, version)
+	default:
+		return nil, fmt.Errorf("DownloadArtifactZip: unsupported artifact type %s", artifactType)
+	}
+
+	request := env.HttpRequest{
+		Method: http.MethodGet,
+		ApiURL: endpoint,
+	}
+	zipBytes, err := c.Do(childCtx, &request)
+	if err != nil {
+		return nil, fmt.Errorf("DownloadArtifactZip(%s:%s): %w", artifactID, version, err)
+	}
+	return zipBytes, nil
+}

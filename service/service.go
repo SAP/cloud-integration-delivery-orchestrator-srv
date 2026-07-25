@@ -44,6 +44,9 @@ type IntegrationService interface {
 	GetPackageIflows(ctx context.Context, packageID string) ([]cpi.IflowItem, error)
 	GetPackageScriptcollections(ctx context.Context, packageID string) ([]cpi.ScriptCollectionItem, error)
 	GetRuntimeArtifacts(ctx context.Context) ([]cpi.RuntimeArtifact, error)
+
+	// Git Sync: download artifact ZIP content
+	DownloadArtifactZip(ctx context.Context, artifactID, version string, artifactType consts.ArtifactType) ([]byte, error)
 }
 
 // IntegrationFactory creates or retrieves a cached CPI client for a given tenant.

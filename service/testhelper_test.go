@@ -76,6 +76,7 @@ func TestMain(m *testing.M) {
 		&db.DeliveryRequest{},
 		&db.ArtifactTenantOperation{},
 		&db.Condition{},
+		&db.GitArtifactSnapshot{},
 	); err != nil {
 		fmt.Printf("FATAL: failed to migrate: %v\n", err)
 		os.Exit(1)
@@ -240,6 +241,9 @@ func (m *mockCPIClient) GetDesignTimeIflow(ctx context.Context, iflowID string, 
 }
 func (m *mockCPIClient) GetDesignTimeScriptCollection(ctx context.Context, scriptCollectionID string, scriptCollectionVersion string) (cpi.ScriptCollectionItem, error) {
 	return cpi.ScriptCollectionItem{}, nil
+}
+func (m *mockCPIClient) DownloadArtifactZip(ctx context.Context, artifactID, version string, artifactType consts.ArtifactType) ([]byte, error) {
+	return nil, nil
 }
 
 // mockCPIClientWithDesignTime extends the mock to return specific design-time versions.
