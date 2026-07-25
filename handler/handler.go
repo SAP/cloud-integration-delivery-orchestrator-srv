@@ -8,22 +8,22 @@ import (
 	"mmt-delivery/pkg/xsuaa"
 	"mmt-delivery/service"
 
+	"github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
-	"github.com/coder/websocket"
 )
 
 // Handler holds all injected dependencies for the HTTP handler layer.
 // All gin handler functions are methods on this struct.
 type Handler struct {
-	svc    *service.Service
-	db     *gorm.DB
-	logger *zap.SugaredLogger
-	cpi    *cpi.Manager
-	xsuaa  *xsuaa.UaaClient
+	svc     *service.Service
+	db      *gorm.DB
+	logger  *zap.SugaredLogger
+	cpi     *cpi.Manager
+	xsuaa   *xsuaa.UaaClient
 	destSvc *cf.DestinationServiceClient
-	hub    *service.WSHub
+	hub     *service.WSHub
 }
 
 type StatusCount struct {
@@ -248,6 +248,14 @@ func (h *Handler) SetupRoutes(v1 *gin.RouterGroup, v2 *gin.RouterGroup, requireS
 	vcAdhoc.Use(requireScope("VersionCompare.Adhoc"))
 	{
 		vcAdhoc.POST("/versionCompare/adhoc", h.AdhocVersionCompare)
+	}
+
+	// --- Code Compare / Git Sync (VersionCompare.Read scope) ---
+	ccRead := v1.Group("")
+	ccRead.Use(requireScope("VersionCompare.Read"))
+	{
+		ccRead.GET("/gitSync/snapshots", h.GetGitSnapshots)
+		ccRead.GET("/gitSync/snapshots/:id/files", h.GetGitSnapshotFiles)
 	}
 
 	// --- System Configuration (CpiTenant.Manage scope — admin-level) ---

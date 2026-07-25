@@ -62,33 +62,27 @@ func (s *Service) GitSync(ctx context.Context, req GitSyncRequest, gitClient gh.
 	treePath := fmt.Sprintf("packages/%s/%s", req.PackageID, req.ArtifactID)
 	tagName := fmt.Sprintf("tenant/%s/%s/%s/%s", req.TenantName, req.PackageID, req.ArtifactID, req.Version)
 
-	// Step 1: Create GitArtifactSnapshot(pending)
-	snapshot := db.GitArtifactSnapshot{
-		ArtifactID:        req.ArtifactID,
-		Version:           req.Version,
-		CpiTenantID:       req.CpiTenantID,
-		PackageID:         req.PackageID,
-		ArtifactType:      req.ArtifactType,
-		BranchName:        branch,
-		TreePath:          treePath,
-		TagName:           tagName,
-		TriggerSource:     req.TriggerSource,
-		DeliveryRequestID: req.DeliveryRequestID,
-		ArtifactOpID:      req.ArtifactOpID,
-		Status:            GitSnapshotPending,
-		TriggeredAt:       time.Now(),
+	// Step 1: Atomically claim the snapshot (DB row = distributed lock)
+	// Only the goroutine that successfully claims proceeds with steps 2-7.
+	var snapshot db.GitArtifactSnapshot
+	claimed, err := s.claimGitSyncSnapshot(req, branch, treePath, tagName, &snapshot)
+	if err != nil {
+		return err
 	}
-	if err := s.DB.Create(&snapshot).Error; err != nil {
-		return fmt.Errorf("create snapshot: %w", err)
+	if !claimed {
+		// Already completed or in-progress by another instance
+		return nil
 	}
 
 	completeSnapshot := func(status string, commitSHA string, errMsg string) {
 		now := time.Now()
-		s.DB.Model(&snapshot).Updates(map[string]interface{}{
-			"status":       status,
-			"commit_sha":   commitSHA,
-			"completed_at": &now,
-			"error":        errMsg,
+		s.DB.Model(&snapshot).Select(
+			"Status", "CommitSHA", "CompletedAt", "Error",
+		).Updates(db.GitArtifactSnapshot{
+			Status:      status,
+			CommitSHA:   commitSHA,
+			CompletedAt: &now,
+			Error:       errMsg,
 		})
 	}
 
@@ -227,4 +221,62 @@ func generateCpiSyncYaml(req GitSyncRequest) ([]byte, error) {
 		return nil, err
 	}
 	return append([]byte(cpiSyncYamlHeader), yamlBytes...), nil
+}
+
+// claimGitSyncSnapshot atomically claims ownership of a sync operation.
+// Returns (true, nil) if this goroutine owns the snapshot and should proceed.
+// Returns (false, nil) if already completed or another instance is processing.
+// Returns (false, err) on unexpected errors.
+func (s *Service) claimGitSyncSnapshot(req GitSyncRequest, branch, treePath, tagName string, out *db.GitArtifactSnapshot) (bool, error) {
+	// Attempt 1: Create new snapshot (status=pending)
+	*out = db.GitArtifactSnapshot{
+		ArtifactID:        req.ArtifactID,
+		Version:           req.Version,
+		CpiTenantID:       req.CpiTenantID,
+		PackageID:         req.PackageID,
+		ArtifactType:      req.ArtifactType,
+		BranchName:        branch,
+		TreePath:          treePath,
+		TagName:           tagName,
+		TriggerSource:     req.TriggerSource,
+		DeliveryRequestID: req.DeliveryRequestID,
+		ArtifactOpID:      req.ArtifactOpID,
+		Status:            GitSnapshotPending,
+		TriggeredAt:       time.Now(),
+	}
+	if err := s.DB.Create(out).Error; err == nil {
+		return true, nil // Created — we own it
+	}
+
+	// Create failed (unique constraint). Query existing record.
+	if err := s.DB.Where("artifact_id = ? AND version = ? AND cpi_tenant_id = ?",
+		req.ArtifactID, req.Version, req.CpiTenantID).First(out).Error; err != nil {
+		return false, fmt.Errorf("query existing snapshot: %w", err)
+	}
+
+	switch out.Status {
+	case GitSnapshotCompleted:
+		return false, nil // Already done
+	case GitSnapshotPending:
+		return false, nil // Another instance is processing
+	case GitSnapshotFailed:
+		// Attempt atomic claim: update only if still failed
+		result := s.DB.Model(out).
+			Where("status = ?", GitSnapshotFailed).
+			Select("Status", "TriggeredAt", "CompletedAt", "Error", "CommitSHA",
+				"TriggerSource", "DeliveryRequestID", "ArtifactOpID").
+			Updates(db.GitArtifactSnapshot{
+				Status:            GitSnapshotPending,
+				TriggeredAt:       time.Now(),
+				TriggerSource:     req.TriggerSource,
+				DeliveryRequestID: req.DeliveryRequestID,
+				ArtifactOpID:      req.ArtifactOpID,
+			})
+		if result.RowsAffected == 0 {
+			return false, nil // Another instance claimed it first
+		}
+		return true, nil // We claimed it
+	default:
+		return false, fmt.Errorf("unexpected snapshot status: %s", out.Status)
+	}
 }
