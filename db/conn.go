@@ -60,6 +60,8 @@ func Connect() (*gorm.DB, error) {
 		&CentralTmsContext{}, &TenantBootstrapJob{},
 		// RFC 017: connectivity check result caching
 		&ConnectivityCheckResult{},
+		// RFC 010: GitHub sync infrastructure
+		&GitRepositoryConfig{}, &GitArtifactSnapshot{},
 	); err != nil {
 		return nil, fmt.Errorf("failed to migrate: %w", err)
 	}
