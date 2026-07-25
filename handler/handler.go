@@ -270,6 +270,6 @@ func (h *Handler) SetupRoutes(v1 *gin.RouterGroup, v2 *gin.RouterGroup, requireS
 	v2Operate := v2.Group("")
 	v2Operate.Use(requireScope("DeliveryRequest.Operate"))
 	{
-		v2Operate.POST("/deliver", h.NativeDeliver)
+		// Native delivery route removed — TMS is the standard delivery mechanism.
 	}
 }
