@@ -4,8 +4,12 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/gin-gonic/gin"
+	"mmt-delivery/db"
+	"mmt-delivery/service"
+
 	"mmt-delivery/pkg/errcode"
+
+	"github.com/gin-gonic/gin"
 )
 
 // --- Integration Config CRUD ---
@@ -139,4 +143,117 @@ func (h *Handler) GetLastConnectivity(ctx *gin.Context) {
 		return
 	}
 	OK(ctx, report)
+}
+
+// --- Git Repository Config ---
+
+// GET /api/v1/system/gitRepoConfig
+func (h *Handler) GetGitRepoConfig(ctx *gin.Context) {
+	var config db.GitRepoConfig
+	if err := h.db.First(&config).Error; err != nil {
+		OK(ctx, db.GitRepoConfig{})
+		return
+	}
+	OK(ctx, config)
+}
+
+// PUT /api/v1/system/gitRepoConfig
+func (h *Handler) UpsertGitRepoConfig(ctx *gin.Context) {
+	var req db.GitRepoConfig
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		Fail(ctx, http.StatusBadRequest, fmt.Sprintf("invalid request body: %s", err))
+		return
+	}
+	if req.Provider == "" || req.DestinationName == "" || req.Owner == "" || req.Repo == "" {
+		Fail(ctx, http.StatusBadRequest, "provider, destinationName, owner, and repo are required")
+		return
+	}
+
+	var existing db.GitRepoConfig
+	if err := h.db.First(&existing).Error; err != nil {
+		// Create new
+		if err := h.db.Create(&req).Error; err != nil {
+			Fail(ctx, http.StatusInternalServerError, fmt.Sprintf("failed to create git repo config: %s", err))
+			return
+		}
+		OK(ctx, req)
+		return
+	}
+
+	// Update existing
+	existing.Provider = req.Provider
+	existing.DestinationName = req.DestinationName
+	existing.Owner = req.Owner
+	existing.Repo = req.Repo
+	existing.Enabled = req.Enabled
+	if err := h.db.Save(&existing).Error; err != nil {
+		Fail(ctx, http.StatusInternalServerError, fmt.Sprintf("failed to update git repo config: %s", err))
+		return
+	}
+	OK(ctx, existing)
+}
+
+// POST /api/v1/system/gitRepoConfig/test
+func (h *Handler) TestGitRepoConnection(ctx *gin.Context) {
+	gitClient, err := h.resolveGitClient(ctx)
+	if err != nil {
+		OK(ctx, gin.H{"status": "error", "message": err.Error()})
+		return
+	}
+
+	// Verify repo is accessible by attempting to read a non-existent tag
+	_, _, err = gitClient.TagExists(ctx.Request.Context(), "__connection_test__")
+	if err != nil {
+		OK(ctx, gin.H{"status": "error", "message": fmt.Sprintf("cannot access repository: %s", err)})
+		return
+	}
+
+	OK(ctx, gin.H{"status": "success", "message": "Repository is accessible"})
+}
+
+// --- Git Sync Trigger ---
+
+// POST /api/v1/gitSync/trigger
+func (h *Handler) TriggerGitSync(ctx *gin.Context) {
+	var req service.GitSyncRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		Fail(ctx, http.StatusBadRequest, fmt.Sprintf("invalid request body: %s", err))
+		return
+	}
+
+	if req.ArtifactID == "" || req.Version == "" || req.PackageID == "" || req.CpiTenantID == 0 {
+		Fail(ctx, http.StatusBadRequest, "artifactId, version, packageId, and cpiTenantId are required")
+		return
+	}
+	if req.TriggerSource == "" {
+		req.TriggerSource = service.TriggerSourceManual
+	}
+
+	// Resolve tenant name for branch naming
+	if req.TenantName == "" {
+		var tenant db.CpiTenant
+		if err := h.db.First(&tenant, req.CpiTenantID).Error; err != nil {
+			Fail(ctx, http.StatusBadRequest, fmt.Sprintf("tenant %d not found", req.CpiTenantID))
+			return
+		}
+		req.TenantName = tenant.Name
+	}
+
+	gitClient, err := h.resolveGitClient(ctx)
+	if err != nil {
+		Fail(ctx, http.StatusServiceUnavailable, "GitHub integration not configured: "+err.Error())
+		return
+	}
+
+	if err := h.svc.GitSync(ctx.Request.Context(), req, gitClient); err != nil {
+		Fail(ctx, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Return the resulting snapshot
+	var snapshot db.GitArtifactSnapshot
+	h.db.Where("artifact_id = ? AND version = ? AND cpi_tenant_id = ?",
+		req.ArtifactID, req.Version, req.CpiTenantID).First(&snapshot)
+
+	OK(ctx, snapshot)
 }

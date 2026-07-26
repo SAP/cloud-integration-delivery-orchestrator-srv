@@ -258,12 +258,22 @@ func (h *Handler) SetupRoutes(v1 *gin.RouterGroup, v2 *gin.RouterGroup, requireS
 		ccRead.GET("/gitSync/snapshots/:id/files", h.GetGitSnapshotFiles)
 	}
 
+	// --- Git Sync Trigger (DeliveryRequest.Operate scope) ---
+	gitSyncOperate := v1.Group("")
+	gitSyncOperate.Use(requireScope("DeliveryRequest.Operate"))
+	{
+		gitSyncOperate.POST("/gitSync/trigger", h.TriggerGitSync)
+	}
+
 	// --- System Configuration (CpiTenant.Manage scope — admin-level) ---
 	system := v1.Group("/system")
 	system.Use(requireScope("CpiTenant.Manage"))
 	{
 		system.GET("/integrations", h.GetIntegrations)
 		system.PUT("/integrations/:type", h.UpdateIntegration)
+		system.GET("/gitRepoConfig", h.GetGitRepoConfig)
+		system.PUT("/gitRepoConfig", h.UpsertGitRepoConfig)
+		system.POST("/gitRepoConfig/test", h.TestGitRepoConnection)
 		system.GET("/database/info", h.GetDatabaseInfo)
 		system.GET("/connectivity/database", h.CheckConnectivityDatabase)
 		system.GET("/connectivity/tms", h.CheckConnectivityTMS)
