@@ -24,6 +24,12 @@ var (
 		metric.WithDescription("Import operation end-to-end duration"))
 	DeployDuration, _ = meter().Float64Histogram("cpi_delivery.deploy.duration_seconds",
 		metric.WithDescription("Deploy operation end-to-end duration"))
+
+	// Git Sync metrics
+	GitSyncTotal, _ = meter().Int64Counter("cpi_delivery.git_sync.ops",
+		metric.WithDescription("Number of git sync operations by result (completed/failed/skipped)"))
+	GitSyncDuration, _ = meter().Float64Histogram("cpi_delivery.git_sync.duration_seconds",
+		metric.WithDescription("Git sync operation duration"))
 )
 
 // RegisterSyncTrackerGauge registers an observable gauge that reports the

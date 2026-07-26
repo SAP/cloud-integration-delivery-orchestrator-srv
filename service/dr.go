@@ -312,6 +312,23 @@ func (s *Service) InsertTenantOps(ctx context.Context, drID uint, ops []db.Artif
 		}()
 	}
 
+	// Git sync source artifact after adding to DR
+	for i := range ops {
+		if ops[i].TenantID == sourceTenant.ID {
+			op := ops[i]
+			go func() {
+				if err := s.TriggerGitSyncForOp(context.WithoutCancel(ctx), op, TriggerSourceDR, &drID); err != nil {
+					s.Logger.Warnw("git sync after DR artifact save failed",
+						"artifact", op.ArtifactTechID,
+						"version", op.ArtifactVersion,
+						"tenant_id", op.TenantID,
+						"delivery_request_id", drID,
+						"error", err)
+				}
+			}()
+		}
+	}
+
 	s.NotifyDrUpdated(drID)
 	return ops, nil
 }

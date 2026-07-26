@@ -13,7 +13,10 @@ import (
 	"mmt-delivery/consts"
 	"mmt-delivery/db"
 	gh "mmt-delivery/pkg/github"
+	cpiotel "mmt-delivery/pkg/otel"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 	"gopkg.in/yaml.v3"
 )
 
@@ -58,6 +61,20 @@ func getBranchLock(branch string) *sync.Mutex {
 
 // GitSync executes the 7-step sync flow for a single artifact version.
 func (s *Service) GitSync(ctx context.Context, req GitSyncRequest, gitClient gh.GitArtifactClient) error {
+	ctx, span := cpiotel.Tracer().Start(ctx, "git_sync")
+	span.SetAttributes(
+		attribute.String("artifact_id", req.ArtifactID),
+		attribute.String("version", req.Version),
+		attribute.String("tenant", req.TenantName),
+		attribute.String("trigger_source", req.TriggerSource),
+	)
+	start := time.Now()
+	defer func() {
+		span.End()
+		cpiotel.GitSyncDuration.Record(ctx, time.Since(start).Seconds(),
+			metric.WithAttributes(attribute.String("trigger_source", req.TriggerSource)))
+	}()
+
 	branch := "tenant/" + req.TenantName
 	treePath := fmt.Sprintf("packages/%s/%s", req.PackageID, req.ArtifactID)
 	tagName := fmt.Sprintf("tenant/%s/%s/%s/%s", req.TenantName, req.PackageID, req.ArtifactID, req.Version)
@@ -84,6 +101,11 @@ func (s *Service) GitSync(ctx context.Context, req GitSyncRequest, gitClient gh.
 			CompletedAt: &now,
 			Error:       errMsg,
 		})
+		if status == GitSnapshotFailed {
+			cpiotel.GitSyncTotal.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("trigger_source", req.TriggerSource),
+				attribute.String("status", "failed")))
+		}
 	}
 
 	// Step 2: Idempotency check (tag exists?)
@@ -95,6 +117,9 @@ func (s *Service) GitSync(ctx context.Context, req GitSyncRequest, gitClient gh.
 	if exists {
 		s.L(ctx).Infow("tag already exists, skipping sync", "tag", tagName, "commitSHA", existingSHA)
 		completeSnapshot(GitSnapshotCompleted, existingSHA, "")
+		cpiotel.GitSyncTotal.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("trigger_source", req.TriggerSource),
+			attribute.String("status", "skipped")))
 		return nil
 	}
 
@@ -140,6 +165,9 @@ func (s *Service) GitSync(ctx context.Context, req GitSyncRequest, gitClient gh.
 
 	// Step 7: Update snapshot(completed)
 	completeSnapshot(GitSnapshotCompleted, commitSHA, "")
+	cpiotel.GitSyncTotal.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("trigger_source", req.TriggerSource),
+		attribute.String("status", "completed")))
 	s.L(ctx).Infow("git sync completed", "artifact", req.ArtifactID, "version", req.Version, "commit", commitSHA)
 	return nil
 }
@@ -370,4 +398,45 @@ func isBinaryPath(path string) bool {
 	return strings.HasSuffix(lower, ".jar") ||
 		strings.HasSuffix(lower, ".zip") ||
 		strings.HasSuffix(lower, ".class")
+}
+
+// =============================================================================
+// Trigger Helper
+// =============================================================================
+
+// TriggerGitSync resolves GitRepoConfig + git client, then executes sync synchronously.
+// Returns nil if git sync is not enabled (silently skips).
+// Caller is responsible for running this in a goroutine if non-blocking behavior is desired.
+func (s *Service) TriggerGitSyncForOp(ctx context.Context, op db.ArtifactTenantOperation, triggerSource string, drID *uint) error {
+	// Check if git sync is enabled
+	var config db.GitRepoConfig
+	if err := s.DB.Where("enabled = ?", true).First(&config).Error; err != nil {
+		return nil // git sync not configured, silently skip
+	}
+
+	// Resolve tenant name
+	var tenant db.CpiTenant
+	if err := s.DB.First(&tenant, op.TenantID).Error; err != nil {
+		return fmt.Errorf("git sync: tenant %d not found: %w", op.TenantID, err)
+	}
+
+	// Create git client
+	gitClient, err := gh.NewGoGitHubClient(ctx, config.DestinationName, config.Owner, config.Repo, s.ProviderDest)
+	if err != nil {
+		return fmt.Errorf("git sync: failed to create git client: %w", err)
+	}
+
+	req := GitSyncRequest{
+		ArtifactID:        op.ArtifactTechID,
+		Version:           op.ArtifactVersion,
+		PackageID:         op.PackageID,
+		ArtifactType:      op.ArtifactType,
+		CpiTenantID:       op.TenantID,
+		TenantName:        tenant.Name,
+		TriggerSource:     triggerSource,
+		DeliveryRequestID: drID,
+		ArtifactOpID:      &op.ID,
+	}
+
+	return s.GitSync(ctx, req, gitClient)
 }

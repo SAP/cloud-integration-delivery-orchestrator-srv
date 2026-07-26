@@ -9,7 +9,6 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	oteltrace "go.opentelemetry.io/otel/trace"
-	"golang.org/x/mod/semver"
 
 	"mmt-delivery/consts"
 	"mmt-delivery/db"
@@ -209,23 +208,7 @@ func (s *Service) syncDeployState(ctx context.Context, deliveryRequestID uint, u
 			// - runtime > expected → a higher version was deployed, this op is superseded
 			// - runtime < expected → deploy hasn't taken effect yet, wait for next cycle
 			rtV, opV := rt.Version, op.ArtifactVersion
-			if !strings.HasPrefix(rtV, "v") {
-				rtV = "v" + rtV
-			}
-			if !strings.HasPrefix(opV, "v") {
-				opV = "v" + opV
-			}
-			if !semver.IsValid(rtV) || !semver.IsValid(opV) {
-				s.L(ctx).Warnw("invalid semver in deploy sync", "runtime_version", rt.Version, "expected_version", op.ArtifactVersion, "artifact", op.ArtifactTechID, "tenant", op.Tenant.Name)
-				conditions = append(conditions, db.Condition{
-					DeliveryRequestID:         deliveryRequestID,
-					ArtifactTenantOperationID: op.ID,
-					State:                     lifecycle.CondWarn,
-					Message:                   fmt.Sprintf("cannot compare versions for artifact %s in tenant %s: runtime version %q or expected version %q is not valid semver", op.ArtifactTechID, op.Tenant.Name, rt.Version, op.ArtifactVersion),
-				})
-				continue
-			}
-			if semver.Compare(rtV, opV) > 0 {
+			if compareCPIVersion(rtV, opV) > 0 {
 				// Superseded: runtime has a higher version
 				state = lifecycle.DeployFailed
 				if err := s.DB.Model(&op).Updates(db.ArtifactTenantOperation{
@@ -464,6 +447,18 @@ func (s *Service) syncImportState(ctx context.Context, deliveryRequestID uint, u
 					State:                     lifecycle.CondSuccess,
 					Message:                   conditionMsg,
 				})
+
+				// Git sync target tenant after successful import
+				go func() {
+					if err := s.TriggerGitSyncForOp(ctx, curOp, TriggerSourceImport, &deliveryRequestID); err != nil {
+						s.L(ctx).Warnw("git sync after import failed",
+							"artifact", curOp.ArtifactTechID,
+							"version", curOp.ArtifactVersion,
+							"tenant_id", curOp.TenantID,
+							"delivery_request_id", deliveryRequestID,
+							"error", err)
+					}
+				}()
 
 				// Send notification to JIRA if configured (same as SUCCEEDED; WARNING is still a successful import)
 				s.PostJiraComment(dr.JiraLink, deliveryRequestID, conditionMsg, "Imported")
