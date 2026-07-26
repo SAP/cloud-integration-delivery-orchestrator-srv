@@ -12,7 +12,7 @@ import (
 // Auth credentials are resolved via BTP Destination Service using DestinationName.
 type GitRepoConfig struct {
 	gorm.Model
-	Provider        string `gorm:"not null" json:"provider"`        // github | github_enterprise
+	Provider        string `gorm:"not null" json:"provider"`        // see github.Provider constants
 	DestinationName string `gorm:"not null" json:"destinationName"` // BTP Destination → resolves to API URL + credentials
 	Owner           string `gorm:"not null" json:"owner"`           // GitHub org or user
 	Repo            string `gorm:"not null" json:"repo"`            // repository name

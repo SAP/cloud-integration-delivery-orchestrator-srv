@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"net/url"
 	"path"
 	"strings"
 
@@ -13,6 +14,9 @@ import (
 	"mmt-delivery/pkg/env"
 )
 
+// Compile-time interface compliance
+var _ GitArtifactClient = (*GoGitHubClient)(nil)
+
 // GoGitHubClient implements GitArtifactClient using GitHub REST API v3 (via go-github).
 // Works identically for github.com and GitHub Enterprise Server — only the base URL differs.
 type GoGitHubClient struct {
@@ -21,9 +25,9 @@ type GoGitHubClient struct {
 	repo   string
 }
 
-// NewGoGitHubClient creates a GoGitHubClient by resolving a BTP Destination for auth/URL.
+// newGoGitHubClient creates a GoGitHubClient by resolving a BTP Destination for auth/URL.
 // The destination must be BasicAuthentication type with Password = GitHub PAT.
-func NewGoGitHubClient(ctx context.Context, destName string, owner, repo string, resolver *cf.DestinationServiceClient) (*GoGitHubClient, error) {
+func newGoGitHubClient(ctx context.Context, destName string, owner, repo string, resolver *cf.DestinationServiceClient) (*GoGitHubClient, error) {
 	dest, err := resolver.GetDestination(ctx, destName)
 	if err != nil {
 		return nil, fmt.Errorf("github destination %s not found: %w", destName, err)
@@ -37,12 +41,9 @@ func NewGoGitHubClient(ctx context.Context, destName string, owner, repo string,
 	// Build client options
 	opts := []github.ClientOptionsFunc{github.WithAuthToken(token)}
 
-	// For GHE Server, override the base URL (destination URL = "https://HOSTNAME/api/v3/")
-	apiURL := strings.TrimRight(dest.URL, "/")
+	// For GHE Server, override the base URL (destination URL should point to HOSTNAME)
+	apiURL := normalizeGitURL(dest.URL)
 	if apiURL != "" && apiURL != "https://api.github.com" {
-		if !strings.HasSuffix(apiURL, "/") {
-			apiURL += "/"
-		}
 		opts = append(opts, github.WithEnterpriseURLs(apiURL, apiURL))
 	}
 
@@ -143,6 +144,76 @@ func (g *GoGitHubClient) CreateTag(ctx context.Context, tag string, commitSHA st
 	return nil
 }
 
+// ListOwners returns the authenticated user and all organizations they belong to.
+func (g *GoGitHubClient) ListOwners(ctx context.Context) ([]OwnerInfo, error) {
+	var owners []OwnerInfo
+
+	// Get authenticated user
+	user, _, err := g.client.Users.Get(ctx, "")
+	if err != nil {
+		return nil, fmt.Errorf("get authenticated user: %w", err)
+	}
+	owners = append(owners, OwnerInfo{Login: user.GetLogin(), Type: "User"})
+
+	// List all user's organizations (paginated)
+	opts := &github.ListOptions{PerPage: 100}
+	for {
+		orgs, resp, err := g.client.Organizations.List(ctx, "", opts)
+		if err != nil {
+			return nil, fmt.Errorf("list organizations: %w", err)
+		}
+		for _, org := range orgs {
+			owners = append(owners, OwnerInfo{Login: org.GetLogin(), Type: "Organization"})
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+
+	return owners, nil
+}
+
+// ListRepos returns repositories for the given owner.
+// ownerType ("User" or "Organization") determines which API to call, avoiding an extra GET /user round-trip.
+func (g *GoGitHubClient) ListRepos(ctx context.Context, owner string, ownerType string) ([]RepoInfo, error) {
+	var repos []RepoInfo
+
+	if ownerType == "User" {
+		opts := &github.RepositoryListByAuthenticatedUserOptions{ListOptions: github.ListOptions{PerPage: 100}}
+		for {
+			ghRepos, resp, err := g.client.Repositories.ListByAuthenticatedUser(ctx, opts)
+			if err != nil {
+				return nil, fmt.Errorf("list user repos: %w", err)
+			}
+			for _, r := range ghRepos {
+				repos = append(repos, RepoInfo{Name: r.GetName(), FullName: r.GetFullName(), Private: r.GetPrivate()})
+			}
+			if resp.NextPage == 0 {
+				break
+			}
+			opts.Page = resp.NextPage
+		}
+	} else {
+		opts := &github.RepositoryListByOrgOptions{ListOptions: github.ListOptions{PerPage: 100}}
+		for {
+			ghRepos, resp, err := g.client.Repositories.ListByOrg(ctx, owner, opts)
+			if err != nil {
+				return nil, fmt.Errorf("list org %s repos: %w", owner, err)
+			}
+			for _, r := range ghRepos {
+				repos = append(repos, RepoInfo{Name: r.GetName(), FullName: r.GetFullName(), Private: r.GetPrivate()})
+			}
+			if resp.NextPage == 0 {
+				break
+			}
+			opts.Page = resp.NextPage
+		}
+	}
+
+	return repos, nil
+}
+
 func (g *GoGitHubClient) ReadTree(ctx context.Context, commitSHA string, treePath string) (FileMap, error) {
 	// Get the tree at commitSHA recursively
 	tree, _, err := g.client.Git.GetTree(ctx, g.owner, g.repo, commitSHA, true)
@@ -186,4 +257,18 @@ func (g *GoGitHubClient) ReadTree(ctx context.Context, commitSHA string, treePat
 	}
 
 	return files, nil
+}
+
+// normalizeGitURL parses a destination URL and forces HTTPS scheme.
+// GitHub API (both github.com and GHE Server) never uses plain HTTP.
+func normalizeGitURL(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	parsed, err := url.Parse(raw)
+	if err == nil && parsed.Host != "" {
+		parsed.Scheme = "https"
+		return strings.TrimRight(parsed.String(), "/")
+	}
+	return strings.TrimRight(raw, "/")
 }
