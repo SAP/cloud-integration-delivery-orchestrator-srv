@@ -57,6 +57,14 @@ func (m *mockGitClient) ReadTree(_ context.Context, commitSHA string, treePath s
 	return m.readFiles, nil
 }
 
+func (m *mockGitClient) ListOwners(_ context.Context) ([]gh.OwnerInfo, error) {
+	return nil, nil
+}
+
+func (m *mockGitClient) ListRepos(_ context.Context, owner string, ownerType string) ([]gh.RepoInfo, error) {
+	return nil, nil
+}
+
 // --- Mock CPI client for DownloadArtifactZip ---
 
 type mockCPIForGitSync struct {

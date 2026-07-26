@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"mmt-delivery/db"
+	gh "mmt-delivery/pkg/github"
 	"mmt-delivery/service"
 
 	"mmt-delivery/pkg/errcode"
@@ -147,6 +148,11 @@ func (h *Handler) GetLastConnectivity(ctx *gin.Context) {
 
 // --- Git Repository Config ---
 
+// GET /api/v1/system/gitRepoConfig/providers
+func (h *Handler) GetGitProviders(ctx *gin.Context) {
+	OK(ctx, gh.SupportedProviders())
+}
+
 // GET /api/v1/system/gitRepoConfig
 func (h *Handler) GetGitRepoConfig(ctx *gin.Context) {
 	var config db.GitRepoConfig
@@ -193,9 +199,65 @@ func (h *Handler) UpsertGitRepoConfig(ctx *gin.Context) {
 	OK(ctx, existing)
 }
 
+// GET /api/v1/system/gitRepoConfig/owners?provider=xxx&destinationName=xxx
+func (h *Handler) GetGitOwners(ctx *gin.Context) {
+	provider := ctx.Query("provider")
+	destName := ctx.Query("destinationName")
+	if provider == "" || destName == "" {
+		Fail(ctx, http.StatusBadRequest, "query params 'provider' and 'destinationName' are required")
+		return
+	}
+
+	client, err := gh.NewGitClient(ctx.Request.Context(), gh.Provider(provider), destName, "", "", h.destSvc)
+	if err != nil {
+		Fail(ctx, http.StatusServiceUnavailable, fmt.Sprintf("failed to create git client: %s", err))
+		return
+	}
+
+	owners, err := client.ListOwners(ctx.Request.Context())
+	if err != nil {
+		Fail(ctx, http.StatusServiceUnavailable, fmt.Sprintf("failed to list owners: %s", err))
+		return
+	}
+
+	OK(ctx, owners)
+}
+
+// GET /api/v1/system/gitRepoConfig/repos?provider=xxx&destinationName=xxx&owner=xxx&ownerType=xxx
+func (h *Handler) GetGitRepos(ctx *gin.Context) {
+	provider := ctx.Query("provider")
+	destName := ctx.Query("destinationName")
+	owner := ctx.Query("owner")
+	ownerType := ctx.Query("ownerType")
+	if provider == "" || destName == "" || owner == "" || ownerType == "" {
+		Fail(ctx, http.StatusBadRequest, "query params 'provider', 'destinationName', 'owner' and 'ownerType' are required")
+		return
+	}
+
+	client, err := gh.NewGitClient(ctx.Request.Context(), gh.Provider(provider), destName, "", "", h.destSvc)
+	if err != nil {
+		Fail(ctx, http.StatusServiceUnavailable, fmt.Sprintf("failed to create git client: %s", err))
+		return
+	}
+
+	repos, err := client.ListRepos(ctx.Request.Context(), owner, ownerType)
+	if err != nil {
+		Fail(ctx, http.StatusServiceUnavailable, fmt.Sprintf("failed to list repos: %s", err))
+		return
+	}
+
+	OK(ctx, repos)
+}
+
 // POST /api/v1/system/gitRepoConfig/test
 func (h *Handler) TestGitRepoConnection(ctx *gin.Context) {
-	gitClient, err := h.resolveGitClient(ctx)
+	var config db.GitRepoConfig
+	if err := h.db.First(&config).Error; err != nil {
+		OK(ctx, gin.H{"status": "error", "message": "no GitRepoConfig found"})
+		return
+	}
+
+	gitClient, err := gh.NewGitClient(ctx.Request.Context(), gh.Provider(config.Provider), config.DestinationName, config.Owner, config.Repo, h.destSvc)
 	if err != nil {
 		OK(ctx, gin.H{"status": "error", "message": err.Error()})
 		return
@@ -208,7 +270,7 @@ func (h *Handler) TestGitRepoConnection(ctx *gin.Context) {
 		return
 	}
 
-	OK(ctx, gin.H{"status": "success", "message": "Repository is accessible"})
+	OK(ctx, gin.H{"status": "ok", "message": "Repository is accessible"})
 }
 
 // --- Git Sync Trigger ---

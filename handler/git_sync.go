@@ -66,7 +66,7 @@ func (h *Handler) GetGitSnapshotFiles(ctx *gin.Context) {
 func (h *Handler) resolveGitClient(ctx *gin.Context) (gh.GitArtifactClient, error) {
 	var config db.GitRepoConfig
 	if err := h.db.Where("enabled = ?", true).First(&config).Error; err != nil {
-		return nil, fmt.Errorf("no enabled GitRepoConfig found: %w", err)
+		return nil, fmt.Errorf("no enabled Git Repository Configuration found: %w", err)
 	}
-	return gh.NewGoGitHubClient(ctx.Request.Context(), config.DestinationName, config.Owner, config.Repo, h.destSvc)
+	return gh.NewGitClient(ctx.Request.Context(), gh.Provider(config.Provider), config.DestinationName, config.Owner, config.Repo, h.destSvc)
 }

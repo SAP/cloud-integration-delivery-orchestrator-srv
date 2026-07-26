@@ -421,7 +421,7 @@ func (s *Service) TriggerGitSyncForOp(ctx context.Context, op db.ArtifactTenantO
 	}
 
 	// Create git client
-	gitClient, err := gh.NewGoGitHubClient(ctx, config.DestinationName, config.Owner, config.Repo, s.ProviderDest)
+	gitClient, err := gh.NewGitClient(ctx, gh.Provider(config.Provider), config.DestinationName, config.Owner, config.Repo, s.ProviderDest)
 	if err != nil {
 		return fmt.Errorf("git sync: failed to create git client: %w", err)
 	}
