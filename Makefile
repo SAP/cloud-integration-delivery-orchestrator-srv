@@ -6,14 +6,6 @@ GOFMT        ?= $(GO)fmt
 DOCKER       ?= docker
 BIN_DIR      ?= $(shell pwd)/build
 
-# --- CF service instance names (must match your CF space) ---
-SVC_UAA      ?= cpi-delivery-uaa
-SVC_UAA_API  ?= uaa-api
-SVC_DB       ?= mmt-devops-pgsql
-SVC_DEST     ?= mmt_devops_destination
-SVC_CONN     ?= mmt_devops_connectivity
-SK_NAME      ?= local-dev
-
 # --- Local PostgreSQL ---
 DB_CONTAINER ?= cpi-delivery-db
 DB_IMAGE     ?= postgres:15
@@ -55,56 +47,38 @@ run-db:
 		echo ">> $(DB_CONTAINER) created and started"; \
 	fi
 
-# --- sync-env: assemble .env from CF service keys (stable credentials) ---
+# --- sync-env: pull VCAP_SERVICES from deployed CF app and write .env ---
 #
 # Prerequisites:
 #   - cf CLI logged in and targeting the correct org/space
 #   - jq installed
+#   - App must be deployed (pulls env from running app)
 #
 # What it does:
-#   1. Checks CF CLI login status (fails early if not logged in)
-#   2. Creates service keys named "local-dev" if they don't already exist
-#      (this is a one-time side effect on your CF space)
-#   3. Reads credentials from each service key
-#   4. Assembles VCAP_SERVICES JSON and writes .env
+#   1. Checks CF CLI login status
+#   2. Fetches VCAP_SERVICES and VCAP_APPLICATION from the deployed app via CF API
+#   3. Writes .env (format compatible with VS Code launch.json envFile)
 #
-# Why service keys:
-#   Service key credentials are independent of app bindings.
-#   They remain stable across cf deploy/restage — no need to regenerate .env.
+# Note: credentials change on each cf deploy/restage. Re-run after deploy.
 #
 # Usage:
-#   make sync-env                         # uses default service instance names
-#   make sync-env SVC_DB=my-pg-instance   # override a specific instance name
-#   make sync-env SK_NAME=dev2            # use a different key name
+#   make sync-env                        # uses default app name
+#   make sync-env CF_APP=my-app-name     # override app name
 
-sync-env: _check-cf _ensure-keys
-	@echo ">> reading service key credentials..."
-	@SK_UAA=$$(cf service-key $(SVC_UAA) $(SK_NAME) | sed -n '/^{/,$$p' | jq -c '.') && \
-	SK_UAA_API=$$(cf service-key $(SVC_UAA_API) $(SK_NAME) | sed -n '/^{/,$$p' | jq -c '.') && \
-	SK_DB=$$(cf service-key $(SVC_DB) $(SK_NAME) | sed -n '/^{/,$$p' | jq -c '.') && \
-	SK_DEST=$$(cf service-key $(SVC_DEST) $(SK_NAME) | sed -n '/^{/,$$p' | jq -c '.') && \
-	SK_CONN=$$(cf service-key $(SVC_CONN) $(SK_NAME) | sed -n '/^{/,$$p' | jq -c '.') && \
-	VCAP_SERVICES=$$(jq -n -c \
-		--argjson uaa "$$SK_UAA" \
-		--argjson uaa_api "$$SK_UAA_API" \
-		--argjson db "$$SK_DB" \
-		--argjson dest "$$SK_DEST" \
-		--argjson conn "$$SK_CONN" \
-		'{ "xsuaa": [ { "label": "xsuaa", "plan": "application", "name": "$(SVC_UAA)", "tags": ["xsuaa"], "credentials": $$uaa }, { "label": "xsuaa", "plan": "apiaccess", "name": "$(SVC_UAA_API)", "tags": ["xsuaa"], "credentials": $$uaa_api } ], "postgresql-db": [ { "label": "postgresql-db", "plan": "development", "name": "$(SVC_DB)", "tags": ["relational","database"], "credentials": $$db } ], "destination": [ { "label": "destination", "plan": "lite", "name": "$(SVC_DEST)", "tags": ["destination","conn","connsvc"], "credentials": $$dest } ], "connectivity": [ { "label": "connectivity", "plan": "lite", "name": "$(SVC_CONN)", "tags": ["connectivity","conn","connsvc"], "credentials": $$conn } ] }') && \
-	VCAP_APP='{"application_name":"cpi-delivery-local","application_uris":["localhost"],"name":"cpi-delivery-local","uris":["localhost"]}' && \
-	printf 'VCAP_SERVICES=%s\nVCAP_APPLICATION=%s\nVITE_DEV_URL=http://localhost:5173\nLOCAL_POSTGRES_URI=postgres://postgres:passw0rd@127.0.0.1:5432/macodeploy?sslmode=disable\n' "$$VCAP_SERVICES" "$$VCAP_APP" > .env && \
-	echo ">> .env written successfully (credentials from service keys '$(SK_NAME)')"
+CF_APP ?= cpi-delivery
+
+sync-env: _check-cf
+	@echo ">> pulling env from deployed app '$(CF_APP)'..."
+	@APP_GUID=$$(cf app $(CF_APP) --guid) && \
+	cf curl /v3/apps/$$APP_GUID/env > /tmp/.cpi-delivery-env.json && \
+	VCAP_SERVICES=$$(jq -c '.system_env_json.VCAP_SERVICES' /tmp/.cpi-delivery-env.json) && \
+	VCAP_APP=$$(jq -c '.application_env_json.VCAP_APPLICATION' /tmp/.cpi-delivery-env.json) && \
+	printf 'VCAP_SERVICES=%s\nVCAP_APPLICATION=%s\nVITE_DEV_URL=http://localhost:5173\nOTEL_SDK_DISABLED=true\nLOCAL_POSTGRES_URI=postgres://postgres:passw0rd@127.0.0.1:5432/macodeploy?sslmode=disable\n' "$$VCAP_SERVICES" "$$VCAP_APP" > .env && \
+	rm -f /tmp/.cpi-delivery-env.json && \
+	echo ">> .env written successfully (from app '$(CF_APP)')"
 
 _check-cf:
 	@cf target >/dev/null 2>&1 || (echo "ERROR: cf CLI not logged in. Run: cf login -a <api> -o <org> -s <space>" && exit 1)
 	@echo ">> CF target: $$(cf target | grep -E 'org:|space:' | tr '\n' ' ')"
 
-_ensure-keys:
-	@echo ">> ensuring service keys '$(SK_NAME)' exist (creates if missing)..."
-	@cf service-key $(SVC_UAA) $(SK_NAME) >/dev/null 2>&1 || cf create-service-key $(SVC_UAA) $(SK_NAME)
-	@cf service-key $(SVC_UAA_API) $(SK_NAME) >/dev/null 2>&1 || cf create-service-key $(SVC_UAA_API) $(SK_NAME)
-	@cf service-key $(SVC_DB) $(SK_NAME) >/dev/null 2>&1 || cf create-service-key $(SVC_DB) $(SK_NAME)
-	@cf service-key $(SVC_DEST) $(SK_NAME) >/dev/null 2>&1 || cf create-service-key $(SVC_DEST) $(SK_NAME)
-	@cf service-key $(SVC_CONN) $(SK_NAME) >/dev/null 2>&1 || cf create-service-key $(SVC_CONN) $(SK_NAME)
-
-.PHONY: all fmt build clean test run-db sync-env _check-cf _ensure-keys
+.PHONY: all fmt build clean test run-db sync-env _check-cf

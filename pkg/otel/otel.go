@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/cloudfoundry-community/go-cfenv"
@@ -26,6 +27,11 @@ import (
 // and the global TracerProvider remains the default (noop — zero overhead).
 func Init(appEnv *cfenv.App, serviceName string, logger *zap.SugaredLogger) func() {
 	noop := func() {}
+
+	if os.Getenv("OTEL_SDK_DISABLED") == "true" {
+		logger.Infof("[otel] disabled via OTEL_SDK_DISABLED=true")
+		return noop
+	}
 
 	if appEnv == nil {
 		logger.Infof("[otel] not running in CF environment, observability disabled")

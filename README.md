@@ -19,19 +19,22 @@ make run-db DOCKER=podman
 
 Idempotent — if the container already exists, it just starts it. Data persists in a named Docker volume.
 
-### 2. Generate `.env` from CF service keys
+### 2. Generate `.env` from deployed CF app
 
 The application reads `VCAP_SERVICES` environment variable at startup (via `go-cfenv`).
 For local development, VS Code loads `.env` via `launch.json`.
 
-To generate a stable `.env` (credentials survive CF redeploys):
+To generate `.env` from the deployed app's environment:
 
 ```bash
 make sync-env
+
+# If your app has a different name:
+make sync-env CF_APP=my-cpi-delivery
 ```
 
-This creates CF service keys (once) and assembles `.env` from their credentials.
-Service keys are independent of app bindings — they don't change when you `cf deploy`.
+This pulls VCAP_SERVICES and VCAP_APPLICATION directly from the deployed CF app via API.
+Re-run after each `cf deploy` (credentials change on redeploy).
 
 ### 3. Run with VS Code (recommended)
 
@@ -76,7 +79,7 @@ Vite dev server starts at `http://localhost:5173`, proxied through Go backend vi
 | `make fmt` | Format all Go source files |
 | `make test` | Run all tests |
 | `make run-db` | Start local PostgreSQL (one-time, idempotent) |
-| `make sync-env` | Generate `.env` from CF service keys (stable credentials) |
+| `make sync-env` | Pull env from deployed CF app and write `.env` |
 | `make clean` | Remove build artifacts |
 
 Use `DOCKER=podman` with any target that uses containers (e.g., `make run-db DOCKER=podman`).
