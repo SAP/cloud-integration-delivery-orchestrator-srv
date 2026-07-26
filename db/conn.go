@@ -50,67 +50,16 @@ func Connect() (*gorm.DB, error) {
 		return nil, fmt.Errorf("failed to connect database: %w", err)
 	}
 
-	// Step 1: AutoMigrate adds new columns to artifact_tenant_operations.
-	// The former artifacts table and artifact_id FK are removed after backfill (below).
+	// Step 1: AutoMigrate — creates/updates tables to match current struct definitions.
 	if err := db.AutoMigrate(
 		&CpiTenant{}, &DeliveryRule{}, &DeliveryRequest{}, &ArtifactTenantOperation{}, &BatchJob{},
 		&Condition{}, &VersionCompareSnapshot{}, &VersionCompareIncludedPackage{},
 		&IntegrationConfig{},
-		// RFC 013: subaccount-centric CpiTenant + bootstrap state machine
 		&CentralTmsContext{}, &TenantBootstrapJob{},
-		// RFC 017: connectivity check result caching
 		&ConnectivityCheckResult{},
-		// RFC 010: GitHub sync infrastructure
 		&GitRepoConfig{}, &GitArtifactSnapshot{},
 	); err != nil {
 		return nil, fmt.Errorf("failed to migrate: %w", err)
-	}
-
-	// Step 2: RFC-015 — backfill flattened artifact fields from the artifacts table.
-	// Runs only while artifact_id column still exists (idempotent: WHERE artifact_name = '').
-	// Once all rows are backfilled, drop the FK column and the artifacts table.
-	if db.Migrator().HasColumn(&ArtifactTenantOperation{}, "artifact_id") {
-		// Build SET clause defensively: package_name and package_version were added
-		// to the artifacts table later and may not exist in older deployments.
-		hasPackageName := db.Migrator().HasColumn("artifacts", "package_name")
-		hasPackageVersion := db.Migrator().HasColumn("artifacts", "package_version")
-
-		setClause := "artifact_name = a.name, artifact_type = a.type, package_id = a.package_id"
-		if hasPackageName {
-			setClause += ", package_name = a.package_name"
-		}
-		if hasPackageVersion {
-			setClause += ", package_version = a.package_version"
-		}
-
-		sql := `UPDATE artifact_tenant_operations op SET ` + setClause + `
-			FROM artifacts a
-			WHERE op.artifact_id = a.id
-			  AND (op.artifact_name IS NULL OR op.artifact_name = '')`
-		if err := db.Exec(sql).Error; err != nil {
-			return nil, fmt.Errorf("RFC-015 backfill failed: %w", err)
-		}
-
-		// Verify all rows were backfilled before dropping the column.
-		// Rows with artifact_name still empty have no matching artifacts row (orphaned ops);
-		// fail fast so they are not silently dropped.
-		var unbackfilled int64
-		if err := db.Model(&ArtifactTenantOperation{}).Where("artifact_name = '' OR artifact_name IS NULL").Count(&unbackfilled).Error; err != nil {
-			return nil, fmt.Errorf("RFC-015 backfill verification failed: %w", err)
-		}
-		if unbackfilled > 0 {
-			return nil, fmt.Errorf("RFC-015 backfill incomplete: %d artifact_tenant_operations row(s) still have empty artifact_name — check for orphaned ops (artifact_id with no matching artifacts row)", unbackfilled)
-		}
-
-		if err := db.Migrator().DropColumn(&ArtifactTenantOperation{}, "artifact_id"); err != nil {
-			return nil, fmt.Errorf("RFC-015 drop artifact_id column failed: %w", err)
-		}
-
-		if db.Migrator().HasTable("artifacts") {
-			if err := db.Exec("DROP TABLE artifacts").Error; err != nil {
-				return nil, fmt.Errorf("RFC-015 drop artifacts table failed: %w", err)
-			}
-		}
 	}
 
 	// Seed predefined integration types (idempotent — skips existing records)
