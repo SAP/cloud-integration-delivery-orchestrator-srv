@@ -361,6 +361,79 @@ func TestCommit_TreeUnchanged_SkipsCommit(t *testing.T) {
 	}
 }
 
+func TestCommit_BranchAutoCreate(t *testing.T) {
+	newCommitSHA := "new-commit-sha"
+	orphanCommitSHA := "orphan-init-sha"
+	branchCreated := false
+	branchGetCount := 0
+
+	mux := http.NewServeMux()
+	// Branch: first call 404 (ensureBranch), second call returns the orphan init commit
+	mux.HandleFunc("GET /repos/test-owner/test-repo/git/ref/heads/tenant/new-tenant", func(w http.ResponseWriter, r *http.Request) {
+		branchGetCount++
+		if branchGetCount <= 1 {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		json.NewEncoder(w).Encode(github.Reference{
+			Object: &github.GitObject{SHA: github.Ptr(orphanCommitSHA)},
+		})
+	})
+	// ensureBranch: CreateCommit (orphan, empty tree, no parents)
+	commitCallCount := 0
+	mux.HandleFunc("POST /repos/test-owner/test-repo/git/commits", func(w http.ResponseWriter, r *http.Request) {
+		commitCallCount++
+		if commitCallCount == 1 {
+			// orphan init commit
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(github.Commit{SHA: github.Ptr(orphanCommitSHA)})
+			return
+		}
+		// real artifact commit
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(github.Commit{SHA: github.Ptr(newCommitSHA)})
+	})
+	// ensureBranch: CreateRef
+	mux.HandleFunc("POST /repos/test-owner/test-repo/git/refs", func(w http.ResponseWriter, r *http.Request) {
+		branchCreated = true
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(github.Reference{})
+	})
+	// Commit step 2: GetCommit (parent is orphan init → empty tree)
+	mux.HandleFunc("GET /repos/test-owner/test-repo/git/commits/{sha}", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(github.Commit{
+			Tree: &github.Tree{SHA: github.Ptr(emptyTreeSHA)},
+		})
+	})
+	// Commit step 3: CreateBlob
+	mux.HandleFunc("POST /repos/test-owner/test-repo/git/blobs", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(github.Blob{SHA: github.Ptr("blobsha")})
+	})
+	// Commit step 4: CreateTree (different from empty tree → commit proceeds)
+	mux.HandleFunc("POST /repos/test-owner/test-repo/git/trees", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(github.Tree{SHA: github.Ptr("new-tree-sha")})
+	})
+	// Commit step 7: UpdateRef
+	mux.HandleFunc("PATCH /repos/test-owner/test-repo/git/refs/heads/tenant/new-tenant", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(github.Reference{})
+	})
+
+	client, srv := setupTestClient(t, mux)
+	defer srv.Close()
+
+	sha, err := client.Commit(context.Background(), "tenant/new-tenant", "pkg/art",
+		FileMap{"file.txt": []byte("content")}, CommitMeta{Message: "sync"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if sha != newCommitSHA {
+		t.Fatalf("expected %s, got %s", newCommitSHA, sha)
+	}
+	if !branchCreated {
+		t.Fatal("expected orphan branch to be auto-created")
+	}
+}
+
 // --- NewGitClient factory ---
 
 func TestNewGitClient_UnsupportedProvider(t *testing.T) {

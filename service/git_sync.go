@@ -13,6 +13,7 @@ import (
 	"mmt-delivery/consts"
 	"mmt-delivery/db"
 	gh "mmt-delivery/pkg/github"
+	"mmt-delivery/pkg/lifecycle"
 	cpiotel "mmt-delivery/pkg/otel"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -76,7 +77,7 @@ func (s *Service) GitSync(ctx context.Context, req GitSyncRequest, gitClient gh.
 	}()
 
 	branch := "tenant/" + req.TenantName
-	treePath := fmt.Sprintf("packages/%s/%s", req.PackageID, req.ArtifactID)
+	treePath := fmt.Sprintf("%s/%s", req.PackageID, req.ArtifactID)
 	tagName := fmt.Sprintf("tenant/%s/%s/%s/%s", req.TenantName, req.PackageID, req.ArtifactID, req.Version)
 
 	// Step 1: Atomically claim the snapshot (DB row = distributed lock)
@@ -404,9 +405,9 @@ func isBinaryPath(path string) bool {
 // Trigger Helper
 // =============================================================================
 
-// TriggerGitSync resolves GitRepoConfig + git client, then executes sync synchronously.
+// TriggerGitSyncForOp resolves GitRepoConfig + git client, then executes sync synchronously.
 // Returns nil if git sync is not enabled (silently skips).
-// Caller is responsible for running this in a goroutine if non-blocking behavior is desired.
+// Writes a Condition to the delivery request on success or failure.
 func (s *Service) TriggerGitSyncForOp(ctx context.Context, op db.ArtifactTenantOperation, triggerSource string, drID *uint) error {
 	// Check if git sync is enabled
 	var config db.GitRepoConfig
@@ -423,6 +424,8 @@ func (s *Service) TriggerGitSyncForOp(ctx context.Context, op db.ArtifactTenantO
 	// Create git client
 	gitClient, err := gh.NewGitClient(ctx, gh.Provider(config.Provider), config.DestinationName, config.Owner, config.Repo, s.ProviderDest)
 	if err != nil {
+		s.writeGitSyncCondition(drID, op.ID, lifecycle.CondError,
+			fmt.Sprintf("git sync failed for %s@%s: %s", op.ArtifactTechID, op.ArtifactVersion, err))
 		return fmt.Errorf("git sync: failed to create git client: %w", err)
 	}
 
@@ -438,5 +441,25 @@ func (s *Service) TriggerGitSyncForOp(ctx context.Context, op db.ArtifactTenantO
 		ArtifactOpID:      &op.ID,
 	}
 
-	return s.GitSync(ctx, req, gitClient)
+	if err := s.GitSync(ctx, req, gitClient); err != nil {
+		s.writeGitSyncCondition(drID, op.ID, lifecycle.CondError,
+			fmt.Sprintf("git sync failed for %s@%s on tenant %s: %s", op.ArtifactTechID, op.ArtifactVersion, tenant.Name, err))
+		return err
+	}
+
+	s.writeGitSyncCondition(drID, op.ID, lifecycle.CondSuccess,
+		fmt.Sprintf("git sync completed for %s@%s on tenant %s → %s/%s", op.ArtifactTechID, op.ArtifactVersion, tenant.Name, config.Owner, config.Repo))
+	return nil
+}
+
+func (s *Service) writeGitSyncCondition(drID *uint, opID uint, state lifecycle.ConditionState, message string) {
+	if drID == nil {
+		return
+	}
+	_ = s.BatchInsertConditions([]db.Condition{{
+		DeliveryRequestID:         *drID,
+		ArtifactTenantOperationID: opID,
+		State:                     state,
+		Message:                   message,
+	}})
 }

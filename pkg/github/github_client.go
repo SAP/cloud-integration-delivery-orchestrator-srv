@@ -2,7 +2,9 @@ package github
 
 import (
 	"context"
+	"crypto/sha1"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"net/url"
 	"path"
@@ -13,6 +15,9 @@ import (
 	"mmt-delivery/pkg/cf"
 	"mmt-delivery/pkg/env"
 )
+
+// Git tree entry file modes
+const fileModeBlob = "100644" // regular non-executable file
 
 // Compile-time interface compliance
 var _ GitArtifactClient = (*GoGitHubClient)(nil)
@@ -67,6 +72,11 @@ func (g *GoGitHubClient) TagExists(ctx context.Context, tag string) (bool, strin
 }
 
 func (g *GoGitHubClient) Commit(ctx context.Context, branch string, treePath string, files FileMap, meta CommitMeta) (string, error) {
+	// Ensure branch exists (auto-create from default branch if not)
+	if err := g.ensureBranch(ctx, branch); err != nil {
+		return "", err
+	}
+
 	// 1. Get current branch tip
 	branchRef, _, err := g.client.Git.GetRef(ctx, g.owner, g.repo, "heads/"+branch)
 	if err != nil {
@@ -94,7 +104,7 @@ func (g *GoGitHubClient) Commit(ctx context.Context, branch string, treePath str
 		}
 		entries = append(entries, &github.TreeEntry{
 			Path: github.Ptr(fullPath),
-			Mode: github.Ptr("100644"),
+			Mode: github.Ptr(fileModeBlob),
 			Type: github.Ptr("blob"),
 			SHA:  blob.SHA,
 		})
@@ -131,6 +141,61 @@ func (g *GoGitHubClient) Commit(ctx context.Context, branch string, treePath str
 	}
 
 	return newCommit.GetSHA(), nil
+}
+
+// emptyTreeSHA computes the SHA-1 of an empty Git tree object at init time.
+//
+// This is a well-known constant in the Git ecosystem, hardcoded in Git's own source:
+// https://github.com/git/git/blob/master/hash.c (search "empty_tree_oid")
+//
+//	static const struct object_id empty_tree_oid = {
+//	    .hash = { 0x4b, 0x82, 0x5d, 0xc6, 0x42, 0xcb, 0x6e, 0xb9, ... },
+//	    .algo = GIT_HASH_SHA1,
+//	};
+//
+// The value is deterministic: SHA-1("tree 0\0") = 4b825dc642cb6eb9a060e54bf8d69288fbee4904.
+// It exists in every SHA-1 Git repository and is used by Git internally for operations like
+// `git diff --cached` against an empty tree (pre-commit hooks), orphan branch creation, etc.
+//
+// Community discussion: https://stackoverflow.com/questions/9765453
+// Git source reference: https://github.com/git/git/blob/master/hash.c
+var emptyTreeSHA = computeEmptyTreeSHA()
+
+func computeEmptyTreeSHA() string {
+	h := sha1.Sum([]byte("tree 0\x00"))
+	return hex.EncodeToString(h[:])
+}
+
+// ensureBranch checks if a branch exists; if not, creates an orphan branch with an empty tree.
+// This ensures tenant branches contain only artifacts synced to that tenant, without inheriting
+// files from the default branch.
+func (g *GoGitHubClient) ensureBranch(ctx context.Context, branch string) error {
+	_, resp, err := g.client.Git.GetRef(ctx, g.owner, g.repo, "heads/"+branch)
+	if err == nil {
+		return nil // branch exists
+	}
+	if resp == nil || resp.StatusCode != 404 {
+		return fmt.Errorf("check branch %s: %w", branch, err)
+	}
+
+	// Create root commit with empty tree (orphan — no parents)
+	initCommit, _, err := g.client.Git.CreateCommit(ctx, g.owner, g.repo, github.Commit{
+		Message: github.Ptr("init: " + branch),
+		Tree:    &github.Tree{SHA: github.Ptr(emptyTreeSHA)},
+		Parents: []*github.Commit{},
+	}, nil)
+	if err != nil {
+		return fmt.Errorf("create orphan commit for %s: %w", branch, err)
+	}
+
+	_, _, err = g.client.Git.CreateRef(ctx, g.owner, g.repo, github.CreateRef{
+		Ref: "refs/heads/" + branch,
+		SHA: initCommit.GetSHA(),
+	})
+	if err != nil {
+		return fmt.Errorf("create branch %s: %w", branch, err)
+	}
+	return nil
 }
 
 func (g *GoGitHubClient) CreateTag(ctx context.Context, tag string, commitSHA string) error {
