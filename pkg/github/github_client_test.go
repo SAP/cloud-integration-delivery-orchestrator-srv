@@ -446,6 +446,63 @@ func TestNewGitClient_UnsupportedProvider(t *testing.T) {
 	}
 }
 
+func TestCommit_RetryOnRefConflict(t *testing.T) {
+	newCommitSHA := "final-commit-sha"
+	updateRefCalls := 0
+
+	mux := http.NewServeMux()
+	// Branch exists
+	mux.HandleFunc("GET /repos/test-owner/test-repo/git/ref/heads/tenant/dev", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(github.Reference{
+			Object: &github.GitObject{SHA: github.Ptr("parent-sha")},
+		})
+	})
+	// Get parent commit
+	mux.HandleFunc("GET /repos/test-owner/test-repo/git/commits/{sha}", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(github.Commit{
+			Tree: &github.Tree{SHA: github.Ptr("base-tree-sha")},
+		})
+	})
+	// Create blob
+	mux.HandleFunc("POST /repos/test-owner/test-repo/git/blobs", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(github.Blob{SHA: github.Ptr("blobsha")})
+	})
+	// Create tree (different from base)
+	mux.HandleFunc("POST /repos/test-owner/test-repo/git/trees", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(github.Tree{SHA: github.Ptr("new-tree-sha")})
+	})
+	// Create commit
+	mux.HandleFunc("POST /repos/test-owner/test-repo/git/commits", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(github.Commit{SHA: github.Ptr(newCommitSHA)})
+	})
+	// UpdateRef: first call → 422 (conflict), second call → success
+	mux.HandleFunc("PATCH /repos/test-owner/test-repo/git/refs/heads/tenant/dev", func(w http.ResponseWriter, r *http.Request) {
+		updateRefCalls++
+		if updateRefCalls == 1 {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			fmt.Fprint(w, `{"message":"Update is not a fast forward"}`)
+			return
+		}
+		json.NewEncoder(w).Encode(github.Reference{})
+	})
+
+	client, srv := setupTestClient(t, mux)
+	defer srv.Close()
+
+	sha, err := client.Commit(context.Background(), "tenant/dev", "pkg/art",
+		FileMap{"file.txt": []byte("content")}, CommitMeta{Message: "sync"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if sha != newCommitSHA {
+		t.Fatalf("expected %s, got %s", newCommitSHA, sha)
+	}
+	if updateRefCalls != 2 {
+		t.Fatalf("expected 2 UpdateRef calls (1 conflict + 1 success), got %d", updateRefCalls)
+	}
+}
+
 // --- normalizeGitURL ---
 
 func TestNormalizeGitURL(t *testing.T) {

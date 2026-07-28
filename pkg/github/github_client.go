@@ -71,12 +71,33 @@ func (g *GoGitHubClient) TagExists(ctx context.Context, tag string) (bool, strin
 	return true, ref.GetObject().GetSHA(), nil
 }
 
+const commitMaxRetries = 3
+
 func (g *GoGitHubClient) Commit(ctx context.Context, branch string, treePath string, files FileMap, meta CommitMeta) (string, error) {
 	// Ensure branch exists (auto-create from default branch if not)
 	if err := g.ensureBranch(ctx, branch); err != nil {
 		return "", err
 	}
 
+	// Retry loop: UpdateRef may return 422 if another instance moved the branch tip concurrently.
+	// On 422, re-read branch tip and rebuild tree/commit from the new base.
+	// Blob creation is idempotent (content-addressable), so re-uploading is harmless.
+	var lastErr error
+	for attempt := 0; attempt < commitMaxRetries; attempt++ {
+		sha, err := g.commitOnce(ctx, branch, treePath, files, meta)
+		if err == nil {
+			return sha, nil
+		}
+		if !isRefUpdateConflict(err) {
+			return "", err
+		}
+		lastErr = err
+		env.L(ctx).Infow("branch tip moved, retrying commit", "branch", branch, "attempt", attempt+1)
+	}
+	return "", fmt.Errorf("commit failed after %d retries (branch tip conflict): %w", commitMaxRetries, lastErr)
+}
+
+func (g *GoGitHubClient) commitOnce(ctx context.Context, branch string, treePath string, files FileMap, meta CommitMeta) (string, error) {
 	// 1. Get current branch tip
 	branchRef, _, err := g.client.Git.GetRef(ctx, g.owner, g.repo, "heads/"+branch)
 	if err != nil {
@@ -133,14 +154,32 @@ func (g *GoGitHubClient) Commit(ctx context.Context, branch string, treePath str
 	}
 
 	// 7. Update branch ref
-	_, _, err = g.client.Git.UpdateRef(ctx, g.owner, g.repo, "heads/"+branch, github.UpdateRef{
+	_, resp, err := g.client.Git.UpdateRef(ctx, g.owner, g.repo, "heads/"+branch, github.UpdateRef{
 		SHA: newCommit.GetSHA(),
 	})
 	if err != nil {
+		if resp != nil && resp.StatusCode == 422 {
+			return "", &refConflictError{branch: branch, err: err}
+		}
 		return "", fmt.Errorf("update ref %s: %w", branch, err)
 	}
 
 	return newCommit.GetSHA(), nil
+}
+
+// refConflictError indicates that UpdateRef failed because the branch tip moved.
+type refConflictError struct {
+	branch string
+	err    error
+}
+
+func (e *refConflictError) Error() string {
+	return fmt.Sprintf("ref conflict on %s: %v", e.branch, e.err)
+}
+
+func isRefUpdateConflict(err error) bool {
+	_, ok := err.(*refConflictError)
+	return ok
 }
 
 // emptyTreeSHA computes the SHA-1 of an empty Git tree object at init time.
@@ -188,11 +227,15 @@ func (g *GoGitHubClient) ensureBranch(ctx context.Context, branch string) error 
 		return fmt.Errorf("create orphan commit for %s: %w", branch, err)
 	}
 
-	_, _, err = g.client.Git.CreateRef(ctx, g.owner, g.repo, github.CreateRef{
+	_, resp2, err := g.client.Git.CreateRef(ctx, g.owner, g.repo, github.CreateRef{
 		Ref: "refs/heads/" + branch,
 		SHA: initCommit.GetSHA(),
 	})
 	if err != nil {
+		// 422 = branch was created concurrently by another instance — that's fine
+		if resp2 != nil && resp2.StatusCode == 422 {
+			return nil
+		}
 		return fmt.Errorf("create branch %s: %w", branch, err)
 	}
 	return nil
