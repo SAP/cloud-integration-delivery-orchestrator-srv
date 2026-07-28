@@ -29,6 +29,10 @@ const (
 	TriggerSourceManual = "MANUAL"
 )
 
+// snapshotPendingTimeout defines how long a snapshot can stay "pending" before
+// being considered stuck. Normal sync takes < 30s; 3 min is generous.
+const snapshotPendingTimeout = 3 * time.Minute
+
 // Git artifact snapshot statuses
 const (
 	GitSnapshotPending   = "pending"
@@ -287,7 +291,25 @@ func (s *Service) claimGitSyncSnapshot(req GitSyncRequest, branch, treePath, tag
 	case GitSnapshotCompleted:
 		return false, nil // Already done
 	case GitSnapshotPending:
-		return false, nil // Another instance is processing
+		if time.Since(out.TriggeredAt) < snapshotPendingTimeout {
+			return false, nil // Still within timeout, let the owner finish
+		}
+		// Stale pending — reclaim atomically (same pattern as failed)
+		result := s.DB.Model(out).
+			Where("status = ? AND triggered_at < ?", GitSnapshotPending, time.Now().Add(-snapshotPendingTimeout)).
+			Select("Status", "TriggeredAt", "CompletedAt", "Error", "CommitSHA",
+				"TriggerSource", "DeliveryRequestID", "ArtifactOpID").
+			Updates(db.GitArtifactSnapshot{
+				Status:            GitSnapshotPending,
+				TriggeredAt:       time.Now(),
+				TriggerSource:     req.TriggerSource,
+				DeliveryRequestID: req.DeliveryRequestID,
+				ArtifactOpID:      req.ArtifactOpID,
+			})
+		if result.RowsAffected == 0 {
+			return false, nil // Another instance reclaimed first
+		}
+		return true, nil
 	case GitSnapshotFailed:
 		// Attempt atomic claim: update only if still failed
 		result := s.DB.Model(out).
@@ -358,11 +380,11 @@ func (s *Service) GetSnapshotFiles(ctx context.Context, snapshotID uint, gitClie
 	}, nil
 }
 
-// GetSnapshots returns the list of completed snapshots for a given artifact + tenant.
+// GetSnapshots returns all snapshots for a given artifact + tenant (all statuses).
 func (s *Service) GetSnapshots(artifactID string, tenantID uint) ([]db.GitArtifactSnapshot, error) {
 	var snapshots []db.GitArtifactSnapshot
 	if err := s.DB.
-		Where("artifact_id = ? AND cpi_tenant_id = ? AND status = ?", artifactID, tenantID, GitSnapshotCompleted).
+		Where("artifact_id = ? AND cpi_tenant_id = ?", artifactID, tenantID).
 		Order("triggered_at DESC").
 		Find(&snapshots).Error; err != nil {
 		return nil, fmt.Errorf("query snapshots: %w", err)

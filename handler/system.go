@@ -277,28 +277,33 @@ func (h *Handler) TestGitRepoConnection(ctx *gin.Context) {
 
 // POST /api/v1/gitSync/trigger
 func (h *Handler) TriggerGitSync(ctx *gin.Context) {
-	var req service.GitSyncRequest
+	var req struct {
+		ArtifactID  string `json:"artifactId"`
+		Version     string `json:"version"`
+		CpiTenantID uint   `json:"cpiTenantId"`
+	}
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		Fail(ctx, http.StatusBadRequest, fmt.Sprintf("invalid request body: %s", err))
 		return
 	}
-
-	if req.ArtifactID == "" || req.Version == "" || req.PackageID == "" || req.CpiTenantID == 0 {
-		Fail(ctx, http.StatusBadRequest, "artifactId, version, packageId, and cpiTenantId are required")
+	if req.ArtifactID == "" || req.Version == "" || req.CpiTenantID == 0 {
+		Fail(ctx, http.StatusBadRequest, "artifactId, version, and cpiTenantId are required")
 		return
 	}
-	if req.TriggerSource == "" {
-		req.TriggerSource = service.TriggerSourceManual
+
+	// Look up artifact info from existing operations
+	var op db.ArtifactTenantOperation
+	if err := h.db.Where("artifact_tech_id = ? AND artifact_version = ? AND tenant_id = ?",
+		req.ArtifactID, req.Version, req.CpiTenantID).First(&op).Error; err != nil {
+		Fail(ctx, http.StatusNotFound, fmt.Sprintf("no operation found for artifact %s@%s on tenant %d", req.ArtifactID, req.Version, req.CpiTenantID))
+		return
 	}
 
-	// Resolve tenant name for branch naming
-	if req.TenantName == "" {
-		var tenant db.CpiTenant
-		if err := h.db.First(&tenant, req.CpiTenantID).Error; err != nil {
-			Fail(ctx, http.StatusBadRequest, fmt.Sprintf("tenant %d not found", req.CpiTenantID))
-			return
-		}
-		req.TenantName = tenant.Name
+	// Resolve tenant name
+	var tenant db.CpiTenant
+	if err := h.db.First(&tenant, req.CpiTenantID).Error; err != nil {
+		Fail(ctx, http.StatusBadRequest, fmt.Sprintf("tenant %d not found", req.CpiTenantID))
+		return
 	}
 
 	gitClient, err := h.resolveGitClient(ctx)
@@ -307,7 +312,17 @@ func (h *Handler) TriggerGitSync(ctx *gin.Context) {
 		return
 	}
 
-	if err := h.svc.GitSync(ctx.Request.Context(), req, gitClient); err != nil {
+	syncReq := service.GitSyncRequest{
+		ArtifactID:    req.ArtifactID,
+		Version:       req.Version,
+		PackageID:     op.PackageID,
+		ArtifactType:  op.ArtifactType,
+		CpiTenantID:   req.CpiTenantID,
+		TenantName:    tenant.Name,
+		TriggerSource: service.TriggerSourceManual,
+	}
+
+	if err := h.svc.GitSync(ctx.Request.Context(), syncReq, gitClient); err != nil {
 		Fail(ctx, http.StatusInternalServerError, err.Error())
 		return
 	}
