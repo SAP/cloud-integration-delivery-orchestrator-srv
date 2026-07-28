@@ -182,8 +182,19 @@ func (h *Handler) UpsertGitRepoConfig(ctx *gin.Context) {
 			Fail(ctx, http.StatusInternalServerError, fmt.Sprintf("failed to create git repo config: %s", err))
 			return
 		}
-		OK(ctx, req)
+		OK(ctx, gin.H{"config": req})
 		return
+	}
+
+	// Check if repo target changed (owner or repo name)
+	var warning string
+	repoChanged := existing.Owner != req.Owner || existing.Repo != req.Repo || existing.DestinationName != req.DestinationName
+	if repoChanged {
+		var count int64
+		h.db.Model(&db.GitArtifactSnapshot{}).Where("status = ?", "completed").Count(&count)
+		if count > 0 {
+			warning = fmt.Sprintf("Repository target changed. %d existing snapshot(s) reference the old repository — their Code Compare may become unavailable.", count)
+		}
 	}
 
 	// Update existing
@@ -196,7 +207,12 @@ func (h *Handler) UpsertGitRepoConfig(ctx *gin.Context) {
 		Fail(ctx, http.StatusInternalServerError, fmt.Sprintf("failed to update git repo config: %s", err))
 		return
 	}
-	OK(ctx, existing)
+
+	result := gin.H{"config": existing}
+	if warning != "" {
+		result["warning"] = warning
+	}
+	OK(ctx, result)
 }
 
 // GET /api/v1/system/gitRepoConfig/owners?provider=xxx&destinationName=xxx
