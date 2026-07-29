@@ -44,6 +44,7 @@ func (s *Service) QueryDrWithAssociations(drID uint) (dr *db.DeliveryRequest, er
 	if err := s.DB.
 		Preload("SourceTenant").
 		Preload("DeliveryRule").
+		Preload("DeliveryRule.IncludedTenants").
 		Preload("ArtifactTenantOperations.Tenant").
 		Preload("Conditions", func(db *gorm.DB) *gorm.DB {
 			return db.Order("created_at asc")
@@ -312,17 +313,19 @@ func (s *Service) InsertTenantOps(ctx context.Context, drID uint, ops []db.Artif
 		}()
 	}
 
-	// Git sync source artifact after adding to DR
+	// Git sync all tenants (source + targets) for Code Compare readiness
 	for i := range ops {
-		if ops[i].TenantID == sourceTenant.ID {
-			op := ops[i]
+		if ops[i].TenantID != sourceTenant.ID {
+			continue // only source ops have the artifact info we need
+		}
+		op := ops[i]
+		for _, t := range rule.IncludedTenants {
+			tenant := t
 			go func() {
-				if err := s.TriggerGitSyncForOp(context.WithoutCancel(ctx), op, TriggerSourceDR, &drID); err != nil {
-					s.Logger.Warnw("git sync after DR artifact save failed",
+				if err := s.TriggerGitSync(context.WithoutCancel(ctx), op.ArtifactTechID, op.PackageID, op.ArtifactType, tenant.ID, &drID); err != nil {
+					s.Logger.Warnw("git sync failed",
 						"artifact", op.ArtifactTechID,
-						"version", op.ArtifactVersion,
-						"tenant_id", op.TenantID,
-						"delivery_request_id", drID,
+						"tenant", tenant.Name,
 						"error", err)
 				}
 			}()

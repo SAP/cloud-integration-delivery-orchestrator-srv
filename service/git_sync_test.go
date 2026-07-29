@@ -123,7 +123,7 @@ func TestGitSync_HappyPath(t *testing.T) {
 		TriggerSource: "MANUAL",
 	}
 
-	err := svc.GitSync(context.Background(), req, gitClient)
+	err := svc.gitSync(context.Background(), req, gitClient)
 	if err != nil {
 		t.Fatalf("GitSync failed: %v", err)
 	}
@@ -161,14 +161,21 @@ func TestGitSync_IdempotencySkip(t *testing.T) {
 	tc := newTestCleanup(t)
 	tenant := seedTenant(t, tc, "sync-idem-tenant")
 
-	svc := newTestService(nil)
+	zipContent := createTestZip(map[string]string{
+		"META-INF/MANIFEST.MF": "Bundle-Version: 2.0.0",
+	})
+	mockCPI := &mockCPIForGitSync{zipContent: zipContent}
+	factory := func(ctx context.Context, dest string) (IntegrationService, error) {
+		return mockCPI, nil
+	}
+	svc := newTestService(factory)
+
 	gitClient := newMockGitClient()
 	// Pre-set tag as existing
 	gitClient.tags["tenant/cpi-dev/Pkg/Flow/2.0.0"] = "existing-sha-999"
 
 	req := GitSyncRequest{
 		ArtifactID:    "Flow",
-		Version:       "2.0.0",
 		PackageID:     "Pkg",
 		ArtifactType:  consts.Artifact_Type_Iflow,
 		CpiTenantID:   tenant.ID,
@@ -176,7 +183,7 @@ func TestGitSync_IdempotencySkip(t *testing.T) {
 		TriggerSource: "DR",
 	}
 
-	err := svc.GitSync(context.Background(), req, gitClient)
+	err := svc.gitSync(context.Background(), req, gitClient)
 	if err != nil {
 		t.Fatalf("GitSync should succeed (idempotent skip): %v", err)
 	}
@@ -203,7 +210,10 @@ func TestGitSync_CommitFailure(t *testing.T) {
 	tc := newTestCleanup(t)
 	tenant := seedTenant(t, tc, "sync-fail-tenant")
 
-	zipContent := createTestZip(map[string]string{"test.txt": "content"})
+	zipContent := createTestZip(map[string]string{
+		"META-INF/MANIFEST.MF": "Bundle-Version: 1.0.0",
+		"test.txt":             "content",
+	})
 	mockCPI := &mockCPIForGitSync{zipContent: zipContent}
 	factory := func(ctx context.Context, dest string) (IntegrationService, error) {
 		return mockCPI, nil
@@ -223,7 +233,7 @@ func TestGitSync_CommitFailure(t *testing.T) {
 		TriggerSource: "CRON",
 	}
 
-	err := svc.GitSync(context.Background(), req, gitClient)
+	err := svc.gitSync(context.Background(), req, gitClient)
 	if err == nil {
 		t.Fatal("expected error from GitSync")
 	}
@@ -243,7 +253,10 @@ func TestGitSync_TagCreationFailure(t *testing.T) {
 	tc := newTestCleanup(t)
 	tenant := seedTenant(t, tc, "sync-tagfail-tenant")
 
-	zipContent := createTestZip(map[string]string{"test.txt": "content"})
+	zipContent := createTestZip(map[string]string{
+		"META-INF/MANIFEST.MF": "Bundle-Version: 3.0.0",
+		"test.txt":             "content",
+	})
 	mockCPI := &mockCPIForGitSync{zipContent: zipContent}
 	factory := func(ctx context.Context, dest string) (IntegrationService, error) {
 		return mockCPI, nil
@@ -263,7 +276,7 @@ func TestGitSync_TagCreationFailure(t *testing.T) {
 		TriggerSource: "IMPORT",
 	}
 
-	err := svc.GitSync(context.Background(), req, gitClient)
+	err := svc.gitSync(context.Background(), req, gitClient)
 	if err == nil {
 		t.Fatal("expected error from GitSync when tag creation fails")
 	}
@@ -283,7 +296,10 @@ func TestGitSync_CpiSyncYamlContent(t *testing.T) {
 	tc := newTestCleanup(t)
 	tenant := seedTenant(t, tc, "sync-yaml-tenant")
 
-	zipContent := createTestZip(map[string]string{"file.txt": "data"})
+	zipContent := createTestZip(map[string]string{
+		"META-INF/MANIFEST.MF": "Bundle-Version: 5.1.0",
+		"file.txt":             "data",
+	})
 	mockCPI := &mockCPIForGitSync{zipContent: zipContent}
 	factory := func(ctx context.Context, dest string) (IntegrationService, error) {
 		return mockCPI, nil
@@ -304,7 +320,7 @@ func TestGitSync_CpiSyncYamlContent(t *testing.T) {
 		DeliveryRequestID: &drID,
 	}
 
-	if err := svc.GitSync(context.Background(), req, gitClient); err != nil {
+	if err := svc.gitSync(context.Background(), req, gitClient); err != nil {
 		t.Fatalf("GitSync failed: %v", err)
 	}
 

@@ -450,13 +450,13 @@ func (s *Service) syncImportState(ctx context.Context, deliveryRequestID uint, u
 
 				// Git sync target tenant after successful import
 				go func() {
-					if err := s.TriggerGitSyncForOp(ctx, curOp, TriggerSourceImport, &deliveryRequestID); err != nil {
-						s.L(ctx).Warnw("git sync after import failed",
-							"artifact", curOp.ArtifactTechID,
-							"version", curOp.ArtifactVersion,
-							"tenant_id", curOp.TenantID,
-							"delivery_request_id", deliveryRequestID,
-							"error", err)
+					err := s.TriggerGitSync(ctx, curOp.ArtifactTechID, curOp.PackageID, curOp.ArtifactType, curOp.TenantID, &deliveryRequestID)
+					if err != nil {
+						s.writeGitSyncCondition(&deliveryRequestID, curOp.ID, lifecycle.CondError,
+							fmt.Sprintf("git sync failed for %s on tenant %d: %s", curOp.ArtifactTechID, curOp.TenantID, err))
+					} else {
+						s.writeGitSyncCondition(&deliveryRequestID, curOp.ID, lifecycle.CondSuccess,
+							fmt.Sprintf("git sync completed for %s on tenant %d", curOp.ArtifactTechID, curOp.TenantID))
 					}
 				}()
 

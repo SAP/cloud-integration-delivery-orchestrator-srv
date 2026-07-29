@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"net/http"
 
+	"mmt-delivery/consts"
 	"mmt-delivery/db"
 	gh "mmt-delivery/pkg/github"
-	"mmt-delivery/service"
 
 	"mmt-delivery/pkg/errcode"
 
@@ -294,59 +294,24 @@ func (h *Handler) TestGitRepoConnection(ctx *gin.Context) {
 // POST /api/v1/gitSync/trigger
 func (h *Handler) TriggerGitSync(ctx *gin.Context) {
 	var req struct {
-		ArtifactID  string `json:"artifactId"`
-		Version     string `json:"version"`
-		CpiTenantID uint   `json:"cpiTenantId"`
+		ArtifactID   string `json:"artifactId"`
+		CpiTenantID  uint   `json:"cpiTenantId"`
+		ArtifactType string `json:"artifactType"`
+		PackageID    string `json:"packageId"`
 	}
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		Fail(ctx, http.StatusBadRequest, fmt.Sprintf("invalid request body: %s", err))
 		return
 	}
-	if req.ArtifactID == "" || req.Version == "" || req.CpiTenantID == 0 {
-		Fail(ctx, http.StatusBadRequest, "artifactId, version, and cpiTenantId are required")
+	if req.ArtifactID == "" || req.CpiTenantID == 0 || req.ArtifactType == "" || req.PackageID == "" {
+		Fail(ctx, http.StatusBadRequest, "artifactId, cpiTenantId, artifactType, and packageId are required")
 		return
 	}
 
-	// Look up artifact info from existing operations
-	var op db.ArtifactTenantOperation
-	if err := h.db.Where("artifact_tech_id = ? AND artifact_version = ? AND tenant_id = ?",
-		req.ArtifactID, req.Version, req.CpiTenantID).First(&op).Error; err != nil {
-		Fail(ctx, http.StatusNotFound, fmt.Sprintf("no operation found for artifact %s@%s on tenant %d", req.ArtifactID, req.Version, req.CpiTenantID))
-		return
-	}
-
-	// Resolve tenant name
-	var tenant db.CpiTenant
-	if err := h.db.First(&tenant, req.CpiTenantID).Error; err != nil {
-		Fail(ctx, http.StatusBadRequest, fmt.Sprintf("tenant %d not found", req.CpiTenantID))
-		return
-	}
-
-	gitClient, err := h.resolveGitClient(ctx)
-	if err != nil {
-		Fail(ctx, http.StatusServiceUnavailable, "GitHub integration not configured: "+err.Error())
-		return
-	}
-
-	syncReq := service.GitSyncRequest{
-		ArtifactID:    req.ArtifactID,
-		Version:       req.Version,
-		PackageID:     op.PackageID,
-		ArtifactType:  op.ArtifactType,
-		CpiTenantID:   req.CpiTenantID,
-		TenantName:    tenant.Name,
-		TriggerSource: service.TriggerSourceManual,
-	}
-
-	if err := h.svc.GitSync(ctx.Request.Context(), syncReq, gitClient); err != nil {
+	if err := h.svc.TriggerGitSync(ctx.Request.Context(), req.ArtifactID, req.PackageID, consts.ArtifactType(req.ArtifactType), req.CpiTenantID, nil); err != nil {
 		Fail(ctx, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	// Return the resulting snapshot
-	var snapshot db.GitArtifactSnapshot
-	h.db.Where("artifact_id = ? AND version = ? AND cpi_tenant_id = ?",
-		req.ArtifactID, req.Version, req.CpiTenantID).First(&snapshot)
-
-	OK(ctx, snapshot)
+	OK(ctx, gin.H{"status": "ok"})
 }

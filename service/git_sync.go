@@ -41,13 +41,14 @@ const (
 )
 
 // GitSyncRequest contains the parameters for a single artifact sync operation.
+// Version is NOT set by callers — it's extracted from MANIFEST.MF after download.
 type GitSyncRequest struct {
-	ArtifactID    string
-	Version       string
-	PackageID     string
-	ArtifactType  consts.ArtifactType
-	CpiTenantID   uint
-	TenantName    string // used for branch naming
+	ArtifactID   string
+	Version      string // populated internally from META-INF/MANIFEST.MF
+	PackageID    string
+	ArtifactType consts.ArtifactType
+	CpiTenantID  uint
+	TenantName   string // used for branch naming
 	TriggerSource string // DR | CRON | IMPORT | MANUAL
 	DeliveryRequestID *uint
 	ArtifactOpID      *uint
@@ -64,12 +65,12 @@ func getBranchLock(branch string) *sync.Mutex {
 	return val.(*sync.Mutex)
 }
 
-// GitSync executes the 7-step sync flow for a single artifact version.
-func (s *Service) GitSync(ctx context.Context, req GitSyncRequest, gitClient gh.GitArtifactClient) error {
+// gitSync executes the core sync flow: download → extract version → claim → commit → tag.
+// Internal only — callers must use TriggerGitSync.
+func (s *Service) gitSync(ctx context.Context, req GitSyncRequest, gitClient gh.GitArtifactClient) error {
 	ctx, span := cpiotel.Tracer().Start(ctx, "git_sync")
 	span.SetAttributes(
 		attribute.String("artifact_id", req.ArtifactID),
-		attribute.String("version", req.Version),
 		attribute.String("tenant", req.TenantName),
 		attribute.String("trigger_source", req.TriggerSource),
 	)
@@ -80,19 +81,37 @@ func (s *Service) GitSync(ctx context.Context, req GitSyncRequest, gitClient gh.
 			metric.WithAttributes(attribute.String("trigger_source", req.TriggerSource)))
 	}()
 
+	// Step 1: CPI Download (always Version='active')
+	zipBytes, err := s.downloadArtifactZip(ctx, req)
+	if err != nil {
+		return fmt.Errorf("download artifact: %w", err)
+	}
+
+	// Step 2: Unzip + extract version from MANIFEST.MF
+	files, err := unzipToFileMap(zipBytes)
+	if err != nil {
+		return fmt.Errorf("unzip: %w", err)
+	}
+	actualVersion, err := extractVersionFromManifest(files)
+	if err != nil {
+		return fmt.Errorf("extract version from MANIFEST.MF: %w", err)
+	}
+
+	// Use actual version (from MANIFEST.MF) as source of truth
+	req.Version = actualVersion
+	span.SetAttributes(attribute.String("version", req.Version))
+
 	branch := "tenant/" + req.TenantName
 	treePath := fmt.Sprintf("%s/%s", req.PackageID, req.ArtifactID)
 	tagName := fmt.Sprintf("tenant/%s/%s/%s/%s", req.TenantName, req.PackageID, req.ArtifactID, req.Version)
 
-	// Step 1: Atomically claim the snapshot (DB row = distributed lock)
-	// Only the goroutine that successfully claims proceeds with steps 2-7.
+	// Step 3: Atomically claim the snapshot (DB row = distributed lock)
 	var snapshot db.GitArtifactSnapshot
 	claimed, err := s.claimGitSyncSnapshot(req, branch, treePath, tagName, &snapshot)
 	if err != nil {
 		return err
 	}
 	if !claimed {
-		// Already completed or in-progress by another instance
 		return nil
 	}
 
@@ -113,7 +132,7 @@ func (s *Service) GitSync(ctx context.Context, req GitSyncRequest, gitClient gh.
 		}
 	}
 
-	// Step 2: Idempotency check (tag exists?)
+	// Step 4: Idempotency check (tag exists?)
 	exists, existingSHA, err := gitClient.TagExists(ctx, tagName)
 	if err != nil {
 		completeSnapshot(GitSnapshotFailed, "", err.Error())
@@ -128,19 +147,7 @@ func (s *Service) GitSync(ctx context.Context, req GitSyncRequest, gitClient gh.
 		return nil
 	}
 
-	// Step 3: CPI Download
-	zipBytes, err := s.downloadArtifactZip(ctx, req)
-	if err != nil {
-		completeSnapshot(GitSnapshotFailed, "", err.Error())
-		return fmt.Errorf("download artifact: %w", err)
-	}
-
-	// Step 4: Unzip + generate .cpi-sync.yaml
-	files, err := unzipToFileMap(zipBytes)
-	if err != nil {
-		completeSnapshot(GitSnapshotFailed, "", err.Error())
-		return fmt.Errorf("unzip: %w", err)
-	}
+	// Step 5: Generate .cpi-sync.yaml
 	syncYaml, err := generateCpiSyncYaml(req)
 	if err != nil {
 		completeSnapshot(GitSnapshotFailed, "", err.Error())
@@ -148,7 +155,7 @@ func (s *Service) GitSync(ctx context.Context, req GitSyncRequest, gitClient gh.
 	}
 	files[".cpi-sync.yaml"] = syncYaml
 
-	// Step 5 + 6: Commit + Tag (per-branch serialization)
+	// Step 6: Commit + Tag (per-branch serialization)
 	lock := getBranchLock(branch)
 	lock.Lock()
 	defer lock.Unlock()
@@ -177,7 +184,7 @@ func (s *Service) GitSync(ctx context.Context, req GitSyncRequest, gitClient gh.
 	return nil
 }
 
-// downloadArtifactZip downloads the artifact ZIP from CPI design-time API.
+// downloadArtifactZip downloads the artifact ZIP from CPI design-time API (always Version='active').
 func (s *Service) downloadArtifactZip(ctx context.Context, req GitSyncRequest) ([]byte, error) {
 	var tenant db.CpiTenant
 	if err := s.DB.First(&tenant, req.CpiTenantID).Error; err != nil {
@@ -189,7 +196,7 @@ func (s *Service) downloadArtifactZip(ctx context.Context, req GitSyncRequest) (
 		return nil, fmt.Errorf("CPI client for tenant %s: %w", tenant.Name, err)
 	}
 
-	zipBytes, err := cpiClient.DownloadArtifactZip(ctx, req.ArtifactID, req.Version, req.ArtifactType)
+	zipBytes, err := cpiClient.DownloadArtifactZip(ctx, req.ArtifactID, "active", req.ArtifactType)
 	if err != nil {
 		return nil, err
 	}
@@ -222,6 +229,26 @@ func unzipToFileMap(zipBytes []byte) (gh.FileMap, error) {
 		files[name] = content
 	}
 	return files, nil
+}
+
+// extractVersionFromManifest reads Bundle-Version from META-INF/MANIFEST.MF.
+// This is the source of truth for the artifact version (CPI only serves 'active' version).
+func extractVersionFromManifest(files gh.FileMap) (string, error) {
+	manifest, ok := files["META-INF/MANIFEST.MF"]
+	if !ok {
+		return "", fmt.Errorf("META-INF/MANIFEST.MF not found in artifact ZIP")
+	}
+	for _, line := range strings.Split(string(manifest), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "Bundle-Version:") {
+			version := strings.TrimSpace(strings.TrimPrefix(line, "Bundle-Version:"))
+			if version == "" {
+				return "", fmt.Errorf("Bundle-Version is empty in MANIFEST.MF")
+			}
+			return version, nil
+		}
+	}
+	return "", fmt.Errorf("Bundle-Version not found in MANIFEST.MF")
 }
 
 // cpiSyncYaml is the structure for .cpi-sync.yaml
@@ -427,51 +454,35 @@ func isBinaryPath(path string) bool {
 // Trigger Helper
 // =============================================================================
 
-// TriggerGitSyncForOp resolves GitRepoConfig + git client, then executes sync synchronously.
-// Returns nil if git sync is not enabled (silently skips).
-// Writes a Condition to the delivery request on success or failure.
-func (s *Service) TriggerGitSyncForOp(ctx context.Context, op db.ArtifactTenantOperation, triggerSource string, drID *uint) error {
-	// Check if git sync is enabled
+// TriggerGitSync is the single entry point for triggering git sync.
+// Resolves config, client, and tenant name internally. Returns nil if git sync is not configured.
+func (s *Service) TriggerGitSync(ctx context.Context, artifactID, packageID string, artifactType consts.ArtifactType, tenantID uint, drID *uint) error {
 	var config db.GitRepoConfig
 	if err := s.DB.Where("enabled = ?", true).First(&config).Error; err != nil {
-		return nil // git sync not configured, silently skip
+		return nil // git sync not configured
 	}
 
-	// Resolve tenant name
 	var tenant db.CpiTenant
-	if err := s.DB.First(&tenant, op.TenantID).Error; err != nil {
-		return fmt.Errorf("git sync: tenant %d not found: %w", op.TenantID, err)
+	if err := s.DB.First(&tenant, tenantID).Error; err != nil {
+		return fmt.Errorf("git sync: tenant %d not found: %w", tenantID, err)
 	}
 
-	// Create git client
 	gitClient, err := gh.NewGitClient(ctx, gh.Provider(config.Provider), config.DestinationName, config.Owner, config.Repo, s.ProviderDest)
 	if err != nil {
-		s.writeGitSyncCondition(drID, op.ID, lifecycle.CondError,
-			fmt.Sprintf("git sync failed for %s@%s: %s", op.ArtifactTechID, op.ArtifactVersion, err))
 		return fmt.Errorf("git sync: failed to create git client: %w", err)
 	}
 
 	req := GitSyncRequest{
-		ArtifactID:        op.ArtifactTechID,
-		Version:           op.ArtifactVersion,
-		PackageID:         op.PackageID,
-		ArtifactType:      op.ArtifactType,
-		CpiTenantID:       op.TenantID,
+		ArtifactID:        artifactID,
+		PackageID:         packageID,
+		ArtifactType:      artifactType,
+		CpiTenantID:       tenantID,
 		TenantName:        tenant.Name,
-		TriggerSource:     triggerSource,
+		TriggerSource:     TriggerSourceDR,
 		DeliveryRequestID: drID,
-		ArtifactOpID:      &op.ID,
 	}
 
-	if err := s.GitSync(ctx, req, gitClient); err != nil {
-		s.writeGitSyncCondition(drID, op.ID, lifecycle.CondError,
-			fmt.Sprintf("git sync failed for %s@%s on tenant %s: %s", op.ArtifactTechID, op.ArtifactVersion, tenant.Name, err))
-		return err
-	}
-
-	s.writeGitSyncCondition(drID, op.ID, lifecycle.CondSuccess,
-		fmt.Sprintf("git sync completed for %s@%s on tenant %s → %s/%s", op.ArtifactTechID, op.ArtifactVersion, tenant.Name, config.Owner, config.Repo))
-	return nil
+	return s.gitSync(ctx, req, gitClient)
 }
 
 func (s *Service) writeGitSyncCondition(drID *uint, opID uint, state lifecycle.ConditionState, message string) {
