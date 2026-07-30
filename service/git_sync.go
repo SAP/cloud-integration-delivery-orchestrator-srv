@@ -409,7 +409,7 @@ func (s *Service) GetSnapshotFiles(ctx context.Context, snapshotID uint, gitClie
 
 // GetSnapshots returns all snapshots for a given artifact + tenant (all statuses).
 func (s *Service) GetSnapshots(artifactID string, tenantID uint) ([]db.GitArtifactSnapshot, error) {
-	var snapshots []db.GitArtifactSnapshot
+	snapshots := []db.GitArtifactSnapshot{} // initialized: JSON serializes to [] not null
 	if err := s.DB.
 		Where("artifact_id = ? AND cpi_tenant_id = ?", artifactID, tenantID).
 		Order("triggered_at DESC").
@@ -420,7 +420,7 @@ func (s *Service) GetSnapshots(artifactID string, tenantID uint) ([]db.GitArtifa
 }
 
 func buildFileEntries(files gh.FileMap) []SnapshotFileEntry {
-	var entries []SnapshotFileEntry
+	entries := []SnapshotFileEntry{} // initialized: JSON serializes to [] not null
 	for path, content := range files {
 		if path == ".cpi-sync.yaml" {
 			continue
