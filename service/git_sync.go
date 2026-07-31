@@ -4,14 +4,17 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
 
 	"mmt-delivery/consts"
 	"mmt-delivery/db"
+	"mmt-delivery/pkg/env"
 	gh "mmt-delivery/pkg/github"
 	"mmt-delivery/pkg/lifecycle"
 	cpiotel "mmt-delivery/pkg/otel"
@@ -38,18 +41,23 @@ const (
 	GitSnapshotPending   = "pending"
 	GitSnapshotCompleted = "completed"
 	GitSnapshotFailed    = "failed"
+	GitSnapshotNotFound  = "not_found" // artifact does not exist on this tenant (CPI 404)
 )
+
+// notFoundVersion is the sentinel version used for not_found snapshots.
+// These snapshots only record "we checked, artifact absent" — version is irrelevant.
+const notFoundVersion = "0.0.0"
 
 // GitSyncRequest contains the parameters for a single artifact sync operation.
 // Version is NOT set by callers — it's extracted from MANIFEST.MF after download.
 type GitSyncRequest struct {
-	ArtifactID   string
-	Version      string // populated internally from META-INF/MANIFEST.MF
-	PackageID    string
-	ArtifactType consts.ArtifactType
-	CpiTenantID  uint
-	TenantName   string // used for branch naming
-	TriggerSource string // DR | CRON | IMPORT | MANUAL
+	ArtifactID        string
+	Version           string // populated internally from META-INF/MANIFEST.MF
+	PackageID         string
+	ArtifactType      consts.ArtifactType
+	CpiTenantID       uint
+	TenantName        string // used for branch naming
+	TriggerSource     string // DR | CRON | IMPORT | MANUAL
 	DeliveryRequestID *uint
 	ArtifactOpID      *uint
 }
@@ -84,6 +92,14 @@ func (s *Service) gitSync(ctx context.Context, req GitSyncRequest, gitClient gh.
 	// Step 1: CPI Download (always Version='active')
 	zipBytes, err := s.downloadArtifactZip(ctx, req)
 	if err != nil {
+		if isArtifactNotFound(err) {
+			// Artifact does not exist on this tenant (first delivery / not yet imported).
+			// Record this as a not_found snapshot so the frontend can read the state directly.
+			s.L(ctx).Infow("artifact not found on tenant, recording not_found snapshot",
+				"artifact", req.ArtifactID, "tenant", req.TenantName)
+			s.recordNotFoundSnapshot(req)
+			return nil
+		}
 		return fmt.Errorf("download artifact: %w", err)
 	}
 
@@ -441,6 +457,37 @@ func buildFileEntries(files gh.FileMap) []SnapshotFileEntry {
 
 func normalizeLineEndings(content []byte) []byte {
 	return bytes.ReplaceAll(content, []byte("\r\n"), []byte("\n"))
+}
+
+// isArtifactNotFound returns true if the error wraps an HTTP 404 from the CPI download API,
+// indicating the artifact does not exist on that tenant (first delivery, not yet imported).
+func isArtifactNotFound(err error) bool {
+	var httpErr *env.HttpResponseError
+	return errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound
+}
+
+// recordNotFoundSnapshot creates or updates a snapshot with status=not_found for the given
+// artifact+tenant. Uses sentinel version "0.0.0" (real versions are never 0.0.0 in CPI).
+// If a not_found row already exists, it updates the timestamp. This is idempotent.
+func (s *Service) recordNotFoundSnapshot(req GitSyncRequest) {
+	now := time.Now()
+	snap := db.GitArtifactSnapshot{
+		ArtifactID:    req.ArtifactID,
+		Version:       notFoundVersion,
+		CpiTenantID:   req.CpiTenantID,
+		PackageID:     req.PackageID,
+		ArtifactType:  req.ArtifactType,
+		TriggerSource: req.TriggerSource,
+		Status:        GitSnapshotNotFound,
+		TriggeredAt:   now,
+		CompletedAt:   &now,
+	}
+	if err := s.DB.Create(&snap).Error; err != nil {
+		// Unique constraint hit → already exists, update timestamp
+		s.DB.Model(&db.GitArtifactSnapshot{}).
+			Where("artifact_id = ? AND version = ? AND cpi_tenant_id = ?", req.ArtifactID, notFoundVersion, req.CpiTenantID).
+			Updates(map[string]any{"status": GitSnapshotNotFound, "triggered_at": now, "completed_at": now, "error": ""})
+	}
 }
 
 func isBinaryPath(path string) bool {
