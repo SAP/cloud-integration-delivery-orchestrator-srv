@@ -46,9 +46,8 @@ const (
 	Artifact_Type_SvcInterface ArtifactType = "Service Interface"
 )
 
-// ArtifactTypeToNavProperty maps artifact types to their CPI OData Navigation Property / EntitySet name.
-// Used for Package Artifacts query, Direct Artifact query, and Download.
-var ArtifactTypeToNavProperty = map[ArtifactType]string{
+// artifactTypeToNavProperty maps artifact types to their CPI OData Navigation Property / EntitySet name.
+var artifactTypeToNavProperty = map[ArtifactType]string{
 	Artifact_Type_Iflow:        "IntegrationDesigntimeArtifacts",
 	Artifact_Type_Sc:           "ScriptCollectionDesigntimeArtifacts",
 	Artifact_Type_ValueMapping: "ValueMappingDesigntimeArtifacts",
@@ -59,13 +58,26 @@ var ArtifactTypeToNavProperty = map[ArtifactType]string{
 	Artifact_Type_SvcInterface: "ServiceInterfaceDesigntimeArtifacts",
 }
 
-// ArtifactTypeToDeployEndpoint maps deployable artifact types to their CPI deploy endpoint.
-// If a type is NOT in this map, it is not deployable.
-var ArtifactTypeToDeployEndpoint = map[ArtifactType]string{
+// artifactTypeToDeployEndpoint maps deployable artifact types to their CPI deploy endpoint.
+var artifactTypeToDeployEndpoint = map[ArtifactType]string{
 	Artifact_Type_Iflow:        "DeployIntegrationDesigntimeArtifact",
 	Artifact_Type_Sc:           "DeployScriptCollectionDesigntimeArtifact",
 	Artifact_Type_ValueMapping: "DeployValueMappingDesigntimeArtifact",
 	Artifact_Type_MsgMapping:   "DeployMessageMappingDesigntimeArtifact",
+}
+
+// NavProperty returns the CPI OData Navigation Property for the given artifact type.
+// Returns ("", false) if the type is not recognized.
+func NavProperty(t ArtifactType) (string, bool) {
+	v, ok := artifactTypeToNavProperty[t]
+	return v, ok
+}
+
+// DeployEndpoint returns the CPI deploy endpoint for the given artifact type.
+// Returns ("", false) if the type is not deployable.
+func DeployEndpoint(t ArtifactType) (string, bool) {
+	v, ok := artifactTypeToDeployEndpoint[t]
+	return v, ok
 }
 
 // AllArtifactTypes returns all supported artifact types in a stable order for parallel queries.
@@ -79,7 +91,7 @@ func AllArtifactTypes() []ArtifactType {
 
 // IsDeployable returns true if the artifact type has a deploy endpoint.
 func IsDeployable(t ArtifactType) bool {
-	_, ok := ArtifactTypeToDeployEndpoint[t]
+	_, ok := artifactTypeToDeployEndpoint[t]
 	return ok
 }
 

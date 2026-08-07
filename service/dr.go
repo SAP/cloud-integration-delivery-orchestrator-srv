@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"mmt-delivery/consts"
 	"mmt-delivery/db"
 	"mmt-delivery/pkg/lifecycle"
 	"time"
@@ -281,6 +282,10 @@ func (s *Service) InsertTenantOps(ctx context.Context, drID uint, ops []db.Artif
 		op.DeliveryRequestID = drID
 		op.ImportState = lifecycle.ImportNotStarted
 		op.RequestState = lifecycle.RequestPending
+		// Non-deployable artifact types always skip deploy
+		if !consts.IsDeployable(op.ArtifactType) {
+			op.SkipDeploy = true
+		}
 		if op.SkipDeploy {
 			op.DeployState = lifecycle.DeployDisabled
 		} else {

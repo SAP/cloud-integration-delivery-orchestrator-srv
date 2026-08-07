@@ -192,8 +192,8 @@ type singleArtifactResp struct {
 // Uses: GET /api/v1/IntegrationPackages('{packageID}')/{NavProperty}
 // Note: draft artifacts will have Version="Active" in the response.
 func (c *CpiClient) GetPackageArtifactsByType(ctx context.Context, packageID string, artifactType consts.ArtifactType) ([]ArtifactCommonItem, error) {
-	navProperty := consts.ArtifactTypeToNavProperty[artifactType]
-	if navProperty == "" {
+	navProperty, ok := consts.NavProperty(artifactType)
+	if !ok {
 		return nil, fmt.Errorf("GetPackageArtifactsByType: unsupported artifact type: %s", artifactType)
 	}
 	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
@@ -219,8 +219,8 @@ func (c *CpiClient) GetPackageArtifactsByType(ctx context.Context, packageID str
 // Uses: GET /api/v1/{NavProperty}(Id='{artifactID}',Version='{version}')
 // When version="active", the response contains the actual formal version number.
 func (c *CpiClient) GetDesignTimeArtifact(ctx context.Context, artifactID, version string, artifactType consts.ArtifactType) (ArtifactCommonItem, error) {
-	navProperty := consts.ArtifactTypeToNavProperty[artifactType]
-	if navProperty == "" {
+	navProperty, ok := consts.NavProperty(artifactType)
+	if !ok {
 		return ArtifactCommonItem{}, fmt.Errorf("GetDesignTimeArtifact: unsupported artifact type: %s", artifactType)
 	}
 	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
@@ -248,7 +248,7 @@ func (c *CpiClient) GetDesignTimeArtifact(ctx context.Context, artifactID, versi
 // DeployArtifact deploys a design-time artifact via the type-specific deploy endpoint.
 // Returns taskID for checking deploy status. Returns error if the type is not deployable.
 func (c *CpiClient) DeployArtifact(ctx context.Context, artifactID, artifactVersion string, artifactType consts.ArtifactType) (string, error) {
-	endpoint, ok := consts.ArtifactTypeToDeployEndpoint[artifactType]
+	endpoint, ok := consts.DeployEndpoint(artifactType)
 	if !ok {
 		return "", fmt.Errorf("artifact type %s is not deployable (artifact %s:%s)", artifactType, artifactID, artifactVersion)
 	}
@@ -412,8 +412,8 @@ func (c *CpiClient) RuntimeArtifact(ctx context.Context, artifactId string) (Run
 // DownloadArtifactZip downloads the artifact content as a ZIP file from CPI design-time API.
 // Uses: GET /api/v1/{NavProperty}(Id='{artifactID}',Version='{version}')/$value
 func (c *CpiClient) DownloadArtifactZip(ctx context.Context, artifactID, version string, artifactType consts.ArtifactType) ([]byte, error) {
-	navProperty := consts.ArtifactTypeToNavProperty[artifactType]
-	if navProperty == "" {
+	navProperty, ok := consts.NavProperty(artifactType)
+	if !ok {
 		return nil, fmt.Errorf("DownloadArtifactZip: unsupported artifact type %s", artifactType)
 	}
 	childCtx, cancel := context.WithTimeout(ctx, consts.LongRequestTimeout)

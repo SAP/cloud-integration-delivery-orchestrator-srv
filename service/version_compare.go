@@ -1114,7 +1114,7 @@ func (s *Service) CreateDRFromMismatch(ctx context.Context, ruleID uint, req Cre
 			ArtifactType:           consts.ArtifactType(art.Type),
 			PackageID:              item.pkg,
 			TransportRequestNumber: "", // empty — to be filled later by TR generation
-			SkipDeploy:             item.skipDeploy,
+			SkipDeploy:             item.skipDeploy || !consts.IsDeployable(consts.ArtifactType(art.Type)),
 		}
 
 		// Artifact tech ID comes from the version snapshot (already correct) — no PIR lookup needed.
