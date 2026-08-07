@@ -613,7 +613,7 @@ func TestTriggerVersionCompare_FirstTrigger(t *testing.T) {
 
 	mockClient := &mockCPIClient{
 		packages: []cpi.CPIPackage{{ID: "pkg1"}},
-		iflows:   map[string][]cpi.IflowItem{"pkg1": {}},
+		artifacts: map[string][]cpi.ArtifactCommonItem{"pkg1/" + string(consts.Artifact_Type_Iflow): {}},
 	}
 	factory := func(ctx context.Context, tenant string) (IntegrationService, error) {
 		return mockClient, nil
@@ -709,7 +709,7 @@ func TestTriggerVersionCompare_CooldownExpired(t *testing.T) {
 
 	mockClient := &mockCPIClient{
 		packages: []cpi.CPIPackage{{ID: "pkg1"}},
-		iflows:   map[string][]cpi.IflowItem{"pkg1": {}},
+		artifacts: map[string][]cpi.ArtifactCommonItem{"pkg1/" + string(consts.Artifact_Type_Iflow): {}},
 	}
 	factory := func(ctx context.Context, tenant string) (IntegrationService, error) {
 		return mockClient, nil
@@ -750,14 +750,12 @@ func TestCollectVersionSnapshot_Success(t *testing.T) {
 	clients := map[string]*mockCPIClient{
 		source.PirApiDestinationName: {
 			packages: []cpi.CPIPackage{{ID: "pkg1"}},
-			iflows: map[string][]cpi.IflowItem{
-				"pkg1": {
-					{ArtifactCommonItem: cpi.ArtifactCommonItem{ID: "iflow1", Name: "IFlow 1", Version: "1.0.0", PackageID: "pkg1"}},
+			artifacts: map[string][]cpi.ArtifactCommonItem{
+				"pkg1/" + string(consts.Artifact_Type_Iflow): {
+					{ID: "iflow1", Name: "IFlow 1", Version: "1.0.0", PackageID: "pkg1"},
 				},
-			},
-			scriptColls: map[string][]cpi.ScriptCollectionItem{
-				"pkg1": {
-					{ArtifactCommonItem: cpi.ArtifactCommonItem{ID: "sc1", Name: "SC 1", Version: "2.0.0", PackageID: "pkg1"}},
+				"pkg1/" + string(consts.Artifact_Type_Sc): {
+					{ID: "sc1", Name: "SC 1", Version: "2.0.0", PackageID: "pkg1"},
 				},
 			},
 			runtimeArts: []cpi.RuntimeArtifact{
@@ -766,14 +764,12 @@ func TestCollectVersionSnapshot_Success(t *testing.T) {
 			},
 		},
 		target.PirApiDestinationName: {
-			iflows: map[string][]cpi.IflowItem{
-				"pkg1": {
-					{ArtifactCommonItem: cpi.ArtifactCommonItem{ID: "iflow1", Name: "IFlow 1", Version: "0.9.0", PackageID: "pkg1"}},
+			artifacts: map[string][]cpi.ArtifactCommonItem{
+				"pkg1/" + string(consts.Artifact_Type_Iflow): {
+					{ID: "iflow1", Name: "IFlow 1", Version: "0.9.0", PackageID: "pkg1"},
 				},
-			},
-			scriptColls: map[string][]cpi.ScriptCollectionItem{
-				"pkg1": {
-					{ArtifactCommonItem: cpi.ArtifactCommonItem{ID: "sc1", Name: "SC 1", Version: "2.0.0", PackageID: "pkg1"}},
+				"pkg1/" + string(consts.Artifact_Type_Sc): {
+					{ID: "sc1", Name: "SC 1", Version: "2.0.0", PackageID: "pkg1"},
 				},
 			},
 			runtimeArts: []cpi.RuntimeArtifact{
@@ -938,15 +934,15 @@ func TestCollectVersionSnapshot_PartialTenantFailure(t *testing.T) {
 	clients := map[string]*mockCPIClient{
 		source.PirApiDestinationName: {
 			packages: []cpi.CPIPackage{{ID: "pkg1"}},
-			iflows: map[string][]cpi.IflowItem{
-				"pkg1": {{ArtifactCommonItem: cpi.ArtifactCommonItem{ID: "iflow1", Name: "Integration Flow", Version: "1.0", PackageID: "pkg1"}}},
+			artifacts: map[string][]cpi.ArtifactCommonItem{
+				"pkg1/" + string(consts.Artifact_Type_Iflow): {{ID: "iflow1", Name: "Integration Flow", Version: "1.0", PackageID: "pkg1"}},
 			},
 			runtimeArts: []cpi.RuntimeArtifact{{ID: "iflow1", Version: "1.0", Status: consts.Artifact_Rt_Started}},
 		},
 		target.PirApiDestinationName: {
 			// Runtime succeeds but iflow fetch will fail
-			iflowsErr:   map[string]error{"pkg1": fmt.Errorf("timeout")},
-			runtimeArts: []cpi.RuntimeArtifact{},
+			artifactsErr: map[string]error{"pkg1/" + string(consts.Artifact_Type_Iflow): fmt.Errorf("timeout")},
+			runtimeArts:  []cpi.RuntimeArtifact{},
 		},
 	}
 	factory := func(ctx context.Context, tenant string) (IntegrationService, error) {
@@ -1294,10 +1290,10 @@ func TestTrigger_WithIncludedPackagesFilter(t *testing.T) {
 			{ID: "PkgB"},
 			{ID: "TemplatePkg"}, // should be excluded when whitelist is active
 		},
-		iflows: map[string][]cpi.IflowItem{
-			"PkgA":        {{ArtifactCommonItem: cpi.ArtifactCommonItem{ID: "FlowA", Name: "Flow A", Version: "1.0.0"}}},
-			"PkgB":        {{ArtifactCommonItem: cpi.ArtifactCommonItem{ID: "FlowB", Name: "Flow B", Version: "2.0.0"}}},
-			"TemplatePkg": {{ArtifactCommonItem: cpi.ArtifactCommonItem{ID: "FlowT", Name: "Flow T", Version: "1.0.0"}}},
+		artifacts: map[string][]cpi.ArtifactCommonItem{
+			"PkgA/" + string(consts.Artifact_Type_Iflow):        {{ID: "FlowA", Name: "Flow A", Version: "1.0.0"}},
+			"PkgB/" + string(consts.Artifact_Type_Iflow):        {{ID: "FlowB", Name: "Flow B", Version: "2.0.0"}},
+			"TemplatePkg/" + string(consts.Artifact_Type_Iflow): {{ID: "FlowT", Name: "Flow T", Version: "1.0.0"}},
 		},
 		runtimeArts: []cpi.RuntimeArtifact{
 			{ID: "FlowA", Version: "1.0.0"},
@@ -1374,9 +1370,9 @@ func TestTrigger_EmptyWhitelistIncludesAll(t *testing.T) {
 			{ID: "PkgA"},
 			{ID: "PkgB"},
 		},
-		iflows: map[string][]cpi.IflowItem{
-			"PkgA": {{ArtifactCommonItem: cpi.ArtifactCommonItem{ID: "FlowA", Name: "Flow A", Version: "1.0.0"}}},
-			"PkgB": {{ArtifactCommonItem: cpi.ArtifactCommonItem{ID: "FlowB", Name: "Flow B", Version: "2.0.0"}}},
+		artifacts: map[string][]cpi.ArtifactCommonItem{
+			"PkgA/" + string(consts.Artifact_Type_Iflow): {{ID: "FlowA", Name: "Flow A", Version: "1.0.0"}},
+			"PkgB/" + string(consts.Artifact_Type_Iflow): {{ID: "FlowB", Name: "Flow B", Version: "2.0.0"}},
 		},
 		runtimeArts: []cpi.RuntimeArtifact{},
 	}
@@ -2113,15 +2109,15 @@ func TestCreateDR_VersionDowngradeSkip(t *testing.T) {
 		},
 	})
 
-	// CPI mock: GetDesignTimeIflow returns the target's current version
-	// For the downgrade check, checkVersionDowngradeInTenant calls GetDesignTimeIflow(ctx, techID, "active")
+	// CPI mock: GetDesignTimeArtifact returns the target's current version
+	// For the downgrade check, checkVersionDowngradeInTenant calls GetDesignTimeArtifact(ctx, techID, "active", type)
 	// and compares the returned version to the source version.
 	factoryWithDowngrade := func(ctx context.Context, tenant string) (IntegrationService, error) {
-		// If this is the target tenant, GetDesignTimeIflow returns version 1.0.5 (for dg-iflow)
+		// If this is the target tenant, GetDesignTimeArtifact returns version 1.0.5 (for dg-iflow)
 		// and 1.0.8 (for ok-iflow)
 		if tenant == target.PirApiDestinationName {
 			return &mockCPIClientWithDesignTime{
-				iflowVersions: map[string]string{
+				artifactVersions: map[string]string{
 					"dg-iflow": "1.0.5", // higher than source 1.0.1 → downgrade
 					"ok-iflow": "1.0.8", // lower than source 1.0.9 → ok
 				},

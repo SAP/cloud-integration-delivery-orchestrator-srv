@@ -200,10 +200,8 @@ func (tc *testCleanup) trackDR(id uint)     { tc.drIDs = append(tc.drIDs, id) }
 type mockCPIClient struct {
 	packages       []cpi.CPIPackage
 	packagesErr    error
-	iflows         map[string][]cpi.IflowItem // key = packageID
-	iflowsErr      map[string]error
-	scriptColls    map[string][]cpi.ScriptCollectionItem // key = packageID
-	scriptCollsErr map[string]error
+	artifacts      map[string][]cpi.ArtifactCommonItem // key = packageID+artifactType or just packageID
+	artifactsErr   map[string]error
 	runtimeArts    []cpi.RuntimeArtifact
 	runtimeArtsErr error
 }
@@ -211,21 +209,22 @@ type mockCPIClient struct {
 func (m *mockCPIClient) GetPackages(ctx context.Context) ([]cpi.CPIPackage, error) {
 	return m.packages, m.packagesErr
 }
-func (m *mockCPIClient) GetPackageIflows(ctx context.Context, packageID string) ([]cpi.IflowItem, error) {
-	if m.iflowsErr != nil {
-		if e, ok := m.iflowsErr[packageID]; ok {
+func (m *mockCPIClient) GetPackageArtifactsByType(ctx context.Context, packageID string, artifactType consts.ArtifactType) ([]cpi.ArtifactCommonItem, error) {
+	key := packageID + "/" + string(artifactType)
+	if m.artifactsErr != nil {
+		if e, ok := m.artifactsErr[key]; ok {
+			return nil, e
+		}
+		// Fallback: check packageID-only key
+		if e, ok := m.artifactsErr[packageID]; ok {
 			return nil, e
 		}
 	}
-	return m.iflows[packageID], nil
-}
-func (m *mockCPIClient) GetPackageScriptcollections(ctx context.Context, packageID string) ([]cpi.ScriptCollectionItem, error) {
-	if m.scriptCollsErr != nil {
-		if e, ok := m.scriptCollsErr[packageID]; ok {
-			return nil, e
-		}
+	if items, ok := m.artifacts[key]; ok {
+		return items, nil
 	}
-	return m.scriptColls[packageID], nil
+	// Fallback: return empty for types not explicitly mocked
+	return nil, nil
 }
 func (m *mockCPIClient) GetRuntimeArtifacts(ctx context.Context) ([]cpi.RuntimeArtifact, error) {
 	return m.runtimeArts, m.runtimeArtsErr
@@ -236,11 +235,8 @@ func (m *mockCPIClient) DeployArtifact(ctx context.Context, artifactID, artifact
 func (m *mockCPIClient) RuntimeArtifact(ctx context.Context, artifactId string) (cpi.RuntimeArtifact, error) {
 	return cpi.RuntimeArtifact{}, nil
 }
-func (m *mockCPIClient) GetDesignTimeIflow(ctx context.Context, iflowID string, iflowVersion string) (cpi.IflowItem, error) {
-	return cpi.IflowItem{}, nil
-}
-func (m *mockCPIClient) GetDesignTimeScriptCollection(ctx context.Context, scriptCollectionID string, scriptCollectionVersion string) (cpi.ScriptCollectionItem, error) {
-	return cpi.ScriptCollectionItem{}, nil
+func (m *mockCPIClient) GetDesignTimeArtifact(ctx context.Context, artifactID, version string, artifactType consts.ArtifactType) (cpi.ArtifactCommonItem, error) {
+	return cpi.ArtifactCommonItem{}, nil
 }
 func (m *mockCPIClient) DownloadArtifactZip(ctx context.Context, artifactID, version string, artifactType consts.ArtifactType) ([]byte, error) {
 	return nil, nil
@@ -250,29 +246,18 @@ func (m *mockCPIClient) DownloadArtifactZip(ctx context.Context, artifactID, ver
 // Used by tests that exercise checkVersionDowngradeInTenant.
 type mockCPIClientWithDesignTime struct {
 	mockCPIClient
-	iflowVersions            map[string]string // artifactID → version
-	scriptCollectionVersions map[string]string
-	notFoundAs404            bool // when true, missing artifacts return HttpResponseError{404}
+	artifactVersions map[string]string // artifactID → version (type-agnostic for simplicity)
+	notFoundAs404    bool              // when true, missing artifacts return HttpResponseError{404}
 }
 
-func (m *mockCPIClientWithDesignTime) GetDesignTimeIflow(ctx context.Context, iflowID string, iflowVersion string) (cpi.IflowItem, error) {
-	if v, ok := m.iflowVersions[iflowID]; ok {
-		return cpi.IflowItem{ArtifactCommonItem: cpi.ArtifactCommonItem{ID: iflowID, Version: v}}, nil
+func (m *mockCPIClientWithDesignTime) GetDesignTimeArtifact(ctx context.Context, artifactID, version string, artifactType consts.ArtifactType) (cpi.ArtifactCommonItem, error) {
+	if v, ok := m.artifactVersions[artifactID]; ok {
+		return cpi.ArtifactCommonItem{ID: artifactID, Version: v}, nil
 	}
 	if m.notFoundAs404 {
-		return cpi.IflowItem{}, &env.HttpResponseError{StatusCode: 404}
+		return cpi.ArtifactCommonItem{}, &env.HttpResponseError{StatusCode: 404}
 	}
-	return cpi.IflowItem{}, fmt.Errorf("iflow %s not found", iflowID)
-}
-
-func (m *mockCPIClientWithDesignTime) GetDesignTimeScriptCollection(ctx context.Context, scID string, scVersion string) (cpi.ScriptCollectionItem, error) {
-	if v, ok := m.scriptCollectionVersions[scID]; ok {
-		return cpi.ScriptCollectionItem{ArtifactCommonItem: cpi.ArtifactCommonItem{ID: scID, Version: v}}, nil
-	}
-	if m.notFoundAs404 {
-		return cpi.ScriptCollectionItem{}, &env.HttpResponseError{StatusCode: 404}
-	}
-	return cpi.ScriptCollectionItem{}, fmt.Errorf("script collection %s not found", scID)
+	return cpi.ArtifactCommonItem{}, fmt.Errorf("artifact %s not found", artifactID)
 }
 
 type mockRuntimeCPI struct {

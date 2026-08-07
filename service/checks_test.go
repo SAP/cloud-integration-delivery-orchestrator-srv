@@ -254,7 +254,7 @@ func TestDeliveryRuleCheck_RejectsDowngradeInTargetTenant(t *testing.T) {
 
 	svc := newTestService(func(ctx context.Context, tenant string) (IntegrationService, error) {
 		return &mockCPIClientWithDesignTime{
-			iflowVersions: map[string]string{
+			artifactVersions: map[string]string{
 				"artifact-1": "1.2.0",
 			},
 		}, nil

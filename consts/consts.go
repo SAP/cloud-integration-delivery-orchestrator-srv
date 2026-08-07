@@ -36,11 +36,52 @@ const (
 )
 
 const (
-	Artifact_Type_Iflow   ArtifactType = "Integration Flow"
-	Artifact_Type_Sc      ArtifactType = "Script Collection"
-	Artifact_Type_Odata   ArtifactType = "OData Service"
-	Artifact_Type_Adapter ArtifactType = "Integration Adapter"
+	Artifact_Type_Iflow        ArtifactType = "Integration Flow"
+	Artifact_Type_Sc           ArtifactType = "Script Collection"
+	Artifact_Type_ValueMapping ArtifactType = "Value Mapping"
+	Artifact_Type_MsgMapping   ArtifactType = "Message Mapping"
+	Artifact_Type_DataType     ArtifactType = "Data Type"
+	Artifact_Type_MsgType      ArtifactType = "Message Type"
+	Artifact_Type_FaultMsgType ArtifactType = "Fault Message Type"
+	Artifact_Type_SvcInterface ArtifactType = "Service Interface"
 )
+
+// ArtifactTypeToNavProperty maps artifact types to their CPI OData Navigation Property / EntitySet name.
+// Used for Package Artifacts query, Direct Artifact query, and Download.
+var ArtifactTypeToNavProperty = map[ArtifactType]string{
+	Artifact_Type_Iflow:        "IntegrationDesigntimeArtifacts",
+	Artifact_Type_Sc:           "ScriptCollectionDesigntimeArtifacts",
+	Artifact_Type_ValueMapping: "ValueMappingDesigntimeArtifacts",
+	Artifact_Type_MsgMapping:   "MessageMappingDesigntimeArtifacts",
+	Artifact_Type_DataType:     "DataTypeDesigntimeArtifacts",
+	Artifact_Type_MsgType:      "MessageTypeDesigntimeArtifacts",
+	Artifact_Type_FaultMsgType: "FaultMessageTypeDesigntimeArtifacts",
+	Artifact_Type_SvcInterface: "ServiceInterfaceDesigntimeArtifacts",
+}
+
+// ArtifactTypeToDeployEndpoint maps deployable artifact types to their CPI deploy endpoint.
+// If a type is NOT in this map, it is not deployable.
+var ArtifactTypeToDeployEndpoint = map[ArtifactType]string{
+	Artifact_Type_Iflow:        "DeployIntegrationDesigntimeArtifact",
+	Artifact_Type_Sc:           "DeployScriptCollectionDesigntimeArtifact",
+	Artifact_Type_ValueMapping: "DeployValueMappingDesigntimeArtifact",
+	Artifact_Type_MsgMapping:   "DeployMessageMappingDesigntimeArtifact",
+}
+
+// AllArtifactTypes returns all supported artifact types in a stable order for parallel queries.
+func AllArtifactTypes() []ArtifactType {
+	return []ArtifactType{
+		Artifact_Type_Iflow, Artifact_Type_Sc, Artifact_Type_ValueMapping,
+		Artifact_Type_MsgMapping, Artifact_Type_DataType, Artifact_Type_MsgType,
+		Artifact_Type_FaultMsgType, Artifact_Type_SvcInterface,
+	}
+}
+
+// IsDeployable returns true if the artifact type has a deploy endpoint.
+func IsDeployable(t ArtifactType) bool {
+	_, ok := ArtifactTypeToDeployEndpoint[t]
+	return ok
+}
 
 const (
 	Job_Type_Import = "Import"

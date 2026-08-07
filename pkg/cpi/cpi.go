@@ -50,7 +50,7 @@ type CpiClient struct {
 }
 
 // maxConcurrentRequests limits parallel outgoing requests per CPI tenant to avoid 429.
-const maxConcurrentRequests = 5
+const maxConcurrentRequests = 10
 
 func NewClient(ctx context.Context, destinationName string, resolver *cf.DestinationServiceClient) (*CpiClient, error) {
 	cpiDest, err := resolver.GetDestination(ctx, destinationName)
@@ -177,157 +177,94 @@ type ArtifactCommonItem struct {
 	ModifiedAt      string      `json:"ModifiedAt"`
 	ArtifactContent interface{} `json:"ArtifactContent"`
 }
-type IflowItem struct {
-	ArtifactCommonItem
-	Configurations struct {
-		Deferred struct {
-			URI string `json:"uri"`
-		} `json:"__deferred"`
-	} `json:"Configurations"`
-	Resources struct {
-		Deferred struct {
-			URI string `json:"uri"`
-		} `json:"__deferred"`
-	} `json:"Resources"`
-	Metadata struct {
-		ID          string `json:"id"`
-		URI         string `json:"uri"`
-		Type        string `json:"type"`
-		ContentType string `json:"content_type"`
-		MediaSrc    string `json:"media_src"`
-		EditMedia   string `json:"edit_media"`
-	} `json:"__metadata"`
-}
 
-type PackageIflowsResp struct {
+type packageArtifactsResp struct {
 	D struct {
-		Results []IflowItem `json:"results"`
+		Results []ArtifactCommonItem `json:"results"`
 	} `json:"d"`
 }
 
-// get all iflows in a package
-func (c *CpiClient) GetPackageIflows(ctx context.Context, packageID string) ([]IflowItem, error) {
+type singleArtifactResp struct {
+	D ArtifactCommonItem `json:"d"`
+}
+
+// GetPackageArtifactsByType queries all artifacts of a given type within a package.
+// Uses: GET /api/v1/IntegrationPackages('{packageID}')/{NavProperty}
+// Note: draft artifacts will have Version="Active" in the response.
+func (c *CpiClient) GetPackageArtifactsByType(ctx context.Context, packageID string, artifactType consts.ArtifactType) ([]ArtifactCommonItem, error) {
+	navProperty := consts.ArtifactTypeToNavProperty[artifactType]
+	if navProperty == "" {
+		return nil, fmt.Errorf("GetPackageArtifactsByType: unsupported artifact type: %s", artifactType)
+	}
 	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
 	defer cancel()
-	fullURL := fmt.Sprintf("%s/IntegrationPackages('%s')/IntegrationDesigntimeArtifacts", c.ApiURL, packageID)
-	logger(ctx).Infow("get package iflows", "package_id", packageID)
+	fullURL := fmt.Sprintf("%s/IntegrationPackages('%s')/%s", c.ApiURL, packageID, navProperty)
+	logger(ctx).Infow("get package artifacts", "package_id", packageID, "type", artifactType)
 	request := env.HttpRequest{
 		Method: http.MethodGet,
 		ApiURL: fullURL,
 	}
 	respBodyContent, errReq := c.Do(childCtx, &request)
 	if errReq != nil {
-		return []IflowItem{}, fmt.Errorf("GetPackageIflows: %w", errReq)
+		return nil, fmt.Errorf("GetPackageArtifactsByType(%s/%s): %w", packageID, navProperty, errReq)
 	}
-	var iflowsResp PackageIflowsResp
-	if err := json.Unmarshal(respBodyContent, &iflowsResp); err != nil {
-		return []IflowItem{}, fmt.Errorf("GetPackageIflows: unmarshal: %w", err)
+	var resp packageArtifactsResp
+	if err := json.Unmarshal(respBodyContent, &resp); err != nil {
+		return nil, fmt.Errorf("GetPackageArtifactsByType(%s/%s): unmarshal: %w", packageID, navProperty, err)
 	}
-
-	return iflowsResp.D.Results, nil
+	return resp.D.Results, nil
 }
 
-type IflowResp struct {
-	D IflowItem `json:"d"`
-}
-
-// Get an integration flow by Id and version.
-func (c *CpiClient) GetPackageIflow(ctx context.Context, packageID string, iflowID string, iflowVersion string) (IflowItem, error) {
+// GetDesignTimeArtifact queries a single artifact by ID and version via Direct API.
+// Uses: GET /api/v1/{NavProperty}(Id='{artifactID}',Version='{version}')
+// When version="active", the response contains the actual formal version number.
+func (c *CpiClient) GetDesignTimeArtifact(ctx context.Context, artifactID, version string, artifactType consts.ArtifactType) (ArtifactCommonItem, error) {
+	navProperty := consts.ArtifactTypeToNavProperty[artifactType]
+	if navProperty == "" {
+		return ArtifactCommonItem{}, fmt.Errorf("GetDesignTimeArtifact: unsupported artifact type: %s", artifactType)
+	}
 	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
 	defer cancel()
-	fullURL := fmt.Sprintf("%s/IntegrationPackages('%s')/IntegrationDesigntimeArtifacts(Id='%s',Version='%s')", c.ApiURL, packageID, iflowID, iflowVersion)
-	logger(ctx).Infow("get package iflow", "iflow_id", iflowID, "package_id", packageID)
+	fullURL := fmt.Sprintf("%s/%s(Id='%s',Version='%s')", c.ApiURL, navProperty, artifactID, version)
+	logger(ctx).Infow("get design time artifact", "artifact_id", artifactID, "type", artifactType)
 	request := env.HttpRequest{
 		Method: http.MethodGet,
 		ApiURL: fullURL,
 	}
 	respBodyContent, errReq := c.Do(childCtx, &request)
 	if errReq != nil {
-		return IflowItem{}, fmt.Errorf("GetPackageIflow: %w", errReq)
+		return ArtifactCommonItem{}, fmt.Errorf("GetDesignTimeArtifact(%s:%s): %w", artifactID, version, errReq)
 	}
-	var iflowResp IflowResp
-	if err := json.Unmarshal(respBodyContent, &iflowResp); err != nil {
-		return IflowItem{}, fmt.Errorf("GetPackageIflow: unmarshal: %w", err)
+	var resp singleArtifactResp
+	if err := json.Unmarshal(respBodyContent, &resp); err != nil {
+		return ArtifactCommonItem{}, fmt.Errorf("GetDesignTimeArtifact(%s:%s): unmarshal: %w", artifactID, version, err)
 	}
-
-	if iflowResp.D.ID == "" {
-		return IflowItem{}, fmt.Errorf("design time iflow %s:%s not found: %s", iflowID, iflowVersion, string(respBodyContent))
+	if resp.D.ID == "" {
+		return ArtifactCommonItem{}, fmt.Errorf("design time artifact %s:%s not found: %s", artifactID, version, string(respBodyContent))
 	}
-
-	return iflowResp.D, nil
+	return resp.D, nil
 }
 
-// Get a design time integration flow by Id and version.
-func (c *CpiClient) GetDesignTimeIflow(ctx context.Context, iflowID string, iflowVersion string) (IflowItem, error) {
-	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
-	defer cancel()
-	fullURL := fmt.Sprintf("%s/IntegrationDesigntimeArtifacts(Id='%s',Version='%s')", c.ApiURL, iflowID, iflowVersion)
-
-	logger(ctx).Infow("get design time iflow", "iflow_id", iflowID)
-	request := env.HttpRequest{
-		Method: http.MethodGet,
-		ApiURL: fullURL,
-	}
-	respBodyContent, errReq := c.Do(childCtx, &request)
-	if errReq != nil {
-		return IflowItem{}, fmt.Errorf("GetDesignTimeIflow: %w", errReq)
-	}
-	var iflowResp IflowResp
-	if err := json.Unmarshal(respBodyContent, &iflowResp); err != nil {
-		return IflowItem{}, fmt.Errorf("GetDesignTimeIflow: unmarshal: %w", err)
-	}
-
-	return iflowResp.D, nil
-}
-
-// Deploy a design time integration flow
-func (c *CpiClient) DeployIflow(ctx context.Context, iflowID string, iflowVersion string) (string, error) {
-	childCtx, cancel := context.WithTimeout(ctx, consts.ImportTimeout)
-	defer cancel()
-	var taskID string
-	fullURL := fmt.Sprintf("%s/DeployIntegrationDesigntimeArtifact?Id='%s'&Version='%s'", c.ApiURL, iflowID, iflowVersion)
-	logger(ctx).Infow("deploy iflow", "iflow_id", iflowID)
-	request := env.HttpRequest{
-		Method: http.MethodPost,
-		ApiURL: fullURL,
-	}
-	respBodyContent, errReq := c.Do(childCtx, &request)
-	if errReq != nil {
-		return taskID, fmt.Errorf("DeployIflow: %w", errReq)
-	}
-	taskID = string(respBodyContent)
-	return taskID, nil
-}
-
-// deploy a design time script collection
-func (c *CpiClient) DeployScriptCollection(ctx context.Context, scriptCollectionID string, scriptCollectionVersion string) (string, error) {
-	childCtx, cancel := context.WithTimeout(ctx, consts.ImportTimeout)
-	defer cancel()
-	var taskID string
-	fullURL := fmt.Sprintf("%s/DeployScriptCollectionDesigntimeArtifact?Id='%s'&Version='%s'", c.ApiURL, scriptCollectionID, scriptCollectionVersion)
-	logger(ctx).Infow("deploy script collection", "script_collection_id", scriptCollectionID)
-	request := env.HttpRequest{
-		Method: http.MethodPost,
-		ApiURL: fullURL,
-	}
-	respBodyContent, errReq := c.Do(childCtx, &request)
-	if errReq != nil {
-		return "", fmt.Errorf("DeployScriptCollection: %w", errReq)
-	}
-	taskID = string(respBodyContent)
-	return taskID, nil
-}
-
-// NOTE: currently only support iflow and script collection deployment
-// return taskID for checking deploy status
+// DeployArtifact deploys a design-time artifact via the type-specific deploy endpoint.
+// Returns taskID for checking deploy status. Returns error if the type is not deployable.
 func (c *CpiClient) DeployArtifact(ctx context.Context, artifactID, artifactVersion string, artifactType consts.ArtifactType) (string, error) {
-	switch artifactType {
-	case consts.Artifact_Type_Iflow:
-		return c.DeployIflow(ctx, artifactID, artifactVersion)
-	case consts.Artifact_Type_Sc:
-		return c.DeployScriptCollection(ctx, artifactID, artifactVersion)
+	endpoint, ok := consts.ArtifactTypeToDeployEndpoint[artifactType]
+	if !ok {
+		return "", fmt.Errorf("artifact type %s is not deployable (artifact %s:%s)", artifactType, artifactID, artifactVersion)
 	}
-	return "", fmt.Errorf("unsupported artifact type %s for artifact %s:%s", artifactType, artifactID, artifactVersion)
+	childCtx, cancel := context.WithTimeout(ctx, consts.ImportTimeout)
+	defer cancel()
+	fullURL := fmt.Sprintf("%s/%s?Id='%s'&Version='%s'", c.ApiURL, endpoint, artifactID, artifactVersion)
+	logger(ctx).Infow("deploy artifact", "artifact_id", artifactID, "type", artifactType)
+	request := env.HttpRequest{
+		Method: http.MethodPost,
+		ApiURL: fullURL,
+	}
+	respBodyContent, errReq := c.Do(childCtx, &request)
+	if errReq != nil {
+		return "", fmt.Errorf("DeployArtifact(%s:%s): %w", artifactID, artifactVersion, errReq)
+	}
+	return string(respBodyContent), nil
 }
 
 type DeployStatus struct {
@@ -362,110 +299,6 @@ func (c *CpiClient) CheckDeployStatusByTaskID(ctx context.Context, taskID string
 		return "", fmt.Errorf("CheckDeployStatusByTaskID: unmarshal: %w", err)
 	}
 	return deployStatus.D.Status, nil
-}
-
-func (c *CpiClient) DeleteIflow(ctx context.Context, iflowID string, iflowVersion string) error {
-	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
-	defer cancel()
-	fullURL := fmt.Sprintf("%s/IntegrationDesigntimeArtifacts(Id='%s',Version='%s')", c.ApiURL, iflowID, iflowVersion)
-	logger(ctx).Infow("delete iflow", "iflow_id", iflowID)
-	request := env.HttpRequest{
-		Method: http.MethodGet,
-		ApiURL: fullURL,
-	}
-	_, errReq := c.Do(childCtx, &request)
-	if errReq != nil {
-		return fmt.Errorf("DeleteIflow: %w", errReq)
-	}
-
-	return nil
-
-}
-
-type ScriptCollectionItem struct {
-	ArtifactCommonItem
-	Metadata struct {
-		ID          string `json:"id"`
-		URI         string `json:"uri"`
-		Type        string `json:"type"`
-		ContentType string `json:"content_type"`
-		MediaSrc    string `json:"media_src"`
-		EditMedia   string `json:"edit_media"`
-	} `json:"__metadata"`
-}
-type ScriptCollectionsResp struct {
-	D struct {
-		Results []ScriptCollectionItem `json:"results"`
-	} `json:"d"`
-}
-
-// get all script collections under a package
-func (c *CpiClient) GetPackageScriptcollections(ctx context.Context, packageID string) ([]ScriptCollectionItem, error) {
-	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
-	defer cancel()
-	fullURL := fmt.Sprintf("%s/IntegrationPackages('%s')/ScriptCollectionDesigntimeArtifacts", c.ApiURL, packageID)
-	logger(ctx).Infow("get package script collections", "package_id", packageID)
-	request := env.HttpRequest{
-		Method: http.MethodGet,
-		ApiURL: fullURL,
-	}
-	respBodyContent, errReq := c.Do(childCtx, &request)
-	if errReq != nil {
-		return []ScriptCollectionItem{}, fmt.Errorf("GetPackageScriptcollections: %w", errReq)
-	}
-	var scriptCollectionsResp ScriptCollectionsResp
-	if err := json.Unmarshal(respBodyContent, &scriptCollectionsResp); err != nil {
-		return []ScriptCollectionItem{}, fmt.Errorf("GetPackageScriptcollections: unmarshal: %w", err)
-	}
-
-	return scriptCollectionsResp.D.Results, nil
-}
-
-type ScriptCollectionResp struct {
-	D ScriptCollectionItem `json:"d"`
-}
-
-// get a design time script collection
-func (c *CpiClient) GetDesignTimeScriptCollection(ctx context.Context, scriptCollectionID string, scriptCollectionVersion string) (ScriptCollectionItem, error) {
-	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
-	defer cancel()
-	fullURL := fmt.Sprintf("%s/ScriptCollectionDesigntimeArtifacts(Id='%s',Version='%s')", c.ApiURL, scriptCollectionID, scriptCollectionVersion)
-	logger(ctx).Infow("get design time script collection", "script_collection_id", scriptCollectionID)
-	request := env.HttpRequest{
-		Method: http.MethodGet,
-		ApiURL: fullURL,
-	}
-	respBodyContent, errReq := c.Do(childCtx, &request)
-	if errReq != nil {
-		return ScriptCollectionItem{}, fmt.Errorf("GetDesignTimeScriptCollection: %w", errReq)
-	}
-	var scriptCollectionResp ScriptCollectionResp
-	if err := json.Unmarshal(respBodyContent, &scriptCollectionResp); err != nil {
-		return ScriptCollectionItem{}, fmt.Errorf("GetDesignTimeScriptCollection: unmarshal: %w", err)
-	}
-
-	if scriptCollectionResp.D.ID == "" {
-		return ScriptCollectionItem{}, fmt.Errorf("design time script collection %s:%s not found: %s", scriptCollectionID, scriptCollectionVersion, string(respBodyContent))
-	}
-
-	return scriptCollectionResp.D, nil
-}
-
-func (c *CpiClient) DeleteScriptCollection(ctx context.Context, scriptCollectionID string, scriptCollectionVersion string) error {
-	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
-	defer cancel()
-	fullURL := fmt.Sprintf("%s/ScriptCollectionDesigntimeArtifacts(Id='%s',Version='%s')", c.ApiURL, scriptCollectionID, scriptCollectionVersion)
-	logger(ctx).Infow("delete script collection", "script_collection_id", scriptCollectionID)
-	request := env.HttpRequest{
-		Method: http.MethodGet,
-		ApiURL: fullURL,
-	}
-	_, errReq := c.Do(childCtx, &request)
-	if errReq != nil {
-		return fmt.Errorf("DeleteScriptCollection: %w", errReq)
-	}
-	return nil
-
 }
 
 func (c *CpiClient) UndeployRuntimeArtifacts(ctx context.Context, artifactID string) error {
@@ -577,20 +410,16 @@ func (c *CpiClient) RuntimeArtifact(ctx context.Context, artifactId string) (Run
 }
 
 // DownloadArtifactZip downloads the artifact content as a ZIP file from CPI design-time API.
+// Uses: GET /api/v1/{NavProperty}(Id='{artifactID}',Version='{version}')/$value
 func (c *CpiClient) DownloadArtifactZip(ctx context.Context, artifactID, version string, artifactType consts.ArtifactType) ([]byte, error) {
+	navProperty := consts.ArtifactTypeToNavProperty[artifactType]
+	if navProperty == "" {
+		return nil, fmt.Errorf("DownloadArtifactZip: unsupported artifact type %s", artifactType)
+	}
 	childCtx, cancel := context.WithTimeout(ctx, consts.LongRequestTimeout)
 	defer cancel()
 
-	var endpoint string
-	switch artifactType {
-	case consts.Artifact_Type_Iflow:
-		endpoint = fmt.Sprintf("%s/IntegrationDesigntimeArtifacts(Id='%s',Version='%s')/$value", c.ApiURL, artifactID, version)
-	case consts.Artifact_Type_Sc:
-		endpoint = fmt.Sprintf("%s/ScriptCollectionDesigntimeArtifacts(Id='%s',Version='%s')/$value", c.ApiURL, artifactID, version)
-	default:
-		return nil, fmt.Errorf("DownloadArtifactZip: unsupported artifact type %s", artifactType)
-	}
-
+	endpoint := fmt.Sprintf("%s/%s(Id='%s',Version='%s')/$value", c.ApiURL, navProperty, artifactID, version)
 	request := env.HttpRequest{
 		Method: http.MethodGet,
 		ApiURL: endpoint,

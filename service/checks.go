@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"mmt-delivery/consts"
 	"mmt-delivery/db"
 	"mmt-delivery/pkg/env"
 	"net/http"
@@ -15,18 +14,36 @@ import (
 )
 
 func (s *Service) DeliveryRuleCheck(ctx context.Context, op *db.ArtifactTenantOperation, rule *db.DeliveryRule) error {
-	// artifact version matches pattern in delivery rule
+	// First priority: reject draft (Active) versions
+	if err := checkDraftVersion(op); err != nil {
+		return err
+	}
+	// Second: artifact version matches pattern in delivery rule
 	if err := checkVersionPattern(op, rule); err != nil {
 		return err
 	}
+	// Third: version downgrade check per target tenant
 	for _, tenant := range rule.IncludedTenants {
 		if op.TenantID == tenant.ID {
 			continue
 		}
-		// before deliver, should check if version would cause downgrade in target tenants
 		if err := s.checkVersionDowngradeInTenant(ctx, op, &tenant); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// isDraftVersion returns true if the version string represents a draft/Active state.
+func isDraftVersion(version string) bool {
+	return strings.EqualFold(version, "active")
+}
+
+// checkDraftVersion rejects operations with draft (Active) versions.
+// Draft artifacts cannot be delivered — only formally versioned artifacts are allowed.
+func checkDraftVersion(op *db.ArtifactTenantOperation) error {
+	if isDraftVersion(op.ArtifactVersion) {
+		return fmt.Errorf("artifact %s has draft version (Active), only formally versioned artifacts can be delivered", op.ArtifactTechID)
 	}
 	return nil
 }
@@ -57,33 +74,19 @@ func (s *Service) checkVersionDowngradeInTenant(ctx context.Context, op *db.Arti
 	if err != nil {
 		return err
 	}
-	sourceVersion := op.ArtifactVersion
-	var targetVersion string
-	switch op.ArtifactType {
-	case consts.Artifact_Type_Iflow:
-		iflow, err := cli.GetDesignTimeIflow(ctx, op.ArtifactTechID, "active")
-		if err != nil {
-			var httpErr *env.HttpResponseError
-			if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
-				return nil // artifact does not exist in target tenant yet — no downgrade risk
-			}
-			return err
+	// Use generic Direct API to get the target's current version
+	art, err := cli.GetDesignTimeArtifact(ctx, op.ArtifactTechID, "active", op.ArtifactType)
+	if err != nil {
+		var httpErr *env.HttpResponseError
+		if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
+			return nil // artifact does not exist in target tenant yet — no downgrade risk
 		}
-		targetVersion = iflow.Version
-	case consts.Artifact_Type_Sc:
-		sc, err := cli.GetDesignTimeScriptCollection(ctx, op.ArtifactTechID, "active")
-		if err != nil {
-			var httpErr *env.HttpResponseError
-			if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
-				return nil // artifact does not exist in target tenant yet — no downgrade risk
-			}
-			return err
-		}
-		targetVersion = sc.Version
+		return err
 	}
-	if compareCPIVersion(sourceVersion, targetVersion) < 0 {
+	targetVersion := art.Version
+	if compareCPIVersion(op.ArtifactVersion, targetVersion) < 0 {
 		return fmt.Errorf("artifact %s: delivering version %s to tenant %s would downgrade existing version %s, please confirm",
-			op.ArtifactTechID, sourceVersion, targetTenant.Name, targetVersion)
+			op.ArtifactTechID, op.ArtifactVersion, targetTenant.Name, targetVersion)
 	}
 	return nil
 }

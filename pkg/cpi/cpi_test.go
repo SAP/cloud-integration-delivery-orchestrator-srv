@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"mmt-delivery/consts"
 	"mmt-delivery/pkg/env"
 )
 
@@ -104,22 +105,22 @@ func TestGetPackages_InvalidJSON(t *testing.T) {
 }
 
 // =============================================================================
-// GetPackageIflows Tests
+// GetPackageArtifactsByType Tests
 // =============================================================================
 
-func TestGetPackageIflows_Success(t *testing.T) {
+func TestGetPackageArtifactsByType_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			t.Errorf("Expected GET method, got %s", r.Method)
 		}
 
-		resp := PackageIflowsResp{
+		resp := packageArtifactsResp{
 			D: struct {
-				Results []IflowItem `json:"results"`
+				Results []ArtifactCommonItem `json:"results"`
 			}{
-				Results: []IflowItem{
-					{ArtifactCommonItem: ArtifactCommonItem{ID: "iflow1", Name: "IFlow 1", Version: "1.0.0"}},
-					{ArtifactCommonItem: ArtifactCommonItem{ID: "iflow2", Name: "IFlow 2", Version: "2.0.0"}},
+				Results: []ArtifactCommonItem{
+					{ID: "iflow1", Name: "IFlow 1", Version: "1.0.0"},
+					{ID: "iflow2", Name: "IFlow 2", Version: "2.0.0"},
 				},
 			},
 		}
@@ -129,23 +130,23 @@ func TestGetPackageIflows_Success(t *testing.T) {
 	defer server.Close()
 
 	client := createTestClient(server.URL)
-	iflows, err := client.GetPackageIflows(context.Background(), "test-package")
+	artifacts, err := client.GetPackageArtifactsByType(context.Background(), "test-package", consts.Artifact_Type_Iflow)
 
 	if err != nil {
 		t.Errorf("Expected no error, got %v", err)
 	}
-	if len(iflows) != 2 {
-		t.Errorf("Expected 2 iflows, got %d", len(iflows))
+	if len(artifacts) != 2 {
+		t.Errorf("Expected 2 artifacts, got %d", len(artifacts))
 	}
-	if iflows[0].ID != "iflow1" {
-		t.Errorf("Expected first iflow ID 'iflow1', got '%s'", iflows[0].ID)
+	if artifacts[0].ID != "iflow1" {
+		t.Errorf("Expected first artifact ID 'iflow1', got '%s'", artifacts[0].ID)
 	}
 }
 
-func TestGetPackageIflows_Timeout(t *testing.T) {
+func TestGetPackageArtifactsByType_Timeout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(3 * time.Second)
-		json.NewEncoder(w).Encode(PackageIflowsResp{})
+		json.NewEncoder(w).Encode(packageArtifactsResp{})
 	}))
 	defer server.Close()
 
@@ -153,7 +154,7 @@ func TestGetPackageIflows_Timeout(t *testing.T) {
 	defer cancel()
 
 	client := createTestClient(server.URL)
-	_, err := client.GetPackageIflows(shortCtx, "test-package")
+	_, err := client.GetPackageArtifactsByType(shortCtx, "test-package", consts.Artifact_Type_Iflow)
 
 	if err == nil {
 		t.Error("Expected timeout error, got nil")
@@ -164,10 +165,10 @@ func TestGetPackageIflows_Timeout(t *testing.T) {
 }
 
 // =============================================================================
-// DeployIflow Tests
+// DeployArtifact Tests
 // =============================================================================
 
-func TestDeployIflow_Success(t *testing.T) {
+func TestDeployArtifact_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Errorf("Expected POST method, got %s", r.Method)
@@ -179,7 +180,7 @@ func TestDeployIflow_Success(t *testing.T) {
 	defer server.Close()
 
 	client := createTestClient(server.URL)
-	taskID, err := client.DeployIflow(context.Background(), "test-iflow", "1.0.0")
+	taskID, err := client.DeployArtifact(context.Background(), "test-iflow", "1.0.0", consts.Artifact_Type_Iflow)
 
 	if err != nil {
 		t.Errorf("Expected no error, got %v", err)
@@ -189,7 +190,7 @@ func TestDeployIflow_Success(t *testing.T) {
 	}
 }
 
-func TestDeployIflow_Timeout(t *testing.T) {
+func TestDeployArtifact_Timeout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(3 * time.Second)
 		w.Write([]byte(`"task-12345"`))
@@ -200,7 +201,7 @@ func TestDeployIflow_Timeout(t *testing.T) {
 	defer cancel()
 
 	client := createTestClient(server.URL)
-	_, err := client.DeployIflow(shortCtx, "test-iflow", "1.0.0")
+	_, err := client.DeployArtifact(shortCtx, "test-iflow", "1.0.0", consts.Artifact_Type_Iflow)
 
 	if err == nil {
 		t.Error("Expected timeout error, got nil")

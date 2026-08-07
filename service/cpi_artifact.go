@@ -2,10 +2,13 @@ package service
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"sync"
 
 	"mmt-delivery/consts"
 	"mmt-delivery/pkg/cpi"
+	"mmt-delivery/pkg/env"
 )
 
 type PackageArtifact struct {
@@ -51,52 +54,61 @@ func GetPackageArtifactsBatch(ctx context.Context, client IntegrationService, pa
 	return results
 }
 
-// GetPackageArtifacts returns all design-time artifacts (IFlows + ScriptCollections) for a package,
-// fetching both types in parallel.
+// isNotFoundError checks if the error is a 404 HTTP response.
+func isNotFoundError(err error) bool {
+	var httpErr *env.HttpResponseError
+	if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
+		return true
+	}
+	return false
+}
+
+// GetPackageArtifacts returns all design-time artifacts of all supported types for a package,
+// fetching all types in parallel. Types that return 404 (package doesn't contain that type)
+// are silently skipped.
 func GetPackageArtifacts(ctx context.Context, client IntegrationService, packageID string) ([]PackageArtifact, error) {
-	var (
-		iflows   []cpi.IflowItem
-		scs      []cpi.ScriptCollectionItem
-		iflowErr error
-		scErr    error
-		wg       sync.WaitGroup
-	)
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		iflows, iflowErr = client.GetPackageIflows(ctx, packageID)
-	}()
-	go func() {
-		defer wg.Done()
-		scs, scErr = client.GetPackageScriptcollections(ctx, packageID)
-	}()
+	types := consts.AllArtifactTypes()
+
+	type result struct {
+		items []cpi.ArtifactCommonItem
+		aType consts.ArtifactType
+		err   error
+	}
+	results := make([]result, len(types))
+	var wg sync.WaitGroup
+
+	for i, at := range types {
+		wg.Add(1)
+		go func(idx int, artifactType consts.ArtifactType) {
+			defer wg.Done()
+			items, err := client.GetPackageArtifactsByType(ctx, packageID, artifactType)
+			results[idx] = result{items: items, aType: artifactType, err: err}
+		}(i, at)
+	}
 	wg.Wait()
 
-	if iflowErr != nil {
-		return nil, iflowErr
-	}
-	if scErr != nil {
-		return nil, scErr
-	}
-
-	artifacts := make([]PackageArtifact, 0, len(iflows)+len(scs))
-	for _, f := range iflows {
-		artifacts = append(artifacts, PackageArtifact{
-			TechID: f.ID, Version: f.Version, PackageID: f.PackageID,
-			Name: f.Name, Description: f.Description,
-			CreatedBy: f.CreatedBy, CreatedAt: f.CreatedAt,
-			ModifiedBy: f.ModifiedBy, ModifiedAt: f.ModifiedAt,
-			Type: string(consts.Artifact_Type_Iflow),
-		})
-	}
-	for _, sc := range scs {
-		artifacts = append(artifacts, PackageArtifact{
-			TechID: sc.ID, Version: sc.Version, PackageID: sc.PackageID,
-			Name: sc.Name, Description: sc.Description,
-			CreatedBy: sc.CreatedBy, CreatedAt: sc.CreatedAt,
-			ModifiedBy: sc.ModifiedBy, ModifiedAt: sc.ModifiedAt,
-			Type: string(consts.Artifact_Type_Sc),
-		})
+	var artifacts []PackageArtifact
+	for _, r := range results {
+		if r.err != nil {
+			if isNotFoundError(r.err) {
+				continue // package doesn't contain this artifact type — skip
+			}
+			return nil, r.err
+		}
+		for _, item := range r.items {
+			artifacts = append(artifacts, PackageArtifact{
+				TechID:      item.ID,
+				Version:     item.Version,
+				PackageID:   item.PackageID,
+				Name:        item.Name,
+				Description: item.Description,
+				CreatedBy:   item.CreatedBy,
+				CreatedAt:   item.CreatedAt,
+				ModifiedBy:  item.ModifiedBy,
+				ModifiedAt:  item.ModifiedAt,
+				Type:        string(r.aType),
+			})
+		}
 	}
 	return artifacts, nil
 }

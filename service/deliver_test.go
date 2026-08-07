@@ -135,7 +135,7 @@ func TestBatchImportTenantOps_PrecheckAggregatesErrors(t *testing.T) {
 
 	svc := newTestService(func(ctx context.Context, tenant string) (IntegrationService, error) {
 		return &mockCPIClientWithDesignTime{
-			iflowVersions: map[string]string{
+			artifactVersions: map[string]string{
 				"artifact-downgrade": "2.0.0",
 			},
 		}, nil
@@ -201,7 +201,7 @@ func TestBatchImportTenantOps_PartialSkipProceedsWithValidOps(t *testing.T) {
 
 	svc := newTestService(func(ctx context.Context, tenant string) (IntegrationService, error) {
 		return &mockCPIClientWithDesignTime{
-			iflowVersions: map[string]string{
+			artifactVersions: map[string]string{
 				"artifact-downgrade": "2.0.0", // target has higher version → downgrade error
 				// "artifact-valid" not present → mock returns 404 → no downgrade risk
 			},
@@ -270,7 +270,7 @@ func TestBatchImportTenantOps_AsyncFailureRollsBackStateAndRecordsCondition(t *t
 
 	svc := newTestService(func(ctx context.Context, tenant string) (IntegrationService, error) {
 		return &mockCPIClientWithDesignTime{
-			iflowVersions: map[string]string{
+			artifactVersions: map[string]string{
 				"artifact-import": "1.0.0",
 			},
 		}, nil

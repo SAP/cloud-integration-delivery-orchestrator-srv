@@ -33,16 +33,22 @@ type TransportService interface {
 
 // IntegrationService defines the CPI operations needed by the service layer.
 // It is a facade over CpiClient for testability — all methods are direct pass-throughs.
+//
+// Two query patterns exist for design-time artifacts:
+//
+//   - Package Artifacts (GetPackageArtifactsByType): queries via Navigation Property.
+//     Draft artifacts return Version="Active" (not the real version number).
+//     Used for discovery/listing.
+//
+//   - Direct Artifact (GetDesignTimeArtifact): queries by artifact ID + version.
+//     When version="active" is passed, returns the actual formal version (e.g. "6.2.9").
+//     Used for version downgrade checks where the real version is needed.
 type IntegrationService interface {
 	DeployArtifact(ctx context.Context, artifactID, artifactVersion string, artifactType consts.ArtifactType) (string, error)
 	RuntimeArtifact(ctx context.Context, artifactId string) (cpi.RuntimeArtifact, error)
-	GetDesignTimeIflow(ctx context.Context, iflowID string, iflowVersion string) (cpi.IflowItem, error)
-	GetDesignTimeScriptCollection(ctx context.Context, scriptCollectionID string, scriptCollectionVersion string) (cpi.ScriptCollectionItem, error)
-
-	// Version Compare: batch query capabilities
+	GetDesignTimeArtifact(ctx context.Context, artifactID, version string, artifactType consts.ArtifactType) (cpi.ArtifactCommonItem, error)
 	GetPackages(ctx context.Context) ([]cpi.CPIPackage, error)
-	GetPackageIflows(ctx context.Context, packageID string) ([]cpi.IflowItem, error)
-	GetPackageScriptcollections(ctx context.Context, packageID string) ([]cpi.ScriptCollectionItem, error)
+	GetPackageArtifactsByType(ctx context.Context, packageID string, artifactType consts.ArtifactType) ([]cpi.ArtifactCommonItem, error)
 	GetRuntimeArtifacts(ctx context.Context) ([]cpi.RuntimeArtifact, error)
 
 	// Git Sync: download artifact ZIP content

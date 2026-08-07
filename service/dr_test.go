@@ -65,19 +65,19 @@ func setupDRTest(t *testing.T) drTestSetup {
 	version := "1.0.5"
 	name := "IFlow " + suffix
 
-	// cpiFactory serves PIR lookup (GetPackageIflows) and downgrade check (GetDesignTimeIflow).
-	// GetPackageIflows returns the artifact with the real tech ID so resolveTechID succeeds.
-	// GetDesignTimeIflow returns the same version so the downgrade check passes.
+	// cpiFactory serves PIR lookup (GetPackageArtifactsByType) and downgrade check (GetDesignTimeArtifact).
+	// GetPackageArtifactsByType returns the artifact with the real tech ID so resolveTechID succeeds.
+	// GetDesignTimeArtifact returns the same version so the downgrade check passes.
 	cpiFactory := func(ctx context.Context, tenant string) (IntegrationService, error) {
 		return &mockCPIClientWithDesignTime{
 			mockCPIClient: mockCPIClient{
-				iflows: map[string][]cpi.IflowItem{
-					"pkg1": {
-						{ArtifactCommonItem: cpi.ArtifactCommonItem{ID: techID, Name: name, Version: version, PackageID: "pkg1"}},
+				artifacts: map[string][]cpi.ArtifactCommonItem{
+					"pkg1/" + string(consts.Artifact_Type_Iflow): {
+						{ID: techID, Name: name, Version: version, PackageID: "pkg1"},
 					},
 				},
 			},
-			iflowVersions: map[string]string{techID: version},
+			artifactVersions: map[string]string{techID: version},
 		}, nil
 	}
 

@@ -503,7 +503,9 @@ func buildVersionCompareResponse(data db.SnapshotData, tenants []db.CpiTenant, s
 						info.ModifiedAt = vi.ModifiedAt
 					}
 					if tenantID != sourceTenantID && sourceHasData {
-						match := vi.DesignTimeVersion == sourceVersion.DesignTimeVersion
+						// Any side being "Active" (draft) means versions are not reliably comparable → mismatch
+						match := vi.DesignTimeVersion == sourceVersion.DesignTimeVersion &&
+							!isDraftVersion(vi.DesignTimeVersion) && !isDraftVersion(sourceVersion.DesignTimeVersion)
 						info.DesignTimeMatch = &match
 						if !match {
 							hasMismatch = true
@@ -948,11 +950,12 @@ func (s *Service) PreviewDRFromMismatch(ruleID uint) (PreviewDRResponse, error) 
 				continue
 			}
 
-			// Check DT mismatch: any compared tenant differs from source
+			// Check DT mismatch: any compared tenant differs from source, or any side is draft
 			hasMismatch := false
 			for _, targetID := range snapshot.Data.ComparedTenants {
 				targetVI, targetHasData := art.Versions[targetID]
-				if !targetHasData || targetVI.DesignTimeVersion != sourceVI.DesignTimeVersion {
+				if !targetHasData || targetVI.DesignTimeVersion != sourceVI.DesignTimeVersion ||
+					isDraftVersion(sourceVI.DesignTimeVersion) || isDraftVersion(targetVI.DesignTimeVersion) {
 					hasMismatch = true
 					break
 				}
