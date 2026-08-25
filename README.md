@@ -1,97 +1,26 @@
-## Local Development
+[![REUSE status](https://api.reuse.software/badge/github.com/SAP/cloud-integration-delivery-orchestrator-srv)](https://api.reuse.software/info/github.com/SAP/cloud-integration-delivery-orchestrator-srv)
 
-### Prerequisites
+# cloud-integration-delivery-orchestrator-srv
 
-- Go 1.24+ and `make` installed
-- Docker or Podman (for local PostgreSQL)
-- CF CLI logged in (for `make sync-env`)
-- `jq` installed (for `make sync-env`)
-- Configure `GOPROXY` if needed: `export GOPROXY=https://goproxy.cn`
+## About this project
 
-### 1. Start PostgreSQL locally
+Go backend service for SAP Cloud Integration multi-tenant delivery orchestration - provides REST API, WebSocket, and XSUAA authentication, compiled into the published Docker image.
 
-```bash
-make run-db
+## Requirements and Setup
 
-# If using Podman:
-make run-db DOCKER=podman
-```
+*Insert a short description what is required to get your project running...*
 
-Idempotent — if the container already exists, it just starts it. Data persists in a named Docker volume.
+## Support, Feedback, Contributing
 
-### 2. Generate `.env` from deployed CF app
+This project is open to feature requests/suggestions, bug reports etc. via [GitHub issues](https://github.com/SAP/cloud-integration-delivery-orchestrator-srv/issues). Contribution and feedback are encouraged and always welcome. For more information about how to contribute, the project structure, as well as additional contribution information, see our [Contribution Guidelines](CONTRIBUTING.md).
 
-The application reads `VCAP_SERVICES` environment variable at startup (via `go-cfenv`).
-For local development, VS Code loads `.env` via `launch.json`.
+## Security / Disclosure
+If you find any bug that may be a security problem, please follow our instructions at [in our security policy](https://github.com/SAP/cloud-integration-delivery-orchestrator-srv/security/policy) on how to report it. Please do not create GitHub issues for security-related doubts or problems.
 
-To generate `.env` from the deployed app's environment:
+## Code of Conduct
 
-```bash
-make sync-env
+We as members, contributors, and leaders pledge to make participation in our community a harassment-free experience for everyone. By participating in this project, you agree to abide by its [Code of Conduct](https://github.com/SAP/.github/blob/main/CODE_OF_CONDUCT.md) at all times.
 
-# If your app has a different name:
-make sync-env CF_APP=my-cpi-delivery
-```
+## Licensing
 
-This pulls VCAP_SERVICES and VCAP_APPLICATION directly from the deployed CF app via API.
-Re-run after each `cf deploy` (credentials change on redeploy).
-
-### 3. Run with VS Code (recommended)
-
-The project uses `.vscode/launch.json` with `envFile` pointing to `.env`:
-
-```jsonc
-// .vscode/launch.json (already configured)
-{
-  "configurations": [
-    {
-      "name": "Launch Package",
-      "type": "go",
-      "request": "launch",
-      "mode": "debug",
-      "program": "${workspaceFolder}/main.go",
-      "envFile": "${workspaceFolder}/.env"
-    }
-  ]
-}
-```
-
-Press F5 to start with debugger. The application listens at `0.0.0.0:9000`.
-
-### 4. Frontend (optional)
-
-If developing frontend locally alongside backend:
-
-```bash
-# In mmt-devops-ui-cpi-delivery/
-npm run dev
-```
-
-Vite dev server starts at `http://localhost:5173`, proxied through Go backend via `VITE_DEV_URL` in `.env`.
-
----
-
-## Makefile Targets
-
-| Target | Description |
-|--------|-------------|
-| `make build` | Compile Go binary (verify compilation) |
-| `make fmt` | Format all Go source files |
-| `make test` | Run all tests |
-| `make run-db` | Start local PostgreSQL (one-time, idempotent) |
-| `make sync-env` | Pull env from deployed CF app and write `.env` |
-| `make clean` | Remove build artifacts |
-
-Use `DOCKER=podman` with any target that uses containers (e.g., `make run-db DOCKER=podman`).
-
----
-
-## Connect to Remote DB Locally
-
-PostgreSQL on CF cannot be connected to directly. Use CF SSH tunnel:
-
-```bash
-cf ssh -L localhost:8866:<db-hostname>:<db-port> cpi-delivery -N
-```
-
-Then connect to `localhost:8866` with the credentials from your service key.
+Copyright 2026 SAP SE or an SAP affiliate company and cloud-integration-delivery-orchestrator-srv contributors. Please see our [LICENSE](LICENSE) for copyright and license information. Detailed information including third-party components and their licensing/copyright information is available [via the REUSE tool](https://api.reuse.software/info/github.com/SAP/cloud-integration-delivery-orchestrator-srv).
