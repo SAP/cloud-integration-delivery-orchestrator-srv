@@ -1,0 +1,11 @@
+build/
+coverage.txt
+.history/
+.env
+*.json
+__debug_bin4272947576
+artifacts/
+mta_archives/
+__debug_bin*
+artifacts-example/
+dist/
