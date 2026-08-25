@@ -456,10 +456,10 @@ func TestSyncImportState_MonotonicProgression_InProgressNotDowngraded(t *testing
 func TestExtractJiraIssueKey(t *testing.T) {
 	svc := newTestService(nil)
 
-	if got := svc.extractJiraIssueKey("https://jira.tools.sap/browse/MACOMMT-32980"); got != "MACOMMT-32980" {
-		t.Fatalf("issue key = %q, want MACOMMT-32980", got)
+	if got := svc.extractJiraIssueKey("https://jira.tools.sap/browse/PROJ-123"); got != "PROJ-123" {
+		t.Fatalf("issue key = %q, want PROJ-123", got)
 	}
-	if got := svc.extractJiraIssueKey("https://jira.tools.sap/projects/MACOMMT"); got != "" {
+	if got := svc.extractJiraIssueKey("https://jira.tools.sap/projects/PROJ"); got != "" {
 		t.Fatalf("expected empty issue key for non-browse URL, got %q", got)
 	}
 }

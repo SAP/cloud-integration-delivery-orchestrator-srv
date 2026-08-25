@@ -505,10 +505,10 @@ func (s *Service) syncImportState(ctx context.Context, deliveryRequestID uint, u
 }
 
 // extractJiraIssueKey extracts JIRA issue key from JIRA URL
-// Example: https://jira.tools.sap/browse/MACOMMT-32980 -> MACOMMT-32980
+// Example: https://jira.tools.sap/browse/PROJ-123 -> PROJ-123
 func (s *Service) extractJiraIssueKey(jiraURL string) string {
 	// Pattern to match JIRA URLs like:
-	// https://jira.tools.sap/browse/MACOMMT-32980
+	// https://jira.tools.sap/browse/PROJ-123
 	// https://domain.atlassian.net/browse/PROJ-123
 	// Extract issue key in format: PROJECT-ID (uppercase letters, hyphen, digits)
 	re := regexp.MustCompile(`/browse/([A-Z]+-\d+)`)
