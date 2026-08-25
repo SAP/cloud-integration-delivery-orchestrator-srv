@@ -118,6 +118,21 @@ func (h *Handler) GetAllDr(c *gin.Context) {
 		Preload("DeliveryRule").
 		Order("updated_at DESC")
 
+	// Optional status filter: comma-separated aggregate_status values
+	// (e.g. "PENDING,IMPORTING"). The frontend derives these from its status
+	// filter groups, so the group definition stays the single source of truth.
+	if statusParam := strings.TrimSpace(c.Query("status")); statusParam != "" {
+		var statuses []string
+		for _, s := range strings.Split(statusParam, ",") {
+			if s = strings.TrimSpace(s); s != "" {
+				statuses = append(statuses, s)
+			}
+		}
+		if len(statuses) > 0 {
+			query = query.Where("aggregate_status IN ?", statuses)
+		}
+	}
+
 	var total int64
 	query.Model(&db.DeliveryRequest{}).Count(&total)
 

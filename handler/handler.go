@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 
 	"mmt-delivery/pkg/cf"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgconn"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
@@ -62,6 +64,14 @@ func FailCode(c *gin.Context, status int, code, message string) {
 // FailCodeErrors sends an error response with code + message + structured error details.
 func FailCodeErrors(c *gin.Context, status int, code, message string, errors any) {
 	c.AbortWithStatusJSON(status, gin.H{"code": code, "message": message, "errors": errors})
+}
+
+// isUniqueViolation reports whether err is a Postgres unique-constraint
+// violation (SQLSTATE 23505). Used to translate duplicate-key errors into
+// 409 Conflict responses instead of a raw 500.
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
 func NewHandler(

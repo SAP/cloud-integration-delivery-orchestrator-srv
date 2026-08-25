@@ -115,8 +115,37 @@ func (s *Service) SourceAndRoute(ctx context.Context, includedTenants []db.CpiTe
 	}
 
 	if sorceTenant == nil {
-		err = fmt.Errorf("no source node found among included tenants' transport nodes")
+		err = fmt.Errorf("could not find a starting (source) tenant among the selected tenants. Please make sure the selection begins with a source tenant and follows the transport routes")
 		return
+	}
+
+	// Connectivity check: every included tenant must be reachable from the single
+	// source via routes internal to the included set, i.e. all included tenants
+	// lie on one connected transport chain. This rejects gapped/disconnected
+	// selections (e.g. skipping an intermediate hop, or two unrelated sources)
+	// that would otherwise silently produce a rule with a broken delivery chain.
+	adj := make(map[uint][]uint, len(includedRoutes))
+	for _, r := range includedRoutes {
+		adj[r.SourceNodeID] = append(adj[r.SourceNodeID], r.TargetNodeID)
+	}
+	reachable := map[uint]bool{sorceTenant.TmsSourceNodeID: true}
+	queue := []uint{sorceTenant.TmsSourceNodeID}
+	for len(queue) > 0 {
+		curr := queue[0]
+		queue = queue[1:]
+		for _, next := range adj[curr] {
+			if !reachable[next] {
+				reachable[next] = true
+				queue = append(queue, next)
+			}
+		}
+	}
+	for i := range includedTenants {
+		t := &includedTenants[i]
+		if !reachable[t.TmsSourceNodeID] {
+			err = fmt.Errorf("tenant %q is not on the same delivery chain as the source tenant %q. Please select only tenants that are connected to the source through transport routes", t.Name, sorceTenant.Name)
+			return
+		}
 	}
 	return
 }

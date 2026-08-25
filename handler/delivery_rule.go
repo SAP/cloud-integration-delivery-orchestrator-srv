@@ -92,6 +92,12 @@ func (h *Handler) UpsertDeliveryRule(ctx *gin.Context) {
 		}
 		return nil
 	}); err != nil {
+		// Unique constraint violation on Name (Postgres 23505) → 409 conflict.
+		// Guards against duplicate rules created by rapid double-submit.
+		if isUniqueViolation(err) {
+			FailCode(ctx, 409, "RULE_NAME_EXISTS", fmt.Sprintf("delivery rule name %q already exists", rule.Name))
+			return
+		}
 		Fail(ctx, 500, err.Error())
 		return
 	}

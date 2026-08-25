@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -51,6 +52,10 @@ func (h *Handler) UpsertCpiTenant(ctx *gin.Context) {
 			LifecycleState: lifecycle.TenantDraft,
 		}
 		if err := h.db.Create(&placeholder).Error; err != nil {
+			if isUniqueViolation(err) {
+				FailCode(ctx, 409, "TENANT_NAME_EXISTS", fmt.Sprintf("tenant name %q already exists", input.Name))
+				return
+			}
 			Fail(ctx, 500, err.Error())
 			return
 		}
@@ -84,6 +89,10 @@ func (h *Handler) UpsertCpiTenant(ctx *gin.Context) {
 	input.LifecycleState = existing.LifecycleState
 
 	if err := h.db.Save(&input).Error; err != nil {
+		if isUniqueViolation(err) {
+			FailCode(ctx, 409, "TENANT_NAME_EXISTS", fmt.Sprintf("tenant name %q already exists", input.Name))
+			return
+		}
 		Fail(ctx, 500, err.Error())
 		return
 	}

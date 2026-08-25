@@ -516,6 +516,123 @@ func TestApprove_AllTRPresent(t *testing.T) {
 	}
 }
 
+// =============================================================================
+// SourceAndRoute Tests
+// =============================================================================
+
+// TestSourceAndRoute covers source-tenant determination and the connectivity
+// check that rejects selections which do not form one connected transport chain.
+// Tenants are constructed in-memory (SourceAndRoute reads only their fields);
+// routes/nodes are served by a mock TMS client, so no DB seeding is required.
+func TestSourceAndRoute(t *testing.T) {
+	tenant := func(name string, node uint) db.CpiTenant {
+		return db.CpiTenant{Name: name, TmsSourceNodeID: node}
+	}
+	route := func(id, src, tgt uint) db.TransportRoute {
+		return db.TransportRoute{ID: id, SourceNodeID: src, TargetNodeID: tgt}
+	}
+	nodes := func(ids ...uint) []db.TransportNode {
+		out := make([]db.TransportNode, 0, len(ids))
+		for _, id := range ids {
+			out = append(out, db.TransportNode{ID: id})
+		}
+		return out
+	}
+
+	cases := []struct {
+		name       string
+		tenants    []db.CpiTenant
+		routes     []db.TransportRoute
+		nodes      []db.TransportNode
+		wantErr    bool
+		wantSource string // expected source tenant name (only checked when wantErr is false)
+		wantRoutes int    // expected number of included routes (only checked when wantErr is false)
+	}{
+		{
+			name:       "linear two-tenant chain",
+			tenants:    []db.CpiTenant{tenant("A", 1), tenant("B", 2)},
+			routes:     []db.TransportRoute{route(1, 1, 2)},
+			nodes:      nodes(1, 2),
+			wantSource: "A",
+			wantRoutes: 1,
+		},
+		{
+			name:       "fork one source to two targets",
+			tenants:    []db.CpiTenant{tenant("A", 1), tenant("B", 2), tenant("C", 3)},
+			routes:     []db.TransportRoute{route(1, 1, 2), route(2, 1, 3)},
+			nodes:      nodes(1, 2, 3),
+			wantSource: "A",
+			wantRoutes: 2,
+		},
+		{
+			name:       "multi-hop connected chain",
+			tenants:    []db.CpiTenant{tenant("A", 1), tenant("B", 2), tenant("C", 3)},
+			routes:     []db.TransportRoute{route(1, 1, 2), route(2, 2, 3)},
+			nodes:      nodes(1, 2, 3),
+			wantSource: "A",
+			wantRoutes: 2,
+		},
+		{
+			name:       "single tenant only source",
+			tenants:    []db.CpiTenant{tenant("A", 1)},
+			routes:     []db.TransportRoute{route(1, 1, 2)},
+			nodes:      nodes(1, 2),
+			wantSource: "A",
+			wantRoutes: 0,
+		},
+		{
+			name:    "gap skips an intermediate hop",
+			tenants: []db.CpiTenant{tenant("A", 1), tenant("C", 3)},
+			routes:  []db.TransportRoute{route(1, 1, 2), route(2, 2, 3)},
+			nodes:   nodes(1, 2, 3),
+			wantErr: true,
+		},
+		{
+			name:    "two disconnected chains",
+			tenants: []db.CpiTenant{tenant("A", 1), tenant("B", 2), tenant("C", 3), tenant("D", 4)},
+			routes:  []db.TransportRoute{route(1, 1, 2), route(2, 3, 4)},
+			nodes:   nodes(1, 2, 3, 4),
+			wantErr: true,
+		},
+		{
+			name:    "cycle has no source",
+			tenants: []db.CpiTenant{tenant("A", 1), tenant("B", 2)},
+			routes:  []db.TransportRoute{route(1, 1, 2), route(2, 2, 1)},
+			nodes:   nodes(1, 2),
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := newTestService(nil, testServiceOpts{
+				tms: &mockTMSClient{nodes: tc.nodes, routes: tc.routes},
+			})
+
+			source, includedRoutes, _, err := svc.SourceAndRoute(context.Background(), tc.tenants)
+
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got source=%v routes=%d", source, len(includedRoutes))
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if source == nil {
+				t.Fatal("expected a source tenant, got nil")
+			}
+			if source.Name != tc.wantSource {
+				t.Errorf("source = %q, want %q", source.Name, tc.wantSource)
+			}
+			if len(includedRoutes) != tc.wantRoutes {
+				t.Errorf("included routes = %d, want %d", len(includedRoutes), tc.wantRoutes)
+			}
+		})
+	}
+}
+
 func TestApprove_ConditionWrittenWhenNotifierFails(t *testing.T) {
 	s := setupApproveTest(t, "TR-APPROVE-003")
 

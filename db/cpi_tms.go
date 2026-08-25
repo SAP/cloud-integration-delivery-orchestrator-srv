@@ -90,7 +90,7 @@ type CpiTenant struct {
 
 	// Name is the human-readable identifier used by existing API consumers and UI.
 	// Unique constraint excludes soft-deleted rows.
-	Name      string `gorm:"uniqueIndex,where:deleted_at IS NULL"`
+	Name      string `gorm:"uniqueIndex:ux_cpi_tenants_name,where:deleted_at IS NULL"`
 	CreatedBy string
 	UpdatedBy string
 

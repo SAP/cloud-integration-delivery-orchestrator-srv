@@ -109,7 +109,9 @@ type BatchJob struct {
 
 type DeliveryRule struct {
 	gorm.Model
-	Name           string
+	// Name is globally unique among active (non-soft-deleted) rules.
+	// The partial unique index excludes soft-deleted rows so a name can be reused after deletion.
+	Name           string `gorm:"uniqueIndex:ux_delivery_rules_name,where:deleted_at IS NULL"`
 	VersionPattern string
 
 	// Associations to CpiTenant
