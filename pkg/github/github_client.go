@@ -37,6 +37,9 @@ func newGoGitHubClient(ctx context.Context, destName string, owner, repo string,
 	if err != nil {
 		return nil, fmt.Errorf("github destination %s not found: %w", destName, err)
 	}
+	if dest == nil {
+		return nil, fmt.Errorf("github destination %s not found", destName)
+	}
 
 	token := dest.Password
 	if token == "" {

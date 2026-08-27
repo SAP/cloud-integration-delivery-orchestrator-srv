@@ -1,19 +1,19 @@
 package cf
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/cloudfoundry-community/go-cfenv"
 
-	"mmt-delivery/pkg/otel"
+	"mmt-delivery/consts"
+	"mmt-delivery/pkg/env"
 )
 
 const defaultDestTTL = 5 * time.Minute
@@ -42,13 +42,10 @@ const defaultDestTTL = 5 * time.Minute
 //	POST /destination-configuration/v1/subaccountDestinations       (create)
 //	PUT  /destination-configuration/v1/subaccountDestinations       (update)
 type DestinationServiceClient struct {
-	httpClient   *http.Client
-	apiURL       string // e.g. "https://destination.cfapps.eu10.hana.ondemand.com"
-	token        string // Bearer token obtained via client_credentials flow
-	tokenExp     time.Time
-	clientID     string
-	clientSecret string
-	authURL      string // OAuth token endpoint
+	// Embedded shared OAuth infra (pkg/env): proactive token refresh plus
+	// 401-reactive refresh-and-retry, mutex-protected token, otel transport.
+	// This is the same client used by pkg/cpi, pkg/cas, pkg/tms and pkg/xsuaa.
+	*env.HttpClient
 
 	// TTL cache — optional.  Zero ttl disables caching.
 	ttl   time.Duration
@@ -107,18 +104,14 @@ func NewDestinationServiceClient(ctx context.Context, credentials map[string]any
 	}
 	tokenURL = NormaliseTokenURL(tokenURL)
 
-	c := &DestinationServiceClient{
-		httpClient:   &http.Client{Timeout: 30 * time.Second, Transport: otel.WrapTransport(nil)},
-		apiURL:       apiURL,
-		clientID:     clientID,
-		clientSecret: clientSecret,
-		authURL:      tokenURL,
+	httpClient, err := env.NewClient(ctx, clientID, clientSecret, tokenURL, apiURL)
+	if err != nil {
+		return nil, fmt.Errorf("cf/dest: create http client: %w", err)
+	}
+	return &DestinationServiceClient{
+		HttpClient: httpClient,
 		// ttl == 0: no cache for ephemeral subscriber clients
-	}
-	if err := c.refreshToken(ctx); err != nil {
-		return nil, err
-	}
-	return c, nil
+	}, nil
 }
 
 // NewDestinationServiceClientFromVCAP constructs a DestinationServiceClient from
@@ -146,19 +139,15 @@ func NewDestinationServiceClientFromVCAP(appEnv *cfenv.App) (*DestinationService
 	}
 	authURL = NormaliseTokenURL(authURL)
 
-	c := &DestinationServiceClient{
-		httpClient:   &http.Client{Timeout: 30 * time.Second, Transport: otel.WrapTransport(nil)},
-		apiURL:       apiURL,
-		clientID:     clientID,
-		clientSecret: clientSecret,
-		authURL:      authURL,
-		ttl:          defaultDestTTL,
-		cache:        make(map[string]*cachedDest),
+	httpClient, err := env.NewClient(context.Background(), clientID, clientSecret, authURL, apiURL)
+	if err != nil {
+		return nil, fmt.Errorf("cf/dest: create http client: %w", err)
 	}
-	if err := c.refreshToken(context.Background()); err != nil {
-		return nil, err
-	}
-	return c, nil
+	return &DestinationServiceClient{
+		HttpClient: httpClient,
+		ttl:        defaultDestTTL,
+		cache:      make(map[string]*cachedDest),
+	}, nil
 }
 
 // NormaliseTokenURL ensures an OAuth token URL ends with /oauth/token.
@@ -175,106 +164,24 @@ func NormaliseTokenURL(u string) string {
 	return u + "oauth/token"
 }
 
-func (c *DestinationServiceClient) refreshToken(ctx context.Context) error {
-	vals := url.Values{
-		"grant_type":    {"client_credentials"},
-		"client_id":     {c.clientID},
-		"client_secret": {c.clientSecret},
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.authURL,
-		bytes.NewBufferString(vals.Encode()))
-	if err != nil {
-		return fmt.Errorf("cf/dest: build token request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("cf/dest: fetch token: %w", err)
-	}
-	defer resp.Body.Close()
-
-	var buf bytes.Buffer
-	_, _ = buf.ReadFrom(resp.Body)
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("cf/dest: token endpoint returned HTTP %d: %s", resp.StatusCode, buf.String())
-	}
-
-	var tok struct {
-		AccessToken string `json:"access_token"`
-		ExpiresIn   int    `json:"expires_in"`
-	}
-	if err := json.Unmarshal(buf.Bytes(), &tok); err != nil {
-		return fmt.Errorf("cf/dest: decode token response: %w", err)
-	}
-	if tok.AccessToken == "" {
-		return fmt.Errorf("cf/dest: token endpoint returned empty access_token")
-	}
-	c.token = tok.AccessToken
-	c.tokenExp = time.Now().Add(time.Duration(tok.ExpiresIn-30) * time.Second)
-	return nil
-}
-
-func (c *DestinationServiceClient) bearerToken(ctx context.Context) (string, error) {
-	if time.Now().After(c.tokenExp) {
-		if err := c.refreshToken(ctx); err != nil {
-			return "", err
-		}
-	}
-	return "Bearer " + c.token, nil
-}
-
-func (c *DestinationServiceClient) doJSON(ctx context.Context, method, path string, body any) ([]byte, int, error) {
-	url := c.apiURL + path
-
-	var reqBody *bytes.Buffer
-	if body != nil {
-		b, err := json.Marshal(body)
-		if err != nil {
-			return nil, 0, fmt.Errorf("cf/dest: marshal request body: %w", err)
-		}
-		reqBody = bytes.NewBuffer(b)
-	} else {
-		reqBody = &bytes.Buffer{}
-	}
-
-	req, err := http.NewRequestWithContext(ctx, method, url, reqBody)
-	if err != nil {
-		return nil, 0, fmt.Errorf("cf/dest: build request %s %s: %w", method, path, err)
-	}
-	tok, err := c.bearerToken(ctx)
-	if err != nil {
-		return nil, 0, err
-	}
-	req.Header.Set("Authorization", tok)
-	req.Header.Set("Accept", "application/json")
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, 0, fmt.Errorf("cf/dest: %s %s: %w", method, path, err)
-	}
-	defer resp.Body.Close()
-
-	var buf bytes.Buffer
-	_, _ = buf.ReadFrom(resp.Body)
-	return buf.Bytes(), resp.StatusCode, nil
-}
-
 // ListDestinations returns all subaccount-level destinations.
+//
+// Requests go through the embedded env.HttpClient, which owns OAuth token
+// handling (proactive + 401-reactive refresh) and 429 backoff; non-2xx
+// responses come back as *env.HttpResponseError. Per-request timeout is a
+// context deadline, matching pkg/cpi and pkg/tms.
 //
 // API: GET /destination-configuration/v1/subaccountDestinations
 func (c *DestinationServiceClient) ListDestinations(ctx context.Context) ([]Destination, error) {
-	data, status, err := c.doJSON(ctx, http.MethodGet,
-		"/destination-configuration/v1/subaccountDestinations", nil)
+	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
+	defer cancel()
+	request := env.HttpRequest{
+		Method: http.MethodGet,
+		ApiURL: c.ApiURL + "/destination-configuration/v1/subaccountDestinations",
+	}
+	data, err := c.Do(childCtx, &request)
 	if err != nil {
 		return nil, err
-	}
-	if status != http.StatusOK {
-		return nil, fmt.Errorf("cf/dest: list destinations returned HTTP %d: %s", status, string(data))
 	}
 	var dests []Destination
 	if err := json.Unmarshal(data, &dests); err != nil {
@@ -300,16 +207,21 @@ func (c *DestinationServiceClient) GetDestination(ctx context.Context, name stri
 		c.mu.RUnlock()
 	}
 
-	data, status, err := c.doJSON(ctx, http.MethodGet,
-		"/destination-configuration/v1/subaccountDestinations/"+name, nil)
+	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
+	defer cancel()
+	request := env.HttpRequest{
+		Method: http.MethodGet,
+		ApiURL: c.ApiURL + "/destination-configuration/v1/subaccountDestinations/" + name,
+	}
+	data, err := c.Do(childCtx, &request)
 	if err != nil {
+		// 404 → destination does not exist; map to (nil, nil) so callers
+		// (notably UpsertDestination) can distinguish create vs update.
+		var httpErr *env.HttpResponseError
+		if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
+			return nil, nil
+		}
 		return nil, err
-	}
-	if status == http.StatusNotFound {
-		return nil, nil
-	}
-	if status != http.StatusOK {
-		return nil, fmt.Errorf("cf/dest: get destination %q returned HTTP %d: %s", name, status, string(data))
 	}
 	var dest Destination
 	if err := json.Unmarshal(data, &dest); err != nil {
@@ -365,13 +277,19 @@ func (c *DestinationServiceClient) UpsertDestination(ctx context.Context, dest D
 		method = http.MethodPut
 	}
 
-	data, status, err := c.doJSON(ctx, method,
-		"/destination-configuration/v1/subaccountDestinations", dest)
+	payload, err := json.Marshal(dest)
 	if err != nil {
-		return err
+		return fmt.Errorf("cf/dest: marshal destination %q: %w", dest.Name, err)
 	}
-	if status < 200 || status >= 300 {
-		return fmt.Errorf("cf/dest: upsert destination %q returned HTTP %d: %s", dest.Name, status, string(data))
+	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
+	defer cancel()
+	request := env.HttpRequest{
+		Method:      method,
+		ApiURL:      c.ApiURL + "/destination-configuration/v1/subaccountDestinations",
+		RequestBody: payload,
+	}
+	if _, err := c.Do(childCtx, &request); err != nil {
+		return err
 	}
 	c.Invalidate(dest.Name)
 	return nil
