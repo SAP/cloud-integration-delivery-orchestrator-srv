@@ -284,7 +284,7 @@ func TestReadTree_FiltersByTreePath(t *testing.T) {
 			Entries: []*github.TreeEntry{
 				{Path: github.Ptr("packages/pkg/artifact/src/main.groovy"), Type: github.Ptr("blob"), SHA: github.Ptr("blob1")},
 				{Path: github.Ptr("packages/pkg/artifact/META-INF/MANIFEST.MF"), Type: github.Ptr("blob"), SHA: github.Ptr("blob2")},
-				{Path: github.Ptr("packages/other/file.txt"), Type: github.Ptr("blob"), SHA: github.Ptr("blob3")},         // different path
+				{Path: github.Ptr("packages/other/file.txt"), Type: github.Ptr("blob"), SHA: github.Ptr("blob3")},        // different path
 				{Path: github.Ptr("packages/pkg/artifact/subdir"), Type: github.Ptr("tree"), SHA: github.Ptr("treeSHA")}, // tree entry, skip
 			},
 		})
@@ -437,7 +437,7 @@ func TestCommit_BranchAutoCreate(t *testing.T) {
 // --- NewGitClient factory ---
 
 func TestNewGitClient_UnsupportedProvider(t *testing.T) {
-	_, err := NewGitClient(context.Background(), "gitlab", "dest", "owner", "repo", nil)
+	_, err := NewGitClient(context.Background(), "gitlab", "dest", "owner", "repo", AuthConfig{}, nil)
 	if err == nil {
 		t.Fatal("expected error for unsupported provider")
 	}
@@ -503,31 +503,70 @@ func TestCommit_RetryOnRefConflict(t *testing.T) {
 	}
 }
 
-// --- normalizeGitURL ---
+// --- resolveGitHubBaseURLs ---
 
-func TestNormalizeGitURL(t *testing.T) {
+func TestResolveGitHubBaseURLs(t *testing.T) {
 	tests := []struct {
-		name  string
-		input string
-		want  string
+		name       string
+		input      string
+		wantGHES   bool
+		wantAPIURL string
+		wantUpload string
 	}{
-		{"empty", "", ""},
-		{"https already", "https://github.wdf.sap.corp", "https://github.wdf.sap.corp"},
-		{"https with trailing slash", "https://github.wdf.sap.corp/", "https://github.wdf.sap.corp"},
-		{"http upgraded to https", "http://github.wdf.sap.corp", "https://github.wdf.sap.corp"},
-		{"http with path", "http://github.wdf.sap.corp/api/v3/", "https://github.wdf.sap.corp/api/v3"},
-		{"http with port 443", "http://github.wdf.sap.corp:443", "https://github.wdf.sap.corp:443"},
-		{"https github.com", "https://api.github.com", "https://api.github.com"},
-		{"http github.com upgraded", "http://api.github.com", "https://api.github.com"},
+		// --- public github.com (non-GHES): defaults are correct, base URLs empty ---
+		{"empty", "", false, "", ""},
+		{"whitespace only", "   ", false, "", ""},
+		{"github.com bare", "github.com", false, "", ""},
+		{"github.com https", "https://github.com", false, "", ""},
+		{"github.com http upgraded", "http://github.com", false, "", ""},
+		{"github.com trailing slash", "https://github.com/", false, "", ""},
+		{"www.github.com", "www.github.com", false, "", ""},
+		{"api.github.com", "https://api.github.com", false, "", ""},
+		{"github.com uppercase", "https://GitHub.com", false, "", ""},
+		{"github.com with path", "https://github.com/some/path", false, "", ""},
+
+		// --- GHES: host root reconstructed, any user path discarded, /api/v3 + /api/uploads owned here ---
+		{"ghes bare host", "github.wdf.sap.corp", true, "https://github.wdf.sap.corp/api/v3", "https://github.wdf.sap.corp/api/uploads"},
+		{"ghes https", "https://github.wdf.sap.corp", true, "https://github.wdf.sap.corp/api/v3", "https://github.wdf.sap.corp/api/uploads"},
+		{"ghes http upgraded", "http://github.wdf.sap.corp", true, "https://github.wdf.sap.corp/api/v3", "https://github.wdf.sap.corp/api/uploads"},
+		{"ghes single trailing slash", "xxx.github.enterprise/", true, "https://xxx.github.enterprise/api/v3", "https://xxx.github.enterprise/api/uploads"},
+		{"ghes double trailing slash", "xxx.github.enterprise//", true, "https://xxx.github.enterprise/api/v3", "https://xxx.github.enterprise/api/uploads"},
+		{"ghes path api", "xxx.github.enterprise/api", true, "https://xxx.github.enterprise/api/v3", "https://xxx.github.enterprise/api/uploads"},
+		{"ghes path api/v3", "xxx.github.enterprise/api/v3", true, "https://xxx.github.enterprise/api/v3", "https://xxx.github.enterprise/api/uploads"},
+		{"ghes path api/v3 with slash", "xxx.github.enterprise/api/v3/", true, "https://xxx.github.enterprise/api/v3", "https://xxx.github.enterprise/api/uploads"},
+		{"ghes wrong path api/v1", "xxx.github.enterprise/api/v1", true, "https://xxx.github.enterprise/api/v3", "https://xxx.github.enterprise/api/uploads"},
+		{"ghes wrong path v1", "xxx.github.enterprise/v1", true, "https://xxx.github.enterprise/api/v3", "https://xxx.github.enterprise/api/uploads"},
+		{"ghes https with path", "https://github.wdf.sap.corp/api/v3", true, "https://github.wdf.sap.corp/api/v3", "https://github.wdf.sap.corp/api/uploads"},
+		{"ghes with port", "github.wdf.sap.corp:8443", true, "https://github.wdf.sap.corp:8443/api/v3", "https://github.wdf.sap.corp:8443/api/uploads"},
+		{"ghes with port and path", "https://github.wdf.sap.corp:8443/api/v1/", true, "https://github.wdf.sap.corp:8443/api/v3", "https://github.wdf.sap.corp:8443/api/uploads"},
+		{"ghes uppercase host", "https://GitHub.WDF.SAP.corp", true, "https://github.wdf.sap.corp/api/v3", "https://github.wdf.sap.corp/api/uploads"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := normalizeGitURL(tt.input)
-			if got != tt.want {
-				t.Errorf("normalizeGitURL(%q) = %q, want %q", tt.input, got, tt.want)
+			gotGHES, gotAPI, gotUpload := resolveGitHubBaseURLs(tt.input)
+			if gotGHES != tt.wantGHES || gotAPI != tt.wantAPIURL || gotUpload != tt.wantUpload {
+				t.Errorf("resolveGitHubBaseURLs(%q) = (%v, %q, %q), want (%v, %q, %q)",
+					tt.input, gotGHES, gotAPI, gotUpload, tt.wantGHES, tt.wantAPIURL, tt.wantUpload)
 			}
 		})
+	}
+}
+
+// TestWithEnterpriseURLs_NoOpOnResolvedURLs proves that go-github's WithEnterpriseURLs appender is a
+// verified no-op on the fully-formed URLs our resolver produces: the /api/v3 and /api/uploads paths
+// survive unchanged (only a trailing slash is added), so we — not go-github — own that convention.
+func TestWithEnterpriseURLs_NoOpOnResolvedURLs(t *testing.T) {
+	_, apiBaseURL, uploadURL := resolveGitHubBaseURLs("github.wdf.sap.corp/api/v1") // deliberately wrong path
+	client, err := github.NewClient(github.WithEnterpriseURLs(apiBaseURL, uploadURL))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	if got, want := client.BaseURL(), "https://github.wdf.sap.corp/api/v3/"; got != want {
+		t.Errorf("BaseURL() = %q, want %q (appender must not double-append)", got, want)
+	}
+	if got, want := client.UploadURL(), "https://github.wdf.sap.corp/api/uploads/"; got != want {
+		t.Errorf("UploadURL() = %q, want %q (appender must not double-append)", got, want)
 	}
 }
 

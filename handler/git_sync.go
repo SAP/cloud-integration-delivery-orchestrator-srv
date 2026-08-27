@@ -106,5 +106,9 @@ func (h *Handler) resolveGitClient(ctx *gin.Context) (gh.GitArtifactClient, erro
 	if err := h.db.Where("enabled = ?", true).First(&config).Error; err != nil {
 		return nil, fmt.Errorf("no enabled Git Repository Configuration found: %w", err)
 	}
-	return gh.NewGitClient(ctx.Request.Context(), gh.Provider(config.Provider), config.DestinationName, config.Owner, config.Repo, h.destSvc)
+	return gh.NewGitClient(ctx.Request.Context(), gh.Provider(config.Provider), config.DestinationName, config.Owner, config.Repo, gh.AuthConfig{
+		Method:         gh.AuthMethod(config.AuthMethod),
+		AppID:          config.GithubAppID,
+		InstallationID: config.GithubInstallationID,
+	}, h.destSvc)
 }

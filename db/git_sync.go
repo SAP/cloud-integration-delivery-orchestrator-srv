@@ -17,6 +17,13 @@ type GitRepoConfig struct {
 	Owner           string `gorm:"not null" json:"owner"`           // GitHub org or user
 	Repo            string `gorm:"not null" json:"repo"`            // repository name
 	Enabled         bool   `gorm:"default:false" json:"enabled"`
+
+	// Auth method: pat (default) uses a static PAT in the destination Password; github_app uses a
+	// GitHub App installation token (base64 PEM private key in the destination Password) with the
+	// App/Installation IDs below. See github.AuthMethodPAT / github.AuthMethodGitHubApp.
+	AuthMethod           string `gorm:"default:pat" json:"authMethod"`
+	GithubAppID          int64  `json:"githubAppId,omitempty"`          // App ID (github_app mode, non-secret)
+	GithubInstallationID int64  `json:"githubInstallationId,omitempty"` // Installation ID (github_app mode, non-secret)
 }
 
 // GitArtifactSnapshot records a single sync event — one artifact version pushed to GitHub.

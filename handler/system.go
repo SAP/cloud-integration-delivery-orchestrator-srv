@@ -170,8 +170,20 @@ func (h *Handler) UpsertGitRepoConfig(ctx *gin.Context) {
 		Fail(ctx, http.StatusBadRequest, fmt.Sprintf("invalid request body: %s", err))
 		return
 	}
-	if req.Provider == "" || req.DestinationName == "" || req.Owner == "" || req.Repo == "" {
-		Fail(ctx, http.StatusBadRequest, "provider, destinationName, owner, and repo are required")
+	if req.Provider == "" || req.DestinationName == "" || req.Repo == "" {
+		Fail(ctx, http.StatusBadRequest, "provider, destinationName, and repo are required")
+		return
+	}
+	// Owner is required for pat mode; in github_app mode it is derived from the installation (OP-1),
+	// so it may be empty here.
+	if gh.AuthMethod(req.AuthMethod) != gh.AuthMethodGitHubApp && req.Owner == "" {
+		Fail(ctx, http.StatusBadRequest, "owner is required for Personal Access Token(PAT) mode")
+		return
+	}
+	// github_app mode additionally requires the (non-secret) App ID and Installation ID; the base64
+	// private key lives in the destination Password (written by the manifest flow callback).
+	if gh.AuthMethod(req.AuthMethod) == gh.AuthMethodGitHubApp && (req.GithubAppID == 0 || req.GithubInstallationID == 0) {
+		Fail(ctx, http.StatusBadRequest, "githubAppId and githubInstallationId are required for github_app mode")
 		return
 	}
 
@@ -203,6 +215,9 @@ func (h *Handler) UpsertGitRepoConfig(ctx *gin.Context) {
 	existing.Owner = req.Owner
 	existing.Repo = req.Repo
 	existing.Enabled = req.Enabled
+	existing.AuthMethod = req.AuthMethod
+	existing.GithubAppID = req.GithubAppID
+	existing.GithubInstallationID = req.GithubInstallationID
 	if err := h.db.Save(&existing).Error; err != nil {
 		Fail(ctx, http.StatusInternalServerError, fmt.Sprintf("failed to update git repo config: %s", err))
 		return
@@ -224,7 +239,7 @@ func (h *Handler) GetGitOwners(ctx *gin.Context) {
 		return
 	}
 
-	client, err := gh.NewGitClient(ctx.Request.Context(), gh.Provider(provider), destName, "", "", h.destSvc)
+	client, err := gh.NewGitClient(ctx.Request.Context(), gh.Provider(provider), destName, "", "", gh.AuthConfig{}, h.destSvc)
 	if err != nil {
 		Fail(ctx, http.StatusServiceUnavailable, fmt.Sprintf("failed to create git client: %s", err))
 		return
@@ -250,7 +265,7 @@ func (h *Handler) GetGitRepos(ctx *gin.Context) {
 		return
 	}
 
-	client, err := gh.NewGitClient(ctx.Request.Context(), gh.Provider(provider), destName, "", "", h.destSvc)
+	client, err := gh.NewGitClient(ctx.Request.Context(), gh.Provider(provider), destName, "", "", gh.AuthConfig{}, h.destSvc)
 	if err != nil {
 		Fail(ctx, http.StatusServiceUnavailable, fmt.Sprintf("failed to create git client: %s", err))
 		return
@@ -273,7 +288,11 @@ func (h *Handler) TestGitRepoConnection(ctx *gin.Context) {
 		return
 	}
 
-	gitClient, err := gh.NewGitClient(ctx.Request.Context(), gh.Provider(config.Provider), config.DestinationName, config.Owner, config.Repo, h.destSvc)
+	gitClient, err := gh.NewGitClient(ctx.Request.Context(), gh.Provider(config.Provider), config.DestinationName, config.Owner, config.Repo, gh.AuthConfig{
+		Method:         gh.AuthMethod(config.AuthMethod),
+		AppID:          config.GithubAppID,
+		InstallationID: config.GithubInstallationID,
+	}, h.destSvc)
 	if err != nil {
 		OK(ctx, gin.H{"status": "error", "message": err.Error()})
 		return

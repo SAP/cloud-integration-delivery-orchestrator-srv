@@ -514,7 +514,11 @@ func (s *Service) TriggerGitSync(ctx context.Context, artifactID, packageID stri
 		return fmt.Errorf("git sync: tenant %d not found: %w", tenantID, err)
 	}
 
-	gitClient, err := gh.NewGitClient(ctx, gh.Provider(config.Provider), config.DestinationName, config.Owner, config.Repo, s.ProviderDest)
+	gitClient, err := gh.NewGitClient(ctx, gh.Provider(config.Provider), config.DestinationName, config.Owner, config.Repo, gh.AuthConfig{
+		Method:         gh.AuthMethod(config.AuthMethod),
+		AppID:          config.GithubAppID,
+		InstallationID: config.GithubInstallationID,
+	}, s.ProviderDest)
 	if err != nil {
 		return fmt.Errorf("git sync: failed to create git client: %w", err)
 	}
