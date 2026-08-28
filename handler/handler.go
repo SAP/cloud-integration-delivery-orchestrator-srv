@@ -6,6 +6,7 @@ import (
 
 	"mmt-delivery/pkg/cf"
 	"mmt-delivery/pkg/cpi"
+	gh "mmt-delivery/pkg/github"
 	"mmt-delivery/pkg/xsuaa"
 	"mmt-delivery/service"
 
@@ -19,13 +20,14 @@ import (
 // Handler holds all injected dependencies for the HTTP handler layer.
 // All gin handler functions are methods on this struct.
 type Handler struct {
-	svc     *service.Service
-	db      *gorm.DB
-	logger  *zap.SugaredLogger
-	cpi     *cpi.Manager
-	xsuaa   *xsuaa.UaaClient
-	destSvc *cf.DestinationServiceClient
-	hub     *service.WSHub
+	svc         *service.Service
+	db          *gorm.DB
+	logger      *zap.SugaredLogger
+	cpi         *cpi.Manager
+	xsuaa       *xsuaa.UaaClient
+	destSvc     *cf.DestinationServiceClient
+	hub         *service.WSHub
+	gitAppState *gh.StateStore
 }
 
 type StatusCount struct {
@@ -82,15 +84,17 @@ func NewHandler(
 	xsuaaClient *xsuaa.UaaClient,
 	destSvc *cf.DestinationServiceClient,
 	hub *service.WSHub,
+	gitAppState *gh.StateStore,
 ) *Handler {
 	return &Handler{
-		svc:     svc,
-		db:      db,
-		logger:  logger,
-		cpi:     cpiManager,
-		xsuaa:   xsuaaClient,
-		destSvc: destSvc,
-		hub:     hub,
+		svc:         svc,
+		db:          db,
+		logger:      logger,
+		cpi:         cpiManager,
+		xsuaa:       xsuaaClient,
+		destSvc:     destSvc,
+		hub:         hub,
+		gitAppState: gitAppState,
 	}
 }
 
@@ -287,6 +291,11 @@ func (h *Handler) SetupRoutes(v1 *gin.RouterGroup, v2 *gin.RouterGroup, requireS
 		system.GET("/gitRepoConfig/repos", h.GetGitRepos)
 		system.PUT("/gitRepoConfig", h.UpsertGitRepoConfig)
 		system.POST("/gitRepoConfig/test", h.TestGitRepoConnection)
+		// GitHub App manifest flow (RFC 010 doc 12 §9). callback/setup are browser
+		// redirects from GitHub carrying the SameSite=Lax session cookie (RP-1).
+		system.GET("/gitApp/manifest", h.StartGitAppManifest)
+		system.GET("/gitApp/callback", h.GitAppManifestCallback)
+		system.GET("/gitApp/setup", h.GitAppSetupCallback)
 		system.GET("/database/info", h.GetDatabaseInfo)
 		system.GET("/connectivity/database", h.CheckConnectivityDatabase)
 		system.GET("/connectivity/tms", h.CheckConnectivityTMS)

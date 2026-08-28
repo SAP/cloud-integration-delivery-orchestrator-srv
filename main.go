@@ -17,8 +17,9 @@ import (
 	"mmt-delivery/pkg/cf"
 	"mmt-delivery/pkg/cpi"
 	"mmt-delivery/pkg/env"
-	"mmt-delivery/pkg/xsuaa"
+	gh "mmt-delivery/pkg/github"
 	cpiotel "mmt-delivery/pkg/otel"
+	"mmt-delivery/pkg/xsuaa"
 	"mmt-delivery/service"
 	"mmt-delivery/web"
 
@@ -88,7 +89,8 @@ func main() {
 	})
 
 	// --- Build handler with all injected dependencies ---
-	h := handler.NewHandler(svc, database, env.Logger(), cpiManager, xsuaaClient, resolver, hub)
+	gitAppState := gh.NewStateStore(gh.DefaultStateTTL)
+	h := handler.NewHandler(svc, database, env.Logger(), cpiManager, xsuaaClient, resolver, hub, gitAppState)
 
 	// --- OAuth2 setup ---
 	oauthCfg, err := auth.LoadOAuthConfigFromEnv()
