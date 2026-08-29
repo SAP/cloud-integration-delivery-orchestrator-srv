@@ -65,6 +65,10 @@ func (m *mockGitClient) ListRepos(_ context.Context, owner string, ownerType str
 	return nil, nil
 }
 
+func (m *mockGitClient) ListAccessibleRepos(_ context.Context) ([]gh.RepoInfo, error) {
+	return nil, nil
+}
+
 // --- Mock CPI client for DownloadArtifactZip ---
 
 type mockCPIForGitSync struct {

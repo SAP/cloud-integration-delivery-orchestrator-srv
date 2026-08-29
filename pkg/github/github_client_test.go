@@ -7,9 +7,12 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/google/go-github/v89/github"
+
+	"mmt-delivery/pkg/cf"
 )
 
 // setupTestClient creates a test HTTP server and a GoGitHubClient pointed at it.
@@ -500,6 +503,111 @@ func TestCommit_RetryOnRefConflict(t *testing.T) {
 	}
 	if updateRefCalls != 2 {
 		t.Fatalf("expected 2 UpdateRef calls (1 conflict + 1 success), got %d", updateRefCalls)
+	}
+}
+
+// --- ListAccessibleRepos (GitHub App installation read-back) ---
+
+func TestListAccessibleRepos_SinglePage(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /installation/repositories", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(github.ListRepositories{
+			TotalCount: github.Ptr(2),
+			Repositories: []*github.Repository{
+				{Name: github.Ptr("repo1"), FullName: github.Ptr("acme/repo1"), Private: github.Ptr(false)},
+				{Name: github.Ptr("repo2"), FullName: github.Ptr("acme/repo2"), Private: github.Ptr(true)},
+			},
+		})
+	})
+
+	client, server := setupTestClient(t, mux)
+	defer server.Close()
+
+	repos, err := client.ListAccessibleRepos(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(repos) != 2 {
+		t.Fatalf("expected 2 repos, got %d", len(repos))
+	}
+	if repos[0].Name != "repo1" || repos[0].FullName != "acme/repo1" || repos[0].Private != false {
+		t.Fatalf("unexpected repo[0]: %+v", repos[0])
+	}
+	if repos[1].Name != "repo2" || repos[1].Private != true {
+		t.Fatalf("unexpected repo[1]: %+v", repos[1])
+	}
+}
+
+func TestListAccessibleRepos_Paginated(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /installation/repositories", func(w http.ResponseWriter, r *http.Request) {
+		page := r.URL.Query().Get("page")
+		if page == "" || page == "1" {
+			w.Header().Set("Link", fmt.Sprintf(`<%s/installation/repositories?page=2&per_page=100>; rel="next"`, server(r)))
+			json.NewEncoder(w).Encode(github.ListRepositories{
+				TotalCount:   github.Ptr(2),
+				Repositories: []*github.Repository{{Name: github.Ptr("repo-p1"), FullName: github.Ptr("acme/repo-p1"), Private: github.Ptr(false)}},
+			})
+		} else {
+			json.NewEncoder(w).Encode(github.ListRepositories{
+				TotalCount:   github.Ptr(2),
+				Repositories: []*github.Repository{{Name: github.Ptr("repo-p2"), FullName: github.Ptr("acme/repo-p2"), Private: github.Ptr(true)}},
+			})
+		}
+	})
+
+	client, server := setupTestClient(t, mux)
+	defer server.Close()
+
+	repos, err := client.ListAccessibleRepos(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(repos) != 2 {
+		t.Fatalf("expected 2 repos across pages, got %d", len(repos))
+	}
+	if repos[0].Name != "repo-p1" {
+		t.Fatalf("expected repo-p1, got %s", repos[0].Name)
+	}
+	if repos[1].Name != "repo-p2" {
+		t.Fatalf("expected repo-p2, got %s", repos[1].Name)
+	}
+}
+
+// --- newGoGitHubClient github_app branch error paths ---
+
+// fakeResolver is a test double for destinationResolver: returns a canned destination/error
+// without any OAuth/HTTP, so the github_app Password-handling branch can be exercised directly.
+type fakeResolver struct {
+	dest *cf.Destination
+	err  error
+}
+
+func (f fakeResolver) GetDestination(ctx context.Context, name string) (*cf.Destination, error) {
+	return f.dest, f.err
+}
+
+func TestNewGoGitHubClient_App_EmptyPassword(t *testing.T) {
+	_, err := newGoGitHubClient(context.Background(), "dest", "owner", "repo",
+		AuthConfig{Method: AuthMethodGitHubApp, AppID: 1, InstallationID: 2},
+		fakeResolver{dest: &cf.Destination{Name: "dest", Password: ""}})
+	if err == nil {
+		t.Fatal("expected error for empty password (missing base64 app private key)")
+	}
+	if !strings.Contains(err.Error(), "no password") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestNewGoGitHubClient_App_InvalidBase64(t *testing.T) {
+	_, err := newGoGitHubClient(context.Background(), "dest", "owner", "repo",
+		AuthConfig{Method: AuthMethodGitHubApp, AppID: 1, InstallationID: 2},
+		fakeResolver{dest: &cf.Destination{Name: "dest", Password: "!!! not valid base64 !!!"}})
+	if err == nil {
+		t.Fatal("expected error decoding invalid base64 app private key")
+	}
+	if !strings.Contains(err.Error(), "decode github app private key") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

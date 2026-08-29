@@ -32,12 +32,19 @@ type GoGitHubClient struct {
 	repo   string
 }
 
+// destinationResolver is the narrow, consumer-side view of the destination service that
+// newGoGitHubClient needs: resolve a destination by name. *cf.DestinationServiceClient
+// satisfies it implicitly, so callers pass their concrete client unchanged; tests supply a fake.
+type destinationResolver interface {
+	GetDestination(ctx context.Context, name string) (*cf.Destination, error)
+}
+
 // newGoGitHubClient creates a GoGitHubClient by resolving a BTP Destination for auth/URL.
 // The destination is BasicAuthentication type; its Password field carries either a GitHub PAT
 // (auth.Method == AuthMethodPAT) or a base64-encoded GitHub App private key (auth.Method ==
 // AuthMethodGitHubApp). The auth method — not the destination content — is the sole discriminator
 // of how Password is interpreted, so the two modes never cross paths.
-func newGoGitHubClient(ctx context.Context, destName string, owner, repo string, auth AuthConfig, resolver *cf.DestinationServiceClient) (*GoGitHubClient, error) {
+func newGoGitHubClient(ctx context.Context, destName string, owner, repo string, auth AuthConfig, resolver destinationResolver) (*GoGitHubClient, error) {
 	dest, err := resolver.GetDestination(ctx, destName)
 	if err != nil {
 		return nil, fmt.Errorf("github destination %s not found: %w", destName, err)
