@@ -80,6 +80,14 @@ type GitArtifactClient interface {
 	// ListRepos returns repositories accessible to the authenticated user under the given owner.
 	// ownerType should be "User" or "Organization" (from ListOwners result) to avoid an extra API call.
 	ListRepos(ctx context.Context, owner string, ownerType string) ([]RepoInfo, error)
+
+	// ListAccessibleRepos returns the repositories the current credential is authorized to access,
+	// without browsing an arbitrary owner. This is the discovery shape for scoped credentials:
+	//   - GitHub App: the installation's granted repos (GET /installation/repositories).
+	//   - (future) GitLab project/group access token, Bitbucket repo/workspace token, ... map to
+	//     their native "list repos this token can see" endpoint.
+	// Distinct from ListOwners/ListRepos, which require a broad user-scoped token to browse owners.
+	ListAccessibleRepos(ctx context.Context) ([]RepoInfo, error)
 }
 
 // NewGitClient is the factory that creates a GitArtifactClient based on provider type.

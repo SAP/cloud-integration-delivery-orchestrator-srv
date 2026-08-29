@@ -101,11 +101,19 @@ func TestResolveGitHubWebBase(t *testing.T) {
 }
 
 func TestNewAppURL(t *testing.T) {
-	if got := NewAppURL(""); got != "https://github.com/settings/apps/new" {
-		t.Errorf("public NewAppURL = %q", got)
+	// Personal account (empty org) → /settings/apps/new.
+	if got := NewAppURL("", ""); got != "https://github.com/settings/apps/new" {
+		t.Errorf("public personal NewAppURL = %q", got)
 	}
-	if got := NewAppURL("https://github.example.com"); got != "https://github.example.com/settings/apps/new" {
-		t.Errorf("GHES NewAppURL = %q", got)
+	if got := NewAppURL("https://github.example.com", ""); got != "https://github.example.com/settings/apps/new" {
+		t.Errorf("GHES personal NewAppURL = %q", got)
+	}
+	// Org ownership → /organizations/<org>/settings/apps/new (DM-7).
+	if got := NewAppURL("", "acme"); got != "https://github.com/organizations/acme/settings/apps/new" {
+		t.Errorf("public org NewAppURL = %q", got)
+	}
+	if got := NewAppURL("https://github.example.com", "acme"); got != "https://github.example.com/organizations/acme/settings/apps/new" {
+		t.Errorf("GHES org NewAppURL = %q", got)
 	}
 }
 

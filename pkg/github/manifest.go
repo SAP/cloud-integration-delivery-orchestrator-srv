@@ -190,10 +190,19 @@ func resolveGitHubWebBase(destURL string) string {
 	return strings.TrimSuffix(apiBaseURL, "/api/v3")
 }
 
-// NewAppURL is the manifest form target: <web-base>/settings/apps/new.
-// The browser POSTs the manifest (with ?state=<csrf>) here.
-func NewAppURL(destURL string) string {
-	return resolveGitHubWebBase(destURL) + "/settings/apps/new"
+// NewAppURL is the manifest form target. The org argument (DM-7 / §9.0) selects
+// ownership of the created App: empty → personal account
+// (<web-base>/settings/apps/new); non-empty → that org
+// (<web-base>/organizations/<org>/settings/apps/new). Because the manifest App is
+// private (public:false), it can only be installed on the account that owns it,
+// so ownership must match the sync-target account. The browser POSTs the manifest
+// (with ?state=<csrf>) here.
+func NewAppURL(destURL, org string) string {
+	base := resolveGitHubWebBase(destURL)
+	if org == "" {
+		return base + "/settings/apps/new"
+	}
+	return base + "/organizations/" + url.PathEscape(org) + "/settings/apps/new"
 }
 
 // InstallURL is the post-creation install deep link:

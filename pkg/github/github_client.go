@@ -358,6 +358,30 @@ func (g *GoGitHubClient) ListRepos(ctx context.Context, owner string, ownerType 
 	return repos, nil
 }
 
+// ListAccessibleRepos returns the repositories the current credential is authorized to access
+// (GitHub App mode: GET /installation/repositories). Requires an installation-authed client
+// (AuthMethodGitHubApp); the installation token scopes the result to exactly the repos the admin
+// granted at install time. This is the scoped-credential discovery path (OP-1) — distinct from
+// PAT-mode ListRepos, which browses an arbitrary owner.
+func (g *GoGitHubClient) ListAccessibleRepos(ctx context.Context) ([]RepoInfo, error) {
+	var repos []RepoInfo
+	opts := &github.ListOptions{PerPage: 100}
+	for {
+		list, resp, err := g.client.Apps.ListRepos(ctx, opts)
+		if err != nil {
+			return nil, fmt.Errorf("list installation repos: %w", err)
+		}
+		for _, r := range list.Repositories {
+			repos = append(repos, RepoInfo{Name: r.GetName(), FullName: r.GetFullName(), Private: r.GetPrivate()})
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	return repos, nil
+}
+
 func (g *GoGitHubClient) ReadTree(ctx context.Context, commitSHA string, treePath string) (FileMap, error) {
 	// Get the tree at commitSHA recursively
 	tree, _, err := g.client.Git.GetTree(ctx, g.owner, g.repo, commitSHA, true)

@@ -230,8 +230,24 @@ func (h *Handler) UpsertGitRepoConfig(ctx *gin.Context) {
 	OK(ctx, result)
 }
 
+// gitHubAppModeConfigured reports whether the persisted GitRepoConfig is in github_app mode.
+// Returns false when no config exists yet (PAT is the default). Used to guard the PAT-only
+// owner/repo browsing endpoints, which have no meaning in App mode (the installation token scopes
+// discovery to the granted repos — see GetGitAppRepos).
+func (h *Handler) gitHubAppModeConfigured() bool {
+	var config db.GitRepoConfig
+	if err := h.db.First(&config).Error; err != nil {
+		return false
+	}
+	return gh.AuthMethod(config.AuthMethod) == gh.AuthMethodGitHubApp
+}
+
 // GET /api/v1/system/gitRepoConfig/owners?provider=xxx&destinationName=xxx
 func (h *Handler) GetGitOwners(ctx *gin.Context) {
+	if h.gitHubAppModeConfigured() {
+		Fail(ctx, http.StatusBadRequest, "owner browsing is not available in github_app mode; use /system/gitApp/repos")
+		return
+	}
 	provider := ctx.Query("provider")
 	destName := ctx.Query("destinationName")
 	if provider == "" || destName == "" {
@@ -256,6 +272,10 @@ func (h *Handler) GetGitOwners(ctx *gin.Context) {
 
 // GET /api/v1/system/gitRepoConfig/repos?provider=xxx&destinationName=xxx&owner=xxx&ownerType=xxx
 func (h *Handler) GetGitRepos(ctx *gin.Context) {
+	if h.gitHubAppModeConfigured() {
+		Fail(ctx, http.StatusBadRequest, "repo browsing is not available in github_app mode; use /system/gitApp/repos")
+		return
+	}
 	provider := ctx.Query("provider")
 	destName := ctx.Query("destinationName")
 	owner := ctx.Query("owner")
@@ -274,6 +294,48 @@ func (h *Handler) GetGitRepos(ctx *gin.Context) {
 	repos, err := client.ListRepos(ctx.Request.Context(), owner, ownerType)
 	if err != nil {
 		Fail(ctx, http.StatusServiceUnavailable, fmt.Sprintf("failed to list repos: %s", err))
+		return
+	}
+
+	OK(ctx, repos)
+}
+
+// GetGitAppRepos returns the repositories the current GitHub App installation was granted
+// (App-mode read-back discovery, OP-1). Unlike GetGitOwners/GetGitRepos (PAT-only, browse an
+// arbitrary owner), this reads the persisted GitRepoConfig and lists exactly the repos the admin
+// authorized at install time via GET /installation/repositories. Requires the install step to
+// have completed (GithubInstallationID populated by the setup callback).
+//
+// GET /api/v1/system/gitApp/repos
+func (h *Handler) GetGitAppRepos(ctx *gin.Context) {
+	var config db.GitRepoConfig
+	if err := h.db.First(&config).Error; err != nil {
+		Fail(ctx, http.StatusNotFound, "no GitRepoConfig found")
+		return
+	}
+	if gh.AuthMethod(config.AuthMethod) != gh.AuthMethodGitHubApp {
+		Fail(ctx, http.StatusBadRequest, "installation repo read-back is only valid in github_app mode")
+		return
+	}
+	if config.GithubAppID == 0 || config.GithubInstallationID == 0 {
+		Fail(ctx, http.StatusConflict, "GitHub App not fully installed yet (missing app or installation id)")
+		return
+	}
+
+	// owner/repo are irrelevant for installation read-back; the installation token scopes the result.
+	client, err := gh.NewGitClient(ctx.Request.Context(), gh.Provider(config.Provider), config.DestinationName, "", "", gh.AuthConfig{
+		Method:         gh.AuthMethod(config.AuthMethod),
+		AppID:          config.GithubAppID,
+		InstallationID: config.GithubInstallationID,
+	}, h.destSvc)
+	if err != nil {
+		Fail(ctx, http.StatusServiceUnavailable, fmt.Sprintf("failed to create git client: %s", err))
+		return
+	}
+
+	repos, err := client.ListAccessibleRepos(ctx.Request.Context())
+	if err != nil {
+		Fail(ctx, http.StatusServiceUnavailable, fmt.Sprintf("failed to list accessible repos: %s", err))
 		return
 	}
 

@@ -296,6 +296,8 @@ func (h *Handler) SetupRoutes(v1 *gin.RouterGroup, v2 *gin.RouterGroup, requireS
 		system.GET("/gitApp/manifest", h.StartGitAppManifest)
 		system.GET("/gitApp/callback", h.GitAppManifestCallback)
 		system.GET("/gitApp/setup", h.GitAppSetupCallback)
+		// App-mode read-back discovery (OP-1): lists repos the installation was granted.
+		system.GET("/gitApp/repos", h.GetGitAppRepos)
 		system.GET("/database/info", h.GetDatabaseInfo)
 		system.GET("/connectivity/database", h.CheckConnectivityDatabase)
 		system.GET("/connectivity/tms", h.CheckConnectivityTMS)

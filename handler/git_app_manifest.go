@@ -81,9 +81,24 @@ func redirectSPA(c *gin.Context, status, reason string) {
 // new App every run, and a random name is globally unique in one shot without
 // any collision-retry dance or user renaming.
 //
-// GET /api/v1/system/gitApp/manifest?githubUrl=<host>
+// accountType (DM-7 / §9.0) selects App ownership: "org" (with a non-empty org
+// query) points the POST at /organizations/<org>/settings/apps/new; anything else
+// defaults to the personal /settings/apps/new. Because the manifest App is private,
+// ownership must match the sync-target account.
+//
+// GET /api/v1/system/gitApp/manifest?githubUrl=<host>&accountType=<user|org>&org=<org>
 func (h *Handler) StartGitAppManifest(c *gin.Context) {
 	githubURL := c.Query("githubUrl") // empty → public github.com
+
+	// org ownership only when accountType=org AND an org name is given (DM-7).
+	org := ""
+	if c.Query("accountType") == "org" {
+		org = c.Query("org")
+		if org == "" {
+			Fail(c, http.StatusBadRequest, "org is required when accountType=org")
+			return
+		}
+	}
 
 	base := h.cfAppBaseURL(c)
 
@@ -108,7 +123,7 @@ func (h *Handler) StartGitAppManifest(c *gin.Context) {
 	}
 
 	OK(c, gin.H{
-		"postUrl":  gh.NewAppURL(githubURL) + "?state=" + url.QueryEscape(state),
+		"postUrl":  gh.NewAppURL(githubURL, org) + "?state=" + url.QueryEscape(state),
 		"manifest": manifestJSON,
 		"state":    state,
 	})
