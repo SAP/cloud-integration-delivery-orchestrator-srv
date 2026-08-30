@@ -164,32 +164,39 @@ func (h *Handler) GetGitRepoConfig(ctx *gin.Context) {
 }
 
 // PUT /api/v1/system/gitRepoConfig
+//
+// Two write semantics, keyed by AuthMethod — the backend is the source of truth for the split:
+//   - github_app: the connection-identity/credential fields (destinationName, owner, githubAppId,
+//     githubInstallationId) are authored out-of-band by the manifest/setup callbacks; the client is
+//     NOT trusted to supply or change them. Only the user-owned target selection (repo + enabled) is
+//     applied — see updateGitAppTarget.
+//   - pat (also empty AuthMethod, backward-compat): the client authors the full config.
 func (h *Handler) UpsertGitRepoConfig(ctx *gin.Context) {
 	var req db.GitRepoConfig
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		Fail(ctx, http.StatusBadRequest, fmt.Sprintf("invalid request body: %s", err))
 		return
 	}
+
+	if gh.AuthMethod(req.AuthMethod) == gh.AuthMethodGitHubApp {
+		h.updateGitAppTarget(ctx, req)
+		return
+	}
+
+	// pat mode: client authors the whole row.
 	if req.Provider == "" || req.DestinationName == "" || req.Repo == "" {
 		Fail(ctx, http.StatusBadRequest, "provider, destinationName, and repo are required")
 		return
 	}
-	// Owner is required for pat mode; in github_app mode it is derived from the installation (OP-1),
-	// so it may be empty here.
-	if gh.AuthMethod(req.AuthMethod) != gh.AuthMethodGitHubApp && req.Owner == "" {
+	if req.Owner == "" {
 		Fail(ctx, http.StatusBadRequest, "owner is required for Personal Access Token(PAT) mode")
-		return
-	}
-	// github_app mode additionally requires the (non-secret) App ID and Installation ID; the base64
-	// private key lives in the destination Password (written by the manifest flow callback).
-	if gh.AuthMethod(req.AuthMethod) == gh.AuthMethodGitHubApp && (req.GithubAppID == 0 || req.GithubInstallationID == 0) {
-		Fail(ctx, http.StatusBadRequest, "githubAppId and githubInstallationId are required for github_app mode")
 		return
 	}
 
 	var existing db.GitRepoConfig
 	if err := h.db.First(&existing).Error; err != nil {
 		// Create new
+		req.AuthMethod = string(gh.AuthMethodPAT)
 		if err := h.db.Create(&req).Error; err != nil {
 			Fail(ctx, http.StatusInternalServerError, fmt.Sprintf("failed to create git repo config: %s", err))
 			return
@@ -198,26 +205,19 @@ func (h *Handler) UpsertGitRepoConfig(ctx *gin.Context) {
 		return
 	}
 
-	// Check if repo target changed (owner or repo name)
-	var warning string
-	repoChanged := existing.Owner != req.Owner || existing.Repo != req.Repo || existing.DestinationName != req.DestinationName
-	if repoChanged {
-		var count int64
-		h.db.Model(&db.GitArtifactSnapshot{}).Where("status = ?", "completed").Count(&count)
-		if count > 0 {
-			warning = fmt.Sprintf("Repository target changed. %d existing snapshot(s) reference the old repository — their Code Compare may become unavailable.", count)
-		}
-	}
+	// Repo target changed (owner / repo / destination) → warn about orphaned snapshots.
+	warning := h.snapshotImpactWarning(existing.Owner != req.Owner || existing.Repo != req.Repo || existing.DestinationName != req.DestinationName)
 
-	// Update existing
+	// Update existing as a full pat config. Switching back from github_app to pat is an explicit
+	// user action, so the stale App identifiers are cleared — the row reflects a single active mode.
 	existing.Provider = req.Provider
 	existing.DestinationName = req.DestinationName
 	existing.Owner = req.Owner
 	existing.Repo = req.Repo
 	existing.Enabled = req.Enabled
-	existing.AuthMethod = req.AuthMethod
-	existing.GithubAppID = req.GithubAppID
-	existing.GithubInstallationID = req.GithubInstallationID
+	existing.AuthMethod = string(gh.AuthMethodPAT)
+	existing.GithubAppID = 0
+	existing.GithubInstallationID = 0
 	if err := h.db.Save(&existing).Error; err != nil {
 		Fail(ctx, http.StatusInternalServerError, fmt.Sprintf("failed to update git repo config: %s", err))
 		return
@@ -228,6 +228,59 @@ func (h *Handler) UpsertGitRepoConfig(ctx *gin.Context) {
 		result["warning"] = warning
 	}
 	OK(ctx, result)
+}
+
+// updateGitAppTarget applies the user-owned target selection (repo + enabled) for github_app mode.
+// It deliberately does NOT touch the callback-authored identity/credential fields (destinationName,
+// owner, githubAppId, githubInstallationId) — those are the backend's source of truth. Requires an
+// existing, fully-installed github_app row (created by the manifest/setup callbacks); otherwise 409.
+func (h *Handler) updateGitAppTarget(ctx *gin.Context, req db.GitRepoConfig) {
+	if req.Repo == "" {
+		Fail(ctx, http.StatusBadRequest, "repo is required")
+		return
+	}
+	var existing db.GitRepoConfig
+	if err := h.db.First(&existing).Error; err != nil {
+		Fail(ctx, http.StatusConflict, "GitHub App not registered yet; complete the App registration flow first")
+		return
+	}
+	if gh.AuthMethod(existing.AuthMethod) != gh.AuthMethodGitHubApp {
+		Fail(ctx, http.StatusConflict, "existing git repo config is not in github_app mode")
+		return
+	}
+	if existing.GithubAppID == 0 || existing.GithubInstallationID == 0 {
+		Fail(ctx, http.StatusConflict, "GitHub App not fully installed yet (missing app or installation id)")
+		return
+	}
+
+	warning := h.snapshotImpactWarning(existing.Repo != req.Repo)
+
+	existing.Repo = req.Repo
+	existing.Enabled = req.Enabled
+	if err := h.db.Save(&existing).Error; err != nil {
+		Fail(ctx, http.StatusInternalServerError, fmt.Sprintf("failed to update git repo config: %s", err))
+		return
+	}
+
+	result := gin.H{"config": existing}
+	if warning != "" {
+		result["warning"] = warning
+	}
+	OK(ctx, result)
+}
+
+// snapshotImpactWarning returns a user-facing warning when the sync target changed and completed
+// snapshots exist that reference the old target (their Code Compare may break). Empty when no impact.
+func (h *Handler) snapshotImpactWarning(changed bool) string {
+	if !changed {
+		return ""
+	}
+	var count int64
+	h.db.Model(&db.GitArtifactSnapshot{}).Where("status = ?", "completed").Count(&count)
+	if count == 0 {
+		return ""
+	}
+	return fmt.Sprintf("Repository target changed. %d existing snapshot(s) reference the old repository — their Code Compare may become unavailable.", count)
 }
 
 // gitHubAppModeConfigured reports whether the persisted GitRepoConfig is in github_app mode.
