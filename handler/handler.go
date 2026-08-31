@@ -3,6 +3,7 @@ package handler
 import (
 	"errors"
 	"net/http"
+	"net/url"
 
 	"mmt-delivery/pkg/cf"
 	"mmt-delivery/pkg/cpi"
@@ -66,6 +67,29 @@ func FailCode(c *gin.Context, status int, code, message string) {
 // FailCodeErrors sends an error response with code + message + structured error details.
 func FailCodeErrors(c *gin.Context, status int, code, message string, errors any) {
 	c.AbortWithStatusJSON(status, gin.H{"code": code, "message": message, "errors": errors})
+}
+
+// RedirectSPA issues a 302 back to the SPA after a browser-facing callback,
+// mirroring the OKMsg()/Fail() JSON helpers but for top-level redirect flows.
+// Because a 302 has no body, the toast directive rides the query string: the SPA
+// reads ?toast=<severity>&msg=<message> and shows it generically (severity is
+// "success" or "error"), exactly like OKMsg carries a backend-authored message.
+// The frontend never interprets the outcome — the message is authored here, the
+// single source of truth. `extra` carries optional action flags (e.g.
+// openGitDialog=1) the destination view honors as a normal deep link.
+func RedirectSPA(c *gin.Context, path, severity, message string, extra url.Values) {
+	if path == "" {
+		path = "/"
+	}
+	q := url.Values{}
+	q.Set("toast", severity)
+	q.Set("msg", message)
+	for k, vs := range extra {
+		for _, v := range vs {
+			q.Add(k, v)
+		}
+	}
+	c.Redirect(http.StatusFound, path+"?"+q.Encode())
 }
 
 // isUniqueViolation reports whether err is a Postgres unique-constraint
@@ -298,6 +322,9 @@ func (h *Handler) SetupRoutes(v1 *gin.RouterGroup, v2 *gin.RouterGroup, requireS
 		system.GET("/gitApp/setup", h.GitAppSetupCallback)
 		// App-mode read-back discovery (OP-1): lists repos the installation was granted.
 		system.GET("/gitApp/repos", h.GetGitAppRepos)
+		// Exit mechanism (§10): uninstall + delete destination + unbind config, returns the
+		// Advanced-page deep-link for the UI-only App-registration deletion.
+		system.DELETE("/gitApp", h.GitAppDisconnect)
 		system.GET("/database/info", h.GetDatabaseInfo)
 		system.GET("/connectivity/database", h.CheckConnectivityDatabase)
 		system.GET("/connectivity/tms", h.CheckConnectivityTMS)

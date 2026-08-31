@@ -118,19 +118,39 @@ func TestNewAppURL(t *testing.T) {
 }
 
 func TestInstallURL(t *testing.T) {
-	got := InstallURL("", "my-app", "st4te")
-	want := "https://github.com/apps/my-app/installations/new?state=st4te"
+	// Personal (owner type "User") → settings-based install page. A private App has
+	// no public /apps/<slug> listing, so install happens from App settings.
+	got := InstallURL("", "User", "octocat", "my-app")
+	want := "https://github.com/settings/apps/my-app/installations"
 	if got != want {
-		t.Errorf("InstallURL = %q, want %q", got, want)
+		t.Errorf("personal InstallURL = %q, want %q", got, want)
 	}
-	// No state → no query string.
-	if got := InstallURL("", "my-app", ""); got != "https://github.com/apps/my-app/installations/new" {
-		t.Errorf("InstallURL without state = %q", got)
+	// Organization owner → /organizations/<owner>/settings/apps/<slug>/installations.
+	if got := InstallURL("", "Organization", "acme", "my-app"); got != "https://github.com/organizations/acme/settings/apps/my-app/installations" {
+		t.Errorf("org InstallURL = %q", got)
+	}
+	// GHES host is honored; empty/unknown owner type defaults to personal.
+	if got := InstallURL("https://github.example.com", "", "octocat", "my-app"); got != "https://github.example.com/settings/apps/my-app/installations" {
+		t.Errorf("GHES personal InstallURL = %q", got)
 	}
 }
 
-func TestGenerateAppName(t *testing.T) {
-	a, err := GenerateAppName()
+func TestAppAdvancedURL(t *testing.T) {
+	// Personal (owner type "User") → App settings Advanced page (UI-only registration delete).
+	if got := AppAdvancedURL("", "User", "octocat", "my-app"); got != "https://github.com/settings/apps/my-app/advanced" {
+		t.Errorf("personal AppAdvancedURL = %q", got)
+	}
+	// Organization owner → /organizations/<owner>/settings/apps/<slug>/advanced.
+	if got := AppAdvancedURL("", "Organization", "acme", "my-app"); got != "https://github.com/organizations/acme/settings/apps/my-app/advanced" {
+		t.Errorf("org AppAdvancedURL = %q", got)
+	}
+	// GHES host honored; empty/unknown owner type defaults to personal.
+	if got := AppAdvancedURL("https://github.example.com", "", "octocat", "my-app"); got != "https://github.example.com/settings/apps/my-app/advanced" {
+		t.Errorf("GHES personal AppAdvancedURL = %q", got)
+	}
+}
+
+func TestGenerateAppName(t *testing.T) {	a, err := GenerateAppName()
 	if err != nil {
 		t.Fatalf("GenerateAppName: %v", err)
 	}

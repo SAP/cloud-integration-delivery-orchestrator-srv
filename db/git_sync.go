@@ -44,8 +44,10 @@ type GitRepoConfig struct {
 
 	// ── github_app credentials (callback-owned; github_app mode only) ──────────
 	// Non-secret App/Installation IDs written by the manifest/setup callbacks; zero/omitted in pat mode.
-	GithubAppID          int64 `json:"githubAppId,omitempty"`          // App ID (manifest callback)
-	GithubInstallationID int64 `json:"githubInstallationId,omitempty"` // Installation ID (setup callback)
+	GithubAppID          int64  `json:"githubAppId,omitempty"`          // App ID (manifest callback)
+	GithubInstallationID int64  `json:"githubInstallationId,omitempty"` // Installation ID (setup callback)
+	GithubOwnerType      string `json:"githubOwnerType,omitempty"`      // "User" | "Organization" (manifest callback) — selects the org-vs-personal shape of the App settings/advanced page URL used by the disconnect flow
+	GithubAppSlug        string `json:"githubAppSlug,omitempty"`        // App URL name (manifest callback) — the human-readable slug GitHub requires in /settings/apps/<slug>/advanced; NOT the numeric GithubAppID. Persisted so the disconnect deep-link needn't reverse-parse it from DestinationName.
 }
 
 // GitArtifactSnapshot records a single sync event — one artifact version pushed to GitHub.

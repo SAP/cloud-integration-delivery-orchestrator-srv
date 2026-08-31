@@ -218,6 +218,8 @@ func (h *Handler) UpsertGitRepoConfig(ctx *gin.Context) {
 	existing.AuthMethod = string(gh.AuthMethodPAT)
 	existing.GithubAppID = 0
 	existing.GithubInstallationID = 0
+	existing.GithubOwnerType = ""
+	existing.GithubAppSlug = ""
 	if err := h.db.Save(&existing).Error; err != nil {
 		Fail(ctx, http.StatusInternalServerError, fmt.Sprintf("failed to update git repo config: %s", err))
 		return

@@ -133,7 +133,10 @@ func NewStateStore(ttl time.Duration) *StateStore {
 
 // Issue returns a fresh random token bound to payload, valid for the store's TTL.
 func (s *StateStore) Issue(payload string) (string, error) {
-	b := make([]byte, 32)
+	// 16 bytes (128 bits) hex-encoded → 32 chars: ample entropy for a single-use,
+	// 15-min anti-forgery token (it is not a long-lived credential) while keeping
+	// the ?state= on the manifest POST URL short.
+	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
 		return "", fmt.Errorf("generate state token: %w", err)
 	}
@@ -205,15 +208,37 @@ func NewAppURL(destURL, org string) string {
 	return base + "/organizations/" + url.PathEscape(org) + "/settings/apps/new"
 }
 
-// InstallURL is the post-creation install deep link:
-// <web-base>/apps/<slug>/installations/new?state=<csrf>. GitHub passes state
-// through to the setup_url callback so it can be validated there.
-func InstallURL(destURL, slug, state string) string {
-	u := resolveGitHubWebBase(destURL) + "/apps/" + url.PathEscape(slug) + "/installations/new"
-	if state != "" {
-		u += "?state=" + url.QueryEscape(state)
+// InstallURL is the post-creation install deep link. The manifest App is private
+// (public:false), so the public listing page (<web-base>/apps/<slug>/…) does not
+// exist and 404s; a private App is installed from its owner's App-settings page
+// instead. ownerType (from the conversion response's owner.type) selects the path:
+// "Organization" → <web-base>/organizations/<owner>/settings/apps/<slug>/installations;
+// anything else (personal) → <web-base>/settings/apps/<slug>/installations.
+//
+// No ?state= is appended: GitHub preserves the install-URL state only for the
+// public /apps/<slug>/installations/new flow, not the settings install page, so
+// the setup_url callback cannot rely on it (see handler.GitAppSetupCallback).
+func InstallURL(destURL, ownerType, owner, slug string) string {
+	base := resolveGitHubWebBase(destURL)
+	if strings.EqualFold(ownerType, "Organization") {
+		return base + "/organizations/" + url.PathEscape(owner) + "/settings/apps/" + url.PathEscape(slug) + "/installations"
 	}
-	return u
+	return base + "/settings/apps/" + url.PathEscape(slug) + "/installations"
+}
+
+// AppAdvancedURL is the created App's "Advanced" settings page, where the admin
+// finishes the exit flow by clicking "Delete GitHub App" (DM-8 / §10). Deleting
+// the App *registration* is UI-only — GitHub exposes no REST API for it (unlike
+// uninstalling an installation, which UninstallApp does). ownerType selects the
+// path exactly like InstallURL: "Organization" →
+// <web-base>/organizations/<owner>/settings/apps/<slug>/advanced; anything else
+// (personal) → <web-base>/settings/apps/<slug>/advanced.
+func AppAdvancedURL(destURL, ownerType, owner, slug string) string {
+	base := resolveGitHubWebBase(destURL)
+	if strings.EqualFold(ownerType, "Organization") {
+		return base + "/organizations/" + url.PathEscape(owner) + "/settings/apps/" + url.PathEscape(slug) + "/advanced"
+	}
+	return base + "/settings/apps/" + url.PathEscape(slug) + "/advanced"
 }
 
 // =============================================================================
@@ -224,10 +249,11 @@ func InstallURL(destURL, slug, state string) string {
 // ClientID/ClientSecret/WebhookSecret from the conversion are intentionally
 // dropped (§9: unused, never persisted).
 type AppCredentials struct {
-	AppID int64
-	Slug  string
-	Owner string
-	PEM   string // raw PEM private key (caller base64-encodes before storing)
+	AppID     int64
+	Slug      string
+	Owner     string
+	OwnerType string // "User" or "Organization" — selects the install-page URL shape
+	PEM       string // raw PEM private key (caller base64-encodes before storing)
 }
 
 // CompleteAppManifest exchanges a one-time manifest code for the created App's
@@ -247,10 +273,11 @@ func CompleteAppManifest(ctx context.Context, destURL, code string) (*AppCredent
 		return nil, fmt.Errorf("manifest conversion returned incomplete app config (missing id or pem)")
 	}
 	return &AppCredentials{
-		AppID: cfg.GetID(),
-		Slug:  cfg.GetSlug(),
-		Owner: cfg.GetOwner().GetLogin(),
-		PEM:   cfg.GetPEM(),
+		AppID:     cfg.GetID(),
+		Slug:      cfg.GetSlug(),
+		Owner:     cfg.GetOwner().GetLogin(),
+		OwnerType: cfg.GetOwner().GetType(),
+		PEM:       cfg.GetPEM(),
 	}, nil
 }
 

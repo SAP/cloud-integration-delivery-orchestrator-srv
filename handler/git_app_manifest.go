@@ -37,6 +37,46 @@ const (
 	gitAppSetupPath    = "/api/v1/system/gitApp/setup"
 )
 
+// gitAppRedirectReason is an internal key selecting the human-readable message
+// the manifest callbacks send on failure. Per the redirect contract (RFC 010
+// doc 12 RP-3) the backend authors the toast text — mirroring OKMsg()/Fail() —
+// so the reason code never crosses to the client; only its message does. The
+// typed const keeps call sites self-documenting and the message table in one
+// place.
+type gitAppRedirectReason string
+
+const (
+	reasonInvalidState             gitAppRedirectReason = "invalid_state"
+	reasonMissingCode              gitAppRedirectReason = "missing_code"
+	reasonNameTaken                gitAppRedirectReason = "name_taken"
+	reasonManifestConversionFailed gitAppRedirectReason = "manifest_conversion_failed"
+	reasonDestinationWriteFailed   gitAppRedirectReason = "destination_write_failed"
+	reasonConfigWriteFailed        gitAppRedirectReason = "config_write_failed"
+	reasonMissingInstallationID    gitAppRedirectReason = "missing_installation_id"
+	reasonNoConfig                 gitAppRedirectReason = "no_config"
+)
+
+// gitAppReasonMessages is the single source of truth for the failure toast text
+// (moved here from the frontend so it matches the OKMsg/Fail convention where the
+// backend authors messages). name_taken nudges the user to re-run the flow, which
+// mints a fresh random name (RP-5).
+var gitAppReasonMessages = map[gitAppRedirectReason]string{
+	reasonInvalidState:             "The registration link expired or was invalid. Please try again.",
+	reasonMissingCode:              "GitHub did not return an authorization code. Please try again.",
+	reasonNameTaken:                "The generated App name was already taken. Please retry — a new name will be used.",
+	reasonManifestConversionFailed: "GitHub could not create the App from the manifest. Please try again.",
+	reasonDestinationWriteFailed:   "Failed to store the App credentials. Please contact your administrator.",
+	reasonConfigWriteFailed:        "Failed to save the GitHub App configuration. Please try again.",
+	reasonMissingInstallationID:    "The installation did not complete. Please install the App on a repository.",
+	reasonNoConfig:                 "No configuration found to attach the installation to. Please re-register the App.",
+}
+
+// gitAppLandingPath is where every manifest redirect (success or failure) lands:
+// the System Config page, next to the Git dialog the admin started from. Success
+// additionally carries openGitDialog=1 so SystemConfigView reopens the dialog on
+// its own mount — no frontend interpretation of the outcome is needed.
+const gitAppLandingPath = "/config/system-config"
+
 // cfAppBaseURL returns the authoritative external base URL for building GitHub
 // redirect/setup callbacks. On CF this is the platform-injected route
 // (ApplicationURIs[0]) — non-spoofable, unlike the request Host (DM-3). Request
@@ -63,14 +103,18 @@ func (h *Handler) cfAppBaseURL(c *gin.Context) string {
 	return scheme + "://" + c.Request.Host
 }
 
-// redirectSPA sends the browser back to the SPA with a status query param the
-// frontend reads to show a toast (RP-3). Relative redirect keeps the same host.
-func redirectSPA(c *gin.Context, status, reason string) {
-	target := "/?gitApp=" + status
-	if reason != "" {
-		target += "&reason=" + url.QueryEscape(reason)
-	}
-	c.Redirect(http.StatusFound, target)
+// gitAppFail 302s back to the System Config page with an error toast carrying the
+// backend-authored message for reason. The frontend just shows it (RP-3).
+func gitAppFail(c *gin.Context, reason gitAppRedirectReason) {
+	RedirectSPA(c, gitAppLandingPath, "error", gitAppReasonMessages[reason], nil)
+}
+
+// gitAppOK 302s back to the System Config page with a success toast and the
+// openGitDialog flag, so the dialog reopens on SystemConfigView's own mount.
+func gitAppOK(c *gin.Context) {
+	RedirectSPA(c, gitAppLandingPath, "success",
+		"GitHub App registered and installed successfully.",
+		url.Values{"openGitDialog": {"1"}})
 }
 
 // StartGitAppManifest builds the App manifest and returns it with the POST target
@@ -139,11 +183,11 @@ func (h *Handler) GitAppManifestCallback(c *gin.Context) {
 	githubURL, ok := h.gitAppState.Consume(c.Query("state"))
 	if !ok {
 		h.logger.Warnf("git app callback: invalid or expired state")
-		redirectSPA(c, "err", "invalid_state")
+		gitAppFail(c, reasonInvalidState)
 		return
 	}
 	if code == "" {
-		redirectSPA(c, "err", "missing_code")
+		gitAppFail(c, reasonMissingCode)
 		return
 	}
 
@@ -154,10 +198,10 @@ func (h *Handler) GitAppManifestCallback(c *gin.Context) {
 		// happens it is recoverable: the SPA simply restarts the flow, which
 		// mints a fresh random name (RP-5). Anything else is generic.
 		if gh.IsNameTaken(err) {
-			redirectSPA(c, "err", "name_taken")
+			gitAppFail(c, reasonNameTaken)
 			return
 		}
-		redirectSPA(c, "err", "manifest_conversion_failed")
+		gitAppFail(c, reasonManifestConversionFailed)
 		return
 	}
 
@@ -179,7 +223,7 @@ func (h *Handler) GitAppManifestCallback(c *gin.Context) {
 	}
 	if err := h.destSvc.UpsertDestination(c.Request.Context(), dest); err != nil {
 		h.logger.Errorf("git app callback: upsert destination failed: %s", err)
-		redirectSPA(c, "err", "destination_write_failed")
+		gitAppFail(c, reasonDestinationWriteFailed)
 		return
 	}
 
@@ -194,10 +238,12 @@ func (h *Handler) GitAppManifestCallback(c *gin.Context) {
 			DestinationName: destName,
 			GithubAppID:     creds.AppID,
 			Owner:           creds.Owner,
+			GithubOwnerType: creds.OwnerType,
+			GithubAppSlug:   creds.Slug,
 		}
 		if err := h.db.Create(&newCfg).Error; err != nil {
 			h.logger.Errorf("git app callback: create config failed: %s", err)
-			redirectSPA(c, "err", "config_write_failed")
+			gitAppFail(c, reasonConfigWriteFailed)
 			return
 		}
 	} else {
@@ -206,51 +252,122 @@ func (h *Handler) GitAppManifestCallback(c *gin.Context) {
 		existing.DestinationName = destName
 		existing.GithubAppID = creds.AppID
 		existing.Owner = creds.Owner
+		existing.GithubOwnerType = creds.OwnerType
+		existing.GithubAppSlug = creds.Slug
 		if err := h.db.Save(&existing).Error; err != nil {
 			h.logger.Errorf("git app callback: save config failed: %s", err)
-			redirectSPA(c, "err", "config_write_failed")
+			gitAppFail(c, reasonConfigWriteFailed)
 			return
 		}
 	}
 
-	// One-click chain: send the admin straight to the install page. A fresh state
-	// (carrying the same host) guards the setup_url callback.
-	installState, err := h.gitAppState.Issue(githubURL)
-	if err != nil {
-		h.logger.Errorf("git app callback: issue install state failed: %s", err)
-		redirectSPA(c, "err", "state_issue_failed")
-		return
-	}
-	c.Redirect(http.StatusFound, gh.InstallURL(githubURL, creds.Slug, installState))
+	// One-click chain: send the admin straight to the App's settings install page
+	// (personal or org, per the conversion-reported owner type). A private App has
+	// no public /apps/<slug> page, and GitHub does NOT preserve a ?state= across the
+	// settings install page → setup_url, so the setup callback is guarded by the
+	// system group's auth+scope rather than a CSRF token (see GitAppSetupCallback).
+	c.Redirect(http.StatusFound, gh.InstallURL(githubURL, creds.OwnerType, creds.Owner, creds.Slug))
 }
 
 // GitAppSetupCallback handles GitHub's setup_url after installation: records the
 // installation_id on the config.
 //
-// GET /api/v1/system/gitApp/setup?installation_id=<id>&state=<state>&setup_action=<action>
+// No CSRF state is validated here: the install step happens on the App's private
+// settings page (a private App has no public /apps/<slug> page), and GitHub does
+// NOT preserve a ?state= query across that page to the setup_url — documented only
+// for the public install URL, and confirmed by community reports (github/community
+// discussions #61291/#64239). The endpoint is instead guarded by the system group's
+// auth+scope (RP-1): only an authenticated admin session reaches it, and it merely
+// attaches installation_id to the single config row already created by the (state-
+// validated) manifest callback.
+//
+// GET /api/v1/system/gitApp/setup?installation_id=<id>&setup_action=<action>
 func (h *Handler) GitAppSetupCallback(c *gin.Context) {
-	if _, ok := h.gitAppState.Consume(c.Query("state")); !ok {
-		h.logger.Warnf("git app setup: invalid or expired state")
-		redirectSPA(c, "err", "invalid_state")
-		return
-	}
 	instID, err := strconv.ParseInt(c.Query("installation_id"), 10, 64)
 	if err != nil || instID == 0 {
-		redirectSPA(c, "err", "missing_installation_id")
+		gitAppFail(c, reasonMissingInstallationID)
 		return
 	}
 
 	var cfg db.GitRepoConfig
 	if err := h.db.First(&cfg).Error; err != nil {
 		h.logger.Errorf("git app setup: no config to attach installation to: %s", err)
-		redirectSPA(c, "err", "no_config")
+		gitAppFail(c, reasonNoConfig)
 		return
 	}
 	cfg.GithubInstallationID = instID
 	if err := h.db.Save(&cfg).Error; err != nil {
 		h.logger.Errorf("git app setup: save installation id failed: %s", err)
-		redirectSPA(c, "err", "config_write_failed")
+		gitAppFail(c, reasonConfigWriteFailed)
 		return
 	}
-	redirectSPA(c, "ok", "")
+	gitAppOK(c)
+}
+
+// GitAppDisconnect tears down the GitHub App integration (exit mechanism, RFC 010
+// doc 12 §10). It performs a layered, best-effort cleanup and then hands the admin
+// the deep-link needed to finish the one step that has no API:
+//
+//	① Uninstall the installation via App-JWT (DELETE /app/installations/{id}) — revokes
+//	   the installation's repo access. Best-effort/logged: a failure here (already
+//	   uninstalled, transient GitHub error) must not strand the admin, so we still tear
+//	   down local state and hand them the Advanced-page link to clean up manually.
+//	② Delete the auto-created destination holding the base64 PEM private key. Best-effort:
+//	   the key is useless once ① revokes the installation, but we remove it so no stale
+//	   secret lingers.
+//	③ Delete the GitRepoConfig row (authoritative local unbind) — the one step that MUST
+//	   succeed for the integration to be considered removed.
+//
+// Deleting the App *registration* itself is UI-only (GitHub exposes no REST API), so the
+// response carries the App's Advanced-settings deep-link (personal vs org, per the
+// persisted owner type) for the admin to click "Delete GitHub App".
+//
+// DELETE /api/v1/system/gitApp
+func (h *Handler) GitAppDisconnect(c *gin.Context) {
+	var config db.GitRepoConfig
+	if err := h.db.First(&config).Error; err != nil {
+		Fail(c, http.StatusNotFound, "no GitRepoConfig found")
+		return
+	}
+	if gh.AuthMethod(config.AuthMethod) != gh.AuthMethodGitHubApp {
+		Fail(c, http.StatusBadRequest, "git repo config is not in github_app mode")
+		return
+	}
+
+	// slug is the App's human-readable URL name (persisted by the manifest callback), required
+	// by GitHub's /settings/apps/<slug>/advanced page — distinct from the numeric GithubAppID.
+	slug := config.GithubAppSlug
+
+	// Resolve the destination host up front — we need it to build the Advanced-page
+	// deep-link, and ② deletes the destination below. Fall back to public github.com.
+	destURL := "https://github.com"
+	if dest, err := h.destSvc.GetDestination(c.Request.Context(), config.DestinationName); err == nil && dest != nil && dest.URL != "" {
+		destURL = dest.URL
+	}
+	advancedURL := gh.AppAdvancedURL(destURL, config.GithubOwnerType, config.Owner, slug)
+
+	// ① Best-effort API uninstall (needs the destination's PEM, so before ②).
+	if config.GithubInstallationID != 0 {
+		if err := gh.UninstallApp(c.Request.Context(), config.DestinationName, config.GithubAppID, config.GithubInstallationID, h.destSvc); err != nil {
+			h.logger.Warnf("git app disconnect: uninstall installation %d failed (continuing): %s", config.GithubInstallationID, err)
+		}
+	}
+
+	// ② Best-effort destination delete (removes the stored private key).
+	if err := h.destSvc.DeleteDestination(c.Request.Context(), config.DestinationName); err != nil {
+		h.logger.Warnf("git app disconnect: delete destination %s failed (continuing): %s", config.DestinationName, err)
+	}
+
+	// ③ Authoritative local unbind. Hard delete so the single-row invariant holds and a
+	// later re-registration starts clean (gorm.Model would otherwise soft-delete).
+	if err := h.db.Unscoped().Delete(&config).Error; err != nil {
+		h.logger.Errorf("git app disconnect: delete config failed: %s", err)
+		Fail(c, http.StatusInternalServerError, "failed to remove git repo config")
+		return
+	}
+
+	OK(c, gin.H{
+		"advancedUrl": advancedURL,
+		"message":     "GitHub App disconnected. To fully delete the App registration on GitHub, open its Advanced settings page and click \"Delete GitHub App\".",
+	})
 }

@@ -294,3 +294,29 @@ func (c *DestinationServiceClient) UpsertDestination(ctx context.Context, dest D
 	c.Invalidate(dest.Name)
 	return nil
 }
+
+// DeleteDestination removes a subaccount destination by name. A 404 is treated as
+// success (idempotent delete): the caller only cares that the destination is gone.
+// Invalidates the cache entry for name on success.
+//
+// API: DELETE /destination-configuration/v1/subaccountDestinations/{name}
+func (c *DestinationServiceClient) DeleteDestination(ctx context.Context, name string) error {
+	childCtx, cancel := context.WithTimeout(ctx, consts.DefaultRequestTimeout)
+	defer cancel()
+	// Evict on every exit path: cache invalidation is always safe (a later read just
+	// re-fetches), so we needn't special-case success vs error.
+	defer c.Invalidate(name)
+	request := env.HttpRequest{
+		Method: http.MethodDelete,
+		ApiURL: c.ApiURL + "/destination-configuration/v1/subaccountDestinations/" + name,
+	}
+	if _, err := c.Do(childCtx, &request); err != nil {
+		// 404 → destination already absent; treat as a successful (idempotent) delete.
+		var httpErr *env.HttpResponseError
+		if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
