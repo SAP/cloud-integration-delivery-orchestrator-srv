@@ -304,6 +304,45 @@ func (h *Handler) GitAppSetupCallback(c *gin.Context) {
 	gitAppOK(c)
 }
 
+// GetGitAppInstallURL returns the install deep-link for an App that is registered but not yet
+// installed (github_app mode, GithubInstallationID still 0). It is the same settings-install URL
+// GitAppManifestCallback 302s to right after registration (gh.InstallURL) — rebuilt here so the SPA
+// can surface a "Finish installing on GitHub" link when the admin returns to the install-pending
+// dialog later instead of hunting for the App in GitHub's settings. Resolving the GitHub host (GHES
+// vs github.com) needs the destination URL, which only the backend knows — hence a backend endpoint.
+// The link works standalone: GitHub doesn't carry ?state= from the settings install page to the
+// setup_url, and GitAppSetupCallback deliberately doesn't rely on it (guarded by the system group's
+// auth+scope), so the deferred install still completes and back-fills GithubInstallationID.
+//
+// GET /api/v1/system/gitApp/installUrl
+func (h *Handler) GetGitAppInstallURL(c *gin.Context) {
+	var config db.GitRepoConfig
+	if err := h.db.First(&config).Error; err != nil {
+		Fail(c, http.StatusNotFound, "no GitRepoConfig found")
+		return
+	}
+	if gh.AuthMethod(config.AuthMethod) != gh.AuthMethodGitHubApp {
+		Fail(c, http.StatusBadRequest, "install URL is only valid in github_app mode")
+		return
+	}
+	if config.GithubAppID == 0 {
+		Fail(c, http.StatusConflict, "GitHub App not registered yet")
+		return
+	}
+	if config.GithubInstallationID != 0 {
+		Fail(c, http.StatusBadRequest, "GitHub App already installed")
+		return
+	}
+
+	// Resolve the GitHub host from the destination (GHES vs public); fall back to public github.com.
+	destURL := "https://github.com"
+	if dest, err := h.destSvc.GetDestination(c.Request.Context(), config.DestinationName); err == nil && dest != nil && dest.URL != "" {
+		destURL = dest.URL
+	}
+
+	OK(c, gin.H{"installUrl": gh.InstallURL(destURL, config.GithubOwnerType, config.Owner, config.GithubAppSlug)})
+}
+
 // GitAppDisconnect tears down the GitHub App integration (exit mechanism, RFC 010
 // doc 12 §10). It performs a layered, best-effort cleanup and then hands the admin
 // the deep-link needed to finish the one step that has no API:

@@ -323,6 +323,8 @@ func (h *Handler) SetupRoutes(v1 *gin.RouterGroup, v2 *gin.RouterGroup, requireS
 		system.GET("/gitApp/setup", h.GitAppSetupCallback)
 		// App-mode read-back discovery (OP-1): lists repos the installation was granted.
 		system.GET("/gitApp/repos", h.GetGitAppRepos)
+		// Install-pending helper: install deep-link for a registered-but-not-yet-installed App.
+		system.GET("/gitApp/installUrl", h.GetGitAppInstallURL)
 		// Exit mechanism (§10): uninstall + delete destination + unbind config, returns the
 		// Advanced-page deep-link for the UI-only App-registration deletion.
 		system.DELETE("/gitApp", h.GitAppDisconnect)
