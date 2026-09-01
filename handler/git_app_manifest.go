@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
+	"time"
 
 	"mmt-delivery/db"
 	"mmt-delivery/pkg/cf"
@@ -84,15 +84,13 @@ const gitAppLandingPath = "/config/system-config"
 //
 // APP_BASE_URL overrides everything and exists solely for local debugging: the
 // manifest flow needs GitHub to redirect the browser back to the running server,
-// but `sync-env` copies the deployed app's VCAP_APPLICATION verbatim, so
-// ApplicationURIs[0] locally points at the remote CF route. Setting
-// APP_BASE_URL=http://localhost:8080 in .env makes the callbacks reach the local
-// server. It is never set in production, so the platform-injected source (DM-3)
-// remains authoritative there.
+// cfAppBaseURL returns the externally-reachable base URL of this deployment.
+// In production, CF injects ApplicationURIs via VCAP_APPLICATION and the first
+// URI is used (with https). Locally, `sync-env` strips application_uris from
+// the pulled VCAP_APPLICATION so this falls through to the request Host
+// (http://localhost:8080), keeping callback URLs correct without a separate
+// override env var.
 func (h *Handler) cfAppBaseURL(c *gin.Context) string {
-	if v := os.Getenv("APP_BASE_URL"); v != "" {
-		return v
-	}
 	if app := env.AppEnv(); app != nil && len(app.ApplicationURIs) > 0 {
 		return "https://" + app.ApplicationURIs[0]
 	}
@@ -101,6 +99,33 @@ func (h *Handler) cfAppBaseURL(c *gin.Context) string {
 		scheme = "http"
 	}
 	return scheme + "://" + c.Request.Host
+}
+
+// buildAppDescription assembles a Markdown description for the GitHub App manifest
+// so the App is identifiable in GitHub settings. Includes deployment context from
+// VCAP_APPLICATION when available; gracefully degrades when fields are missing.
+func (h *Handler) buildAppDescription(baseURL string) string {
+	appName := "unknown"
+	spaceName := ""
+	if app := env.AppEnv(); app != nil {
+		if app.Name != "" {
+			appName = app.Name
+		}
+		spaceName = app.SpaceName
+	}
+	desc := fmt.Sprintf(
+		"Auto-registered by **%s** to sync SAP Cloud Integration artifacts "+
+			"to GitHub for version control and code comparison.\n\n"+
+			"| Property | Value |\n|----------|-------|\n"+
+			"| Application | %s |\n"+
+			"| URL | %s |\n",
+		appName, appName, baseURL,
+	)
+	if spaceName != "" {
+		desc += fmt.Sprintf("| Space | %s |\n", spaceName)
+	}
+	desc += fmt.Sprintf("| Registered | %s |\n", time.Now().UTC().Format("2006-01-02 15:04 UTC"))
+	return desc
 }
 
 // gitAppFail 302s back to the System Config page with an error toast carrying the
@@ -152,7 +177,7 @@ func (h *Handler) StartGitAppManifest(c *gin.Context) {
 		return
 	}
 
-	manifest := gh.BuildManifest(appName, base, base+gitAppCallbackPath, base+gitAppSetupPath)
+	manifest := gh.BuildManifest(appName, h.buildAppDescription(base), base, base+gitAppCallbackPath, base+gitAppSetupPath)
 	manifestJSON, err := manifest.JSON()
 	if err != nil {
 		Fail(c, http.StatusInternalServerError, err.Error())

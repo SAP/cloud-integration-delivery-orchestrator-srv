@@ -29,6 +29,7 @@ import (
 // hook_attributes would force a required `url` field, so we leave it out entirely.
 type AppManifest struct {
 	Name               string            `json:"name"`
+	Description        string            `json:"description,omitempty"`
 	URL                string            `json:"url"`          // App homepage (required by GitHub)
 	RedirectURL        string            `json:"redirect_url"` // where the one-time code lands
 	SetupURL           string            `json:"setup_url,omitempty"`
@@ -38,9 +39,12 @@ type AppManifest struct {
 
 // BuildManifest constructs a minimal-permission (Contents: R/W), webhook-less
 // App manifest. name must be globally unique on the target GitHub host.
-func BuildManifest(name, appHomeURL, redirectURL, setupURL string) AppManifest {
+// description carries deployment context (Markdown) so the App is identifiable
+// in GitHub settings; it is purely informational and has no length constraint.
+func BuildManifest(name, description, appHomeURL, redirectURL, setupURL string) AppManifest {
 	return AppManifest{
 		Name:               name,
+		Description:        description,
 		URL:                appHomeURL,
 		RedirectURL:        redirectURL,
 		SetupURL:           setupURL,
@@ -224,6 +228,17 @@ func InstallURL(destURL, ownerType, owner, slug string) string {
 		return base + "/organizations/" + url.PathEscape(owner) + "/settings/apps/" + url.PathEscape(slug) + "/installations"
 	}
 	return base + "/settings/apps/" + url.PathEscape(slug) + "/installations"
+}
+
+// AppSettingsURL is the created App's general settings page, where the admin can
+// view the App name, description, permissions, and navigate to installations or
+// the advanced (delete) page. ownerType selects the path like InstallURL.
+func AppSettingsURL(destURL, ownerType, owner, slug string) string {
+	base := resolveGitHubWebBase(destURL)
+	if strings.EqualFold(ownerType, "Organization") {
+		return base + "/organizations/" + url.PathEscape(owner) + "/settings/apps/" + url.PathEscape(slug)
+	}
+	return base + "/settings/apps/" + url.PathEscape(slug)
 }
 
 // AppAdvancedURL is the created App's "Advanced" settings page, where the admin

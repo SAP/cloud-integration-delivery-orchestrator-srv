@@ -153,6 +153,13 @@ func (h *Handler) GetGitProviders(ctx *gin.Context) {
 	OK(ctx, gh.SupportedProviders())
 }
 
+// gitRepoConfigResponse wraps the persisted config with computed fields that
+// depend on external state (destination URL → GitHub host classification).
+type gitRepoConfigResponse struct {
+	db.GitRepoConfig
+	AppSettingsURL string `json:"appSettingsUrl,omitempty"`
+}
+
 // GET /api/v1/system/gitRepoConfig
 func (h *Handler) GetGitRepoConfig(ctx *gin.Context) {
 	var config db.GitRepoConfig
@@ -160,7 +167,20 @@ func (h *Handler) GetGitRepoConfig(ctx *gin.Context) {
 		OK(ctx, db.GitRepoConfig{})
 		return
 	}
-	OK(ctx, config)
+
+	resp := gitRepoConfigResponse{GitRepoConfig: config}
+
+	// Compute App settings URL for github_app mode (requires destination to
+	// resolve GHES vs public host). Best-effort: omitted if resolution fails.
+	if gh.AuthMethod(config.AuthMethod) == gh.AuthMethodGitHubApp && config.GithubAppSlug != "" {
+		destURL := "https://github.com"
+		if dest, err := h.destSvc.GetDestination(ctx.Request.Context(), config.DestinationName); err == nil && dest != nil && dest.URL != "" {
+			destURL = dest.URL
+		}
+		resp.AppSettingsURL = gh.AppSettingsURL(destURL, config.GithubOwnerType, config.Owner, config.GithubAppSlug)
+	}
+
+	OK(ctx, resp)
 }
 
 // PUT /api/v1/system/gitRepoConfig

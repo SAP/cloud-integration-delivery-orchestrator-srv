@@ -120,8 +120,8 @@ sync-env: _check-cf
 	@APP_GUID=$$(cf app $(CF_APP) --guid) && \
 	cf curl /v3/apps/$$APP_GUID/env > /tmp/.cpi-delivery-env.json && \
 	VCAP_SERVICES=$$(jq -c '.system_env_json.VCAP_SERVICES' /tmp/.cpi-delivery-env.json) && \
-	VCAP_APP=$$(jq -c '.application_env_json.VCAP_APPLICATION' /tmp/.cpi-delivery-env.json) && \
-	printf 'VCAP_SERVICES=%s\nVCAP_APPLICATION=%s\nVITE_DEV_URL=http://localhost:5173\nOTEL_SDK_DISABLED=true\nAPP_BASE_URL=http://localhost:8080\nLOCAL_POSTGRES_URI=postgres://postgres:passw0rd@127.0.0.1:5432/$(DB_NAME)?sslmode=disable\n' "$$VCAP_SERVICES" "$$VCAP_APP" > $(ENV_FILE) && \
+	VCAP_APP=$$(jq -c '.application_env_json.VCAP_APPLICATION | del(.application_uris) | del(.uris)' /tmp/.cpi-delivery-env.json) && \
+	printf 'VCAP_SERVICES=%s\nVCAP_APPLICATION=%s\nVITE_DEV_URL=http://localhost:5173\nOTEL_SDK_DISABLED=true\nLOCAL_POSTGRES_URI=postgres://postgres:passw0rd@127.0.0.1:5432/$(DB_NAME)?sslmode=disable\n' "$$VCAP_SERVICES" "$$VCAP_APP" > $(ENV_FILE) && \
 	rm -f /tmp/.cpi-delivery-env.json && \
 	echo ">> $(ENV_FILE) written successfully (from app '$(CF_APP)')"
 

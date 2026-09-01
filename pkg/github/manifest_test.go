@@ -55,7 +55,7 @@ func TestStateStore_Expired(t *testing.T) {
 }
 
 func TestBuildManifest_NoWebhookMinimalPerms(t *testing.T) {
-	m := BuildManifest("cpi-delivery-sync", "https://app.example.com",
+	m := BuildManifest("cpi-delivery-sync", "test description", "https://app.example.com",
 		"https://app.example.com/api/v1/system/gitApp/callback",
 		"https://app.example.com/api/v1/system/gitApp/setup")
 
