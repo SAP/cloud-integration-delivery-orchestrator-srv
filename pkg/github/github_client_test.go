@@ -696,3 +696,39 @@ func keys(m FileMap) []string {
 	}
 	return ks
 }
+
+func TestHTTPStatusOf(t *testing.T) {
+	cases := []struct {
+		name     string
+		err      error
+		wantCode int
+		wantOK   bool
+	}{
+		{
+			name:     "wrapped github error",
+			err:      fmt.Errorf("get tree at x: %w", &github.ErrorResponse{Response: &http.Response{StatusCode: 409}}),
+			wantCode: 409,
+			wantOK:   true,
+		},
+		{
+			name:     "plain error",
+			err:      fmt.Errorf("dial tcp: connection refused"),
+			wantCode: 0,
+			wantOK:   false,
+		},
+		{
+			name:     "github error without response",
+			err:      &github.ErrorResponse{},
+			wantCode: 0,
+			wantOK:   false,
+		},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			code, ok := HTTPStatusOf(tt.err)
+			if code != tt.wantCode || ok != tt.wantOK {
+				t.Errorf("HTTPStatusOf = (%d, %v), want (%d, %v)", code, ok, tt.wantCode, tt.wantOK)
+			}
+		})
+	}
+}

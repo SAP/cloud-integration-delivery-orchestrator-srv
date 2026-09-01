@@ -5,6 +5,7 @@ import (
 	"crypto/sha1"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -106,12 +107,42 @@ func newGoGitHubClient(ctx context.Context, destName string, owner, repo string,
 func (g *GoGitHubClient) TagExists(ctx context.Context, tag string) (bool, string, error) {
 	ref, resp, err := g.client.Git.GetRef(ctx, g.owner, g.repo, "tags/"+tag)
 	if err != nil {
+		if resp != nil && resp.StatusCode == 409 {
+			// 409 = Git Repository is empty — no refs at all.
+			// Bootstrap the repo via Contents API so all subsequent Git Data API
+			// calls work, then return "tag not found" (an empty repo has no tags).
+			if bErr := g.bootstrapEmptyRepo(ctx); bErr != nil {
+				return false, "", fmt.Errorf("bootstrap empty repo: %w", bErr)
+			}
+			return false, "", nil
+		}
 		if resp != nil && resp.StatusCode == 404 {
 			return false, "", nil
 		}
 		return false, "", fmt.Errorf("TagExists(%s): %w", tag, err)
 	}
 	return true, ref.GetObject().GetSHA(), nil
+}
+
+// bootstrapEmptyRepo creates an initial commit on the default branch via the
+// Contents API — the only GitHub REST endpoint that works on a completely empty
+// repository. After this call the Git Data API (trees, commits, refs) becomes
+// functional. Concurrent callers racing to bootstrap the same repo are handled
+// gracefully: the loser gets a 422 (file already exists) which is treated as success.
+func (g *GoGitHubClient) bootstrapEmptyRepo(ctx context.Context) error {
+	_, _, err := g.client.Repositories.CreateFile(ctx, g.owner, g.repo, "README.md", &github.RepositoryContentFileOptions{
+		Message: github.Ptr("init: bootstrap empty repository"),
+		Content: []byte("# " + g.repo + "\n"),
+	})
+	if err != nil {
+		// 422 = file already exists (concurrent bootstrap) — repo is already initialized.
+		var ghErr *github.ErrorResponse
+		if errors.As(err, &ghErr) && ghErr.Response != nil && ghErr.Response.StatusCode == 422 {
+			return nil
+		}
+		return fmt.Errorf("create initial README.md: %w", err)
+	}
+	return nil
 }
 
 const commitMaxRetries = 3
@@ -387,6 +418,18 @@ func (g *GoGitHubClient) ListAccessibleRepos(ctx context.Context) ([]RepoInfo, e
 		opts.Page = resp.NextPage
 	}
 	return repos, nil
+}
+
+// HTTPStatusOf extracts the HTTP status code from a go-github *ErrorResponse
+// found anywhere in the error chain (errors.As over the %w chain). Returns
+// (code, true) when a GitHub API error is present, so callers can classify by
+// the stable REST status-code contract instead of parsing message text.
+func HTTPStatusOf(err error) (int, bool) {
+	var ghErr *github.ErrorResponse
+	if errors.As(err, &ghErr) && ghErr.Response != nil {
+		return ghErr.Response.StatusCode, true
+	}
+	return 0, false
 }
 
 func (g *GoGitHubClient) ReadTree(ctx context.Context, commitSHA string, treePath string) (FileMap, error) {

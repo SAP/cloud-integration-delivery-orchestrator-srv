@@ -301,6 +301,7 @@ func (h *Handler) SetupRoutes(v1 *gin.RouterGroup, v2 *gin.RouterGroup, requireS
 	gitSyncOperate.Use(requireScope("DeliveryRequest.Operate"))
 	{
 		gitSyncOperate.POST("/gitSync/trigger", h.TriggerGitSync)
+		gitSyncOperate.POST("/gitSync/snapshots/:id/invalidate", h.InvalidateGitSnapshot)
 	}
 
 	// --- System Configuration (CpiTenant.Manage scope — admin-level) ---

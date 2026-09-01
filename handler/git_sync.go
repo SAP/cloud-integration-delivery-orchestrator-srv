@@ -1,13 +1,16 @@
 package handler
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
 
 	"mmt-delivery/db"
+	"mmt-delivery/pkg/errcode"
 	gh "mmt-delivery/pkg/github"
+	"mmt-delivery/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -93,11 +96,39 @@ func (h *Handler) GetGitSnapshotFiles(ctx *gin.Context) {
 
 	resp, err := h.svc.GetSnapshotFiles(ctx.Request.Context(), uint(snapshotID), gitClient)
 	if err != nil {
+		// Orphaned snapshot (pinned commit unreadable in current repo) → 409 +
+		// machine-readable code so the frontend offers a Re-sync path instead of
+		// a dead error banner. All other errors keep their current mapping.
+		var orphan *service.OrphanedSnapshotError
+		if errors.As(err, &orphan) {
+			FailCode(ctx, http.StatusConflict, errcode.SnapshotOrphaned,
+				"This snapshot's version is no longer available in the current repository. Re-sync to rebuild it.")
+			return
+		}
 		Fail(ctx, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	OK(ctx, resp)
+}
+
+// InvalidateGitSnapshot marks a completed-but-orphaned snapshot as failed, so the
+// existing failed→pending reclaim path can re-push it to the current repo on the
+// next Re-sync. POST /api/v1/gitSync/snapshots/:id/invalidate (RFC 010 · 13).
+func (h *Handler) InvalidateGitSnapshot(ctx *gin.Context) {
+	idStr := ctx.Param("id")
+	snapshotID, err := strconv.ParseUint(idStr, 10, 64)
+	if err != nil {
+		Fail(ctx, http.StatusBadRequest, "invalid snapshot ID")
+		return
+	}
+
+	if err := h.svc.InvalidateSnapshot(uint(snapshotID)); err != nil {
+		Fail(ctx, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	OK(ctx, gin.H{"invalidated": true})
 }
 
 // resolveGitClient reads GitRepoConfig from DB, resolves BTP Destination, and creates a GitArtifactClient.

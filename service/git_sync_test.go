@@ -4,23 +4,28 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"testing"
 
 	"mmt-delivery/consts"
 	"mmt-delivery/db"
 	gh "mmt-delivery/pkg/github"
+
+	"github.com/google/go-github/v89/github"
 )
 
 // --- Mock GitArtifactClient ---
 
 type mockGitClient struct {
-	tags       map[string]string // tag → commitSHA
-	committed  gh.FileMap        // last committed files
-	commitSHA  string            // SHA to return from Commit
-	commitErr  error
-	tagErr     error
-	readFiles  gh.FileMap        // files to return from ReadTree
+	tags      map[string]string // tag → commitSHA
+	committed gh.FileMap        // last committed files
+	commitSHA string            // SHA to return from Commit
+	commitErr error
+	tagErr    error
+	readFiles gh.FileMap // files to return from ReadTree
+	readErr   error      // error to return from ReadTree
 }
 
 func newMockGitClient() *mockGitClient {
@@ -54,6 +59,9 @@ func (m *mockGitClient) CreateTag(_ context.Context, tag string, commitSHA strin
 }
 
 func (m *mockGitClient) ReadTree(_ context.Context, commitSHA string, treePath string) (gh.FileMap, error) {
+	if m.readErr != nil {
+		return nil, m.readErr
+	}
 	return m.readFiles, nil
 }
 
@@ -105,7 +113,7 @@ func TestGitSync_HappyPath(t *testing.T) {
 	tenant := seedTenant(t, tc, "sync-tenant")
 
 	zipContent := createTestZip(map[string]string{
-		"META-INF/MANIFEST.MF": "Bundle-Version: 1.0.0",
+		"META-INF/MANIFEST.MF":                  "Bundle-Version: 1.0.0",
 		"src/main/resources/script/test.groovy": "println 'hello'",
 	})
 
@@ -348,4 +356,117 @@ func TestGitSync_CpiSyncYamlContent(t *testing.T) {
 			t.Errorf(".cpi-sync.yaml missing expected content %q\nFull content:\n%s", check, content)
 		}
 	}
+}
+
+// =============================================================================
+// Orphaned snapshot read resilience (RFC 010 · 13)
+// =============================================================================
+
+// ghErr builds a go-github *ErrorResponse carrying an HTTP status, wrapped the
+// same way ReadTree wraps it (%w), so classification exercises the errors.As chain.
+func ghErr(code int) error {
+	return fmt.Errorf("get tree at deadbeef: %w", &github.ErrorResponse{
+		Response: &http.Response{StatusCode: code},
+	})
+}
+
+// seedCompletedSnapshot inserts a completed snapshot row for GetSnapshotFiles tests.
+func seedCompletedSnapshot(t *testing.T, tenantID uint) db.GitArtifactSnapshot {
+	t.Helper()
+	snap := db.GitArtifactSnapshot{
+		ArtifactID:  "OrphanFlow",
+		Version:     "1.0.0",
+		CpiTenantID: tenantID,
+		PackageID:   "OrphanPkg",
+		TreePath:    "tenant/cpi-dev/OrphanPkg/OrphanFlow",
+		Status:      GitSnapshotCompleted,
+		CommitSHA:   "7fe2b86db6270e822f10747a25be2edba91ab94f",
+	}
+	if err := testDB.Create(&snap).Error; err != nil {
+		t.Fatalf("seed snapshot: %v", err)
+	}
+	return snap
+}
+
+func TestGetSnapshotFiles_ErrorClassification(t *testing.T) {
+	tc := newTestCleanup(t)
+	tenant := seedTenant(t, tc, "orphan-tenant")
+	svc := newTestService(func(context.Context, string) (IntegrationService, error) { return nil, nil })
+
+	cases := []struct {
+		name       string
+		readErr    error
+		wantOrphan bool
+	}{
+		{"empty repo 409", ghErr(http.StatusConflict), true},
+		{"commit unreachable 404", ghErr(http.StatusNotFound), true},
+		{"invalid SHA 422", ghErr(http.StatusUnprocessableEntity), true},
+		{"transient 500 not orphan", ghErr(http.StatusInternalServerError), false},
+		{"rate limit 429 not orphan", ghErr(http.StatusTooManyRequests), false},
+		{"auth 401 not orphan", ghErr(http.StatusUnauthorized), false},
+		{"auth 403 not orphan", ghErr(http.StatusForbidden), false},
+		{"non-github error not orphan", errors.New("dial tcp: connection refused"), false},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			snap := seedCompletedSnapshot(t, tenant.ID)
+			defer testDB.Unscoped().Delete(&db.GitArtifactSnapshot{}, snap.ID)
+
+			client := newMockGitClient()
+			client.readErr = tt.readErr
+
+			_, err := svc.GetSnapshotFiles(context.Background(), snap.ID, client)
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			var orphan *OrphanedSnapshotError
+			if got := errors.As(err, &orphan); got != tt.wantOrphan {
+				t.Errorf("errors.As(OrphanedSnapshotError) = %v, want %v (err=%v)", got, tt.wantOrphan, err)
+			}
+		})
+	}
+}
+
+func TestInvalidateSnapshot(t *testing.T) {
+	tc := newTestCleanup(t)
+	tenant := seedTenant(t, tc, "invalidate-tenant")
+	svc := newTestService(func(context.Context, string) (IntegrationService, error) { return nil, nil })
+
+	t.Run("completed becomes failed", func(t *testing.T) {
+		snap := seedCompletedSnapshot(t, tenant.ID)
+		defer testDB.Unscoped().Delete(&db.GitArtifactSnapshot{}, snap.ID)
+
+		if err := svc.InvalidateSnapshot(snap.ID); err != nil {
+			t.Fatalf("InvalidateSnapshot: %v", err)
+		}
+		var got db.GitArtifactSnapshot
+		testDB.First(&got, snap.ID)
+		if got.Status != GitSnapshotFailed {
+			t.Errorf("status = %q, want %q", got.Status, GitSnapshotFailed)
+		}
+		if got.Error == "" {
+			t.Error("expected a human-readable error message on the failed row")
+		}
+	})
+
+	t.Run("non-completed untouched", func(t *testing.T) {
+		snap := db.GitArtifactSnapshot{
+			ArtifactID: "OrphanFlow", Version: "2.0.0", CpiTenantID: tenant.ID,
+			PackageID: "OrphanPkg", Status: GitSnapshotPending,
+		}
+		if err := testDB.Create(&snap).Error; err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+		defer testDB.Unscoped().Delete(&db.GitArtifactSnapshot{}, snap.ID)
+
+		if err := svc.InvalidateSnapshot(snap.ID); err != nil {
+			t.Fatalf("InvalidateSnapshot: %v", err)
+		}
+		var got db.GitArtifactSnapshot
+		testDB.First(&got, snap.ID)
+		if got.Status != GitSnapshotPending {
+			t.Errorf("status = %q, want %q (pending must be left alone)", got.Status, GitSnapshotPending)
+		}
+	})
 }
