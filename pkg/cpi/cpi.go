@@ -8,9 +8,9 @@ import (
 	"net/http"
 	"strings"
 
-	"mmt-delivery/consts"
-	"mmt-delivery/pkg/cf"
-	"mmt-delivery/pkg/env"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/consts"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cf"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/env"
 
 	"go.uber.org/zap"
 )

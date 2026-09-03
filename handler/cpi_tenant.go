@@ -8,9 +8,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"mmt-delivery/db"
-	"mmt-delivery/pkg/lifecycle"
-	"mmt-delivery/service"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/lifecycle"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/service"
 )
 
 // UpsertCpiTenant creates or updates a CpiTenant.

@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"mmt-delivery/consts"
-	"mmt-delivery/db"
-	"mmt-delivery/pkg/cas"
-	"mmt-delivery/pkg/cpi"
-	"mmt-delivery/pkg/env"
-	"mmt-delivery/pkg/tms"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/consts"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cas"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cpi"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/env"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/tms"
 
 	"go.uber.org/zap"
 	"gorm.io/driver/postgres"

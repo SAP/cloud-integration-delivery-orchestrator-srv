@@ -1,4 +1,4 @@
-module mmt-delivery
+module github.com/SAP/cloud-integration-delivery-orchestrator-srv
 
 go 1.25.0
 

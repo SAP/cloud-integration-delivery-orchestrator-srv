@@ -29,10 +29,10 @@ import (
 
 	oteltrace "go.opentelemetry.io/otel/trace"
 
-	"mmt-delivery/db"
-	"mmt-delivery/pkg/cas"
-	"mmt-delivery/pkg/lifecycle"
-	cpiotel "mmt-delivery/pkg/otel"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cas"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/lifecycle"
+	cpiotel "github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/otel"
 )
 
 // TransportRequest is the result of a successful export for one artifact operation.

@@ -9,9 +9,9 @@ import (
 	"net/http"
 	"testing"
 
-	"mmt-delivery/consts"
-	"mmt-delivery/db"
-	gh "mmt-delivery/pkg/github"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/consts"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
+	gh "github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/github"
 
 	"github.com/google/go-github/v89/github"
 )

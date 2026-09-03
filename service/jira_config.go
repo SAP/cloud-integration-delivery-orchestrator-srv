@@ -3,7 +3,7 @@ package service
 import (
 	"context"
 
-	"mmt-delivery/db"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
 )
 
 // GetJiraConfig returns the singleton JiraConfig row, or nil if not yet configured.

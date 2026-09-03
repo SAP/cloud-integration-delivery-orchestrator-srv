@@ -12,7 +12,7 @@ import (
 
 	"github.com/google/go-github/v89/github"
 
-	"mmt-delivery/pkg/cf"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cf"
 )
 
 // setupTestClient creates a test HTTP server and a GoGitHubClient pointed at it.

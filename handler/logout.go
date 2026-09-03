@@ -2,7 +2,7 @@ package handler
 
 import (
 	"github.com/gin-gonic/gin"
-	"mmt-delivery/pkg/auth"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/auth"
 )
 
 // HandleLogout clears the local session and redirects to XSUAA logout.do

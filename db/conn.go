@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"mmt-delivery/pkg/env"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/env"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"

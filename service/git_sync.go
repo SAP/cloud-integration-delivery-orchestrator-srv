@@ -12,12 +12,12 @@ import (
 	"sync"
 	"time"
 
-	"mmt-delivery/consts"
-	"mmt-delivery/db"
-	"mmt-delivery/pkg/env"
-	gh "mmt-delivery/pkg/github"
-	"mmt-delivery/pkg/lifecycle"
-	cpiotel "mmt-delivery/pkg/otel"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/consts"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/env"
+	gh "github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/github"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/lifecycle"
+	cpiotel "github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/otel"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"

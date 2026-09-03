@@ -24,8 +24,8 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"mmt-delivery/db"
-	"mmt-delivery/pkg/lifecycle"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/lifecycle"
 )
 
 // ── Public errors ─────────────────────────────────────────────────────────────

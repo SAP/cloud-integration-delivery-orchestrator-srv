@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"mmt-delivery/db"
-	"mmt-delivery/pkg/cf"
-	"mmt-delivery/pkg/lifecycle"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cf"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/lifecycle"
 )
 
 func seedCentralTmsContext(t *testing.T, destinationName string) db.CentralTmsContext {

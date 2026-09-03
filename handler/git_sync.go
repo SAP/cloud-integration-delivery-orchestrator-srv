@@ -7,10 +7,10 @@ import (
 	"net/url"
 	"strconv"
 
-	"mmt-delivery/db"
-	"mmt-delivery/pkg/errcode"
-	gh "mmt-delivery/pkg/github"
-	"mmt-delivery/service"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/errcode"
+	gh "github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/github"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/service"
 
 	"github.com/gin-gonic/gin"
 )

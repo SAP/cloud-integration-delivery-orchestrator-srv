@@ -2,8 +2,8 @@ package handler
 
 import (
 	"github.com/gin-gonic/gin"
-	"mmt-delivery/pkg/cf"
-	"mmt-delivery/pkg/errcode"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cf"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/errcode"
 )
 
 // CfNamedResource is a minimal org or space representation returned to the UI.

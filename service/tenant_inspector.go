@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"mmt-delivery/db"
-	"mmt-delivery/pkg/cf"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cf"
 )
 
 // ── Bootstrap step names (matches TenantBootstrapJob.CurrentStep values) ─────

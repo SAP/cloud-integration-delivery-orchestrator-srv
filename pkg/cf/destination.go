@@ -12,8 +12,8 @@ import (
 
 	"github.com/cloudfoundry-community/go-cfenv"
 
-	"mmt-delivery/consts"
-	"mmt-delivery/pkg/env"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/consts"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/env"
 )
 
 const defaultDestTTL = 5 * time.Minute

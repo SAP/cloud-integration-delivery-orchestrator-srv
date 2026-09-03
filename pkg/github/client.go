@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"mmt-delivery/pkg/cf"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cf"
 )
 
 // Provider identifies a Git hosting provider.

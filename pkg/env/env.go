@@ -6,7 +6,7 @@ import (
 	"os"
 
 	"github.com/cloudfoundry-community/go-cfenv"
-	cpiotel "mmt-delivery/pkg/otel"
+	cpiotel "github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/otel"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )

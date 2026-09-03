@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	"mmt-delivery/db"
-	"mmt-delivery/pkg/lifecycle"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/lifecycle"
 )
 
 // TestTransitionLifecycle_ValidTransitions verifies every edge in allowedTransitions

@@ -8,10 +8,10 @@ import (
 	"strconv"
 	"time"
 
-	"mmt-delivery/db"
-	"mmt-delivery/pkg/cf"
-	"mmt-delivery/pkg/env"
-	gh "mmt-delivery/pkg/github"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cf"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/env"
+	gh "github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/github"
 
 	"github.com/gin-gonic/gin"
 )

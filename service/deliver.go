@@ -10,9 +10,9 @@ import (
 	oteltrace "go.opentelemetry.io/otel/trace"
 	"gorm.io/gorm"
 
-	"mmt-delivery/db"
-	"mmt-delivery/pkg/lifecycle"
-	cpiotel "mmt-delivery/pkg/otel"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/lifecycle"
+	cpiotel "github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/otel"
 )
 
 // import INITIAL artifact operations under target node

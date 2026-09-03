@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
-	"mmt-delivery/consts"
-	"mmt-delivery/db"
-	"mmt-delivery/pkg/cpi"
-	"mmt-delivery/pkg/lifecycle"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/consts"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cpi"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/lifecycle"
 
 	"golang.org/x/sync/errgroup"
 	"gorm.io/gorm"

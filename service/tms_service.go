@@ -19,9 +19,9 @@ import (
 	"fmt"
 	"sync"
 
-	"mmt-delivery/db"
-	"mmt-delivery/pkg/cf"
-	"mmt-delivery/pkg/tms"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cf"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/tms"
 
 	"gorm.io/gorm"
 )

@@ -5,11 +5,11 @@ import (
 	"net/http"
 	"net/url"
 
-	"mmt-delivery/pkg/cf"
-	"mmt-delivery/pkg/cpi"
-	gh "mmt-delivery/pkg/github"
-	"mmt-delivery/pkg/xsuaa"
-	"mmt-delivery/service"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cf"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cpi"
+	gh "github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/github"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/xsuaa"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/service"
 
 	"github.com/coder/websocket"
 	"github.com/gin-gonic/gin"

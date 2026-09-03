@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"mmt-delivery/pkg/auth"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/auth"
 )
 
 // HandleCurrentUser implements GET /user-api/currentUser.

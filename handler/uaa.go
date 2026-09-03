@@ -1,8 +1,8 @@
 package handler
 
 import (
-	"mmt-delivery/db"
-	"mmt-delivery/service"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/service"
 	"strings"
 
 	"github.com/gin-gonic/gin"

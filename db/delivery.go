@@ -1,8 +1,8 @@
 package db
 
 import (
-	"mmt-delivery/consts"
-	"mmt-delivery/pkg/lifecycle"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/consts"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/lifecycle"
 	"time"
 
 	"gorm.io/gorm"

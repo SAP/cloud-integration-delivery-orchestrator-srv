@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"net/http"
 
-	"mmt-delivery/consts"
-	"mmt-delivery/db"
-	gh "mmt-delivery/pkg/github"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/consts"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
+	gh "github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/github"
 
-	"mmt-delivery/pkg/errcode"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/errcode"
 
 	"github.com/gin-gonic/gin"
 )

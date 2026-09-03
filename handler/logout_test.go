@@ -8,7 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
-	"mmt-delivery/pkg/auth"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/auth"
 )
 
 func TestHandleLogout(t *testing.T) {

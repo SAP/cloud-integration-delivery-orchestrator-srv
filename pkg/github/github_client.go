@@ -15,8 +15,8 @@ import (
 	"github.com/bradleyfalzon/ghinstallation/v2"
 	"github.com/google/go-github/v89/github"
 
-	"mmt-delivery/pkg/cf"
-	"mmt-delivery/pkg/env"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cf"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/env"
 )
 
 // Git tree entry file modes

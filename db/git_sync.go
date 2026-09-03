@@ -3,7 +3,7 @@ package db
 import (
 	"time"
 
-	"mmt-delivery/consts"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/consts"
 
 	"gorm.io/gorm"
 )

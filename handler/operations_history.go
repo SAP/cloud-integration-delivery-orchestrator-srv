@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"mmt-delivery/service"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/service"
 
 	"github.com/gin-gonic/gin"
 )

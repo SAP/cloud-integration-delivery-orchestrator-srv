@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"mmt-delivery/db"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"

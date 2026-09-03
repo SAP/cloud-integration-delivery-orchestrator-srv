@@ -6,9 +6,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"mmt-delivery/consts"
-	"mmt-delivery/db"
-	"mmt-delivery/pkg/lifecycle"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/consts"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/lifecycle"
 	"time"
 
 	"gorm.io/gorm"

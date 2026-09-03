@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"mmt-delivery/pkg/env"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/env"
 )
 
 // OAuthConfig holds XSUAA application-plan credentials for Authorization Code Flow.
