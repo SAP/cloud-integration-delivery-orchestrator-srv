@@ -32,7 +32,7 @@ func (h *Handler) GetGitSnapshots(ctx *gin.Context) {
 		return
 	}
 
-	tenantID, err := strconv.ParseUint(tenantIDStr, 10, 64)
+	tenantID, err := strconv.ParseUint(tenantIDStr, 10, 32)
 	if err != nil {
 		Fail(ctx, http.StatusBadRequest, "invalid 'tenantId'")
 		return
@@ -82,7 +82,7 @@ func (h *Handler) gitRepoBrowserURL(ctx *gin.Context) string {
 // GET /api/v1/gitSync/snapshots/:id/files
 func (h *Handler) GetGitSnapshotFiles(ctx *gin.Context) {
 	idStr := ctx.Param("id")
-	snapshotID, err := strconv.ParseUint(idStr, 10, 64)
+	snapshotID, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
 		Fail(ctx, http.StatusBadRequest, "invalid snapshot ID")
 		return
@@ -117,7 +117,7 @@ func (h *Handler) GetGitSnapshotFiles(ctx *gin.Context) {
 // next Re-sync. POST /api/v1/gitSync/snapshots/:id/invalidate (RFC 010 · 13).
 func (h *Handler) InvalidateGitSnapshot(ctx *gin.Context) {
 	idStr := ctx.Param("id")
-	snapshotID, err := strconv.ParseUint(idStr, 10, 64)
+	snapshotID, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
 		Fail(ctx, http.StatusBadRequest, "invalid snapshot ID")
 		return
