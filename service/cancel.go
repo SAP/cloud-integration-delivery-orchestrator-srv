@@ -72,15 +72,11 @@ func (s *Service) CancelDeliveryRequest(drID uint, userID string, reason string)
 	// 6. Send JIRA notification if configured (async)
 	s.PostJiraComment(dr.JiraLink, drID, conditionMsg, "Canceled")
 
-	// 7. Send email notification to related users (async)
+	// 7. Send notification to related users (async)
 	go func() {
 		message := fmt.Sprintf("Delivery request #%d has been canceled by %s. Reason: %s", drID, userEmail, reason)
-		recipients := []string{dr.CreatedBy, dr.UpdatedBy}
-		if dr.ApprovedBy != "" {
-			recipients = append(recipients, dr.ApprovedBy)
-		}
-		if err := s.Notifier.SendDeliveryNotification(recipients, drID, "Canceled", message); err != nil {
-			s.Logger.Errorw("failed to send cancellation notification email", "dr_id", drID, "error", err)
+		if err := s.Notifier.OnStatusChanged(drID, "Canceled", message); err != nil {
+			s.Logger.Errorw("failed to send cancellation notification", "dr_id", drID, "error", err)
 		}
 	}()
 

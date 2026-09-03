@@ -308,8 +308,9 @@ func (h *Handler) SetupRoutes(v1 *gin.RouterGroup, v2 *gin.RouterGroup, requireS
 	system := v1.Group("/system")
 	system.Use(requireScope("CpiTenant.Manage"))
 	{
-		system.GET("/integrations", h.GetIntegrations)
-		system.PUT("/integrations/:type", h.UpdateIntegration)
+		system.GET("/jiraConfig", h.GetJiraConfig)
+		system.PUT("/jiraConfig", h.UpdateJiraConfig)
+		system.POST("/jiraConfig/test", h.TestJiraConnection)
 		system.GET("/gitRepoConfig", h.GetGitRepoConfig)
 		system.GET("/gitRepoConfig/providers", h.GetGitProviders)
 		system.GET("/gitRepoConfig/owners", h.GetGitOwners)
@@ -332,10 +333,6 @@ func (h *Handler) SetupRoutes(v1 *gin.RouterGroup, v2 *gin.RouterGroup, requireS
 		system.GET("/connectivity/database", h.CheckConnectivityDatabase)
 		system.GET("/connectivity/tms", h.CheckConnectivityTMS)
 		system.GET("/connectivity/tenants", h.CheckConnectivityTenants)
-		system.GET("/connectivity/integrations", h.CheckConnectivityIntegrations)
-		system.GET("/connectivity/integration/:type", h.TestIntegration)
-		system.POST("/connectivity/all", h.CheckConnectivity)
-		system.GET("/connectivity/last", h.GetLastConnectivity)
 	}
 
 	// --- v2 API (DeliveryRequest.Operate) ---

@@ -70,11 +70,12 @@ type CasService interface {
 // Production value built by NewCasFactory; test value is a literal returning a mock.
 type CasFactory func(ctx context.Context, tenantID uint) (CasService, error)
 
-// Notifier abstracts notification operations (email, JIRA).
+// Notifier abstracts delivery event notifications.
+// Implementations decide the delivery channel (ANS, Jira API, etc.).
 type Notifier interface {
-	SendApprovalRequest(to []string, drID uint, requestor string, description string) error
-	SendDeliveryNotification(to []string, drID uint, status string, message string) error
-	AddDeliveryComment(issueKey string, drID uint, message string, status string) error
+	OnApprovalRequested(drID uint, requestor string, description string) error
+	OnStatusChanged(drID uint, status string, message string) error
+	OnDeliveryComment(issueKey string, drID uint, message string, status string) error
 }
 
 // --- Service struct ---
@@ -106,50 +107,36 @@ func (s *Service) L(ctx context.Context) *zap.SugaredLogger {
 	return cpiotel.WithTrace(ctx, s.Logger)
 }
 
-// --- Default Notifier implementation (wraps pkg/notify package functions) ---
+// --- Jira Notifier implementation ---
 
-type defaultNotifier struct {
+type jiraNotifier struct {
 	resolver *cf.DestinationServiceClient
 	database *gorm.DB
 }
 
-func NewDefaultNotifier(resolver *cf.DestinationServiceClient, database *gorm.DB) Notifier {
-	return &defaultNotifier{resolver: resolver, database: database}
+func NewJiraNotifier(resolver *cf.DestinationServiceClient, database *gorm.DB) Notifier {
+	return &jiraNotifier{resolver: resolver, database: database}
 }
 
-func (n *defaultNotifier) smtpDest() string {
-	var cfg db.IntegrationConfig
-	if err := n.database.Where("type = ?", "smtp").First(&cfg).Error; err != nil || !cfg.Enabled {
+func (n *jiraNotifier) jiraDest() string {
+	var cfg db.JiraConfig
+	if err := n.database.First(&cfg).Error; err != nil || !cfg.Enabled {
 		return ""
 	}
 	return cfg.DestinationName
 }
 
-func (n *defaultNotifier) jiraDest() string {
-	var cfg db.IntegrationConfig
-	if err := n.database.Where("type = ?", "jira").First(&cfg).Error; err != nil || !cfg.Enabled {
-		return ""
-	}
-	return cfg.DestinationName
+// OnApprovalRequested is a no-op — pending ANS integration (RFC 027 Phase 4).
+func (n *jiraNotifier) OnApprovalRequested(drID uint, requestor string, description string) error {
+	return nil
 }
 
-func (n *defaultNotifier) SendApprovalRequest(to []string, drID uint, requestor string, description string) error {
-	dest := n.smtpDest()
-	if dest == "" {
-		return nil // SMTP not configured, silently skip
-	}
-	return notify.SendApprovalRequest(n.resolver, dest, to, drID, requestor, description)
+// OnStatusChanged is a no-op — pending ANS integration (RFC 027 Phase 4).
+func (n *jiraNotifier) OnStatusChanged(drID uint, status string, message string) error {
+	return nil
 }
 
-func (n *defaultNotifier) SendDeliveryNotification(to []string, drID uint, status string, message string) error {
-	dest := n.smtpDest()
-	if dest == "" {
-		return nil
-	}
-	return notify.SendDeliveryNotification(n.resolver, dest, to, drID, status, message)
-}
-
-func (n *defaultNotifier) AddDeliveryComment(issueKey string, drID uint, message string, status string) error {
+func (n *jiraNotifier) OnDeliveryComment(issueKey string, drID uint, message string, status string) error {
 	dest := n.jiraDest()
 	if dest == "" {
 		return nil // JIRA not configured, silently skip

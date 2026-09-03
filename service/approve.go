@@ -35,22 +35,19 @@ func (s *Service) RequestApproval(drID uint, currentUserID string, approvers []s
 	if err != nil {
 		return err
 	}
-	// send email to approver asynchronously
-	sendMailto := s.sendMailto(dr.Approvers, approvers)
-	if len(sendMailto) > 0 {
-		go func() {
-			if err := s.Notifier.SendApprovalRequest(sendMailto, drID, requesterEmail, comment); err != nil {
-				s.Logger.Errorw("failed to send approval request email", "dr_id", drID, "error", err)
-				_ = s.BatchInsertConditions([]db.Condition{
-					{
-						DeliveryRequestID: drID,
-						State:             lifecycle.CondWarn,
-						Message:           fmt.Sprintf("Failed to send approval request email to approvers: %s", err.Error()),
-					},
-				})
-			}
-		}()
-	}
+	// notify approvers asynchronously (non-critical)
+	go func() {
+		if err := s.Notifier.OnApprovalRequested(drID, requesterEmail, comment); err != nil {
+			s.Logger.Errorw("failed to send approval request notification", "dr_id", drID, "error", err)
+			_ = s.BatchInsertConditions([]db.Condition{
+				{
+					DeliveryRequestID: drID,
+					State:             lifecycle.CondWarn,
+					Message:           fmt.Sprintf("Failed to send approval request notification: %s", err.Error()),
+				},
+			})
+		}
+	}()
 	if err := s.DB.Model(dr).Updates(db.DeliveryRequest{
 		AggregateStatus: lifecycle.AggWaitingApprove,
 		Approvers:       approvers,
@@ -125,18 +122,16 @@ func (s *Service) Approve(drID uint, approverID string) (*db.DeliveryRequest, er
 		return nil, fmt.Errorf("failed to update condition: %s", err.Error())
 	}
 
-	// send email notification asynchronously (non-critical)
+	// send notification asynchronously (non-critical)
 	go func() {
 		message := fmt.Sprintf("Delivery request #%d has been approved by %s", drID, approverID)
-		if err := s.Notifier.SendDeliveryNotification(
-			[]string{approverID, dr.CreatedBy, dr.UpdatedBy}, drID, "Approved", message,
-		); err != nil {
-			s.Logger.Errorw("failed to send approval notification email", "dr_id", drID, "error", err)
+		if err := s.Notifier.OnStatusChanged(drID, "Approved", message); err != nil {
+			s.Logger.Errorw("failed to send approval notification", "dr_id", drID, "error", err)
 			_ = s.BatchInsertConditions([]db.Condition{
 				{
 					DeliveryRequestID: drID,
 					State:             lifecycle.CondWarn,
-					Message:           fmt.Sprintf("Failed to send approval notification email: %s", err.Error()),
+					Message:           fmt.Sprintf("Failed to send approval notification: %s", err.Error()),
 				},
 			})
 		}
@@ -152,25 +147,4 @@ func (s *Service) Approve(drID uint, approverID string) (*db.DeliveryRequest, er
 	}()
 
 	return dr, nil
-}
-
-// existAppr: already send mail to; newAppr: receive from http request.
-func (s *Service) sendMailto(existAppr []string, newAppr []string) []string {
-	markSent := make(map[string]bool) // mark user id that already send to approvers
-	for _, uid := range existAppr {
-		markSent[uid] = true
-	}
-	sendMailto := make([]string, 0)
-	for _, appr := range newAppr {
-		if _, ok := markSent[appr]; !ok {
-			// Convert XSUAA user ID to email address
-			email, err := s.GetUserEmail(context.Background(), appr)
-			if err != nil {
-				s.Logger.Errorw("failed to get email for user", "user", appr, "error", err)
-				continue // skip if failed to get email
-			}
-			sendMailto = append(sendMailto, email)
-		}
-	}
-	return sendMailto
 }

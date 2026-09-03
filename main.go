@@ -74,7 +74,7 @@ func main() {
 			return cpiManager.Get(ctx, tenant)
 		},
 		GetUserEmail: xsuaa.GetUserEmail,
-		Notifier:     service.NewDefaultNotifier(resolver, database),
+		Notifier:     service.NewJiraNotifier(resolver, database),
 		Hub:          hub,
 		SyncTracker:  service.NewSyncTracker(),
 		ProviderDest: resolver,

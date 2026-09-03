@@ -537,7 +537,7 @@ func (s *Service) PostJiraComment(jiraLink string, drID uint, message string, st
 		return
 	}
 	go func() {
-		if err := s.Notifier.AddDeliveryComment(issueKey, drID, message, status); err != nil {
+		if err := s.Notifier.OnDeliveryComment(issueKey, drID, message, status); err != nil {
 			s.Logger.Errorw("failed to post JIRA comment", "dr_id", drID, "status", status, "error", err)
 		}
 	}()
