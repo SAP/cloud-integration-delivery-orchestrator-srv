@@ -3,20 +3,51 @@ package db
 import (
 	"time"
 
-	"mmt-delivery/consts"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/consts"
 
 	"gorm.io/gorm"
 )
 
 // GitRepoConfig stores the Git repository business configuration for artifact code sync.
 // Auth credentials are resolved via BTP Destination Service using DestinationName.
+//
+// Fields are grouped by WHO owns (authoritatively writes) them, because the row has two authors
+// depending on AuthMethod. The backend is the source of truth for this ownership split: in
+// github_app mode the client is NOT trusted to supply the connection-identity/credential fields —
+// UpsertGitRepoConfig applies only the client-owned target selection (see handler.updateGitAppTarget),
+// while the identity/credential fields are authored solely by the manifest/setup callbacks.
+// (Field reordering is column-name-preserving for GORM AutoMigrate — no migration impact.)
 type GitRepoConfig struct {
 	gorm.Model
-	Provider        string `gorm:"not null" json:"provider"`        // see github.Provider constants
+
+	// ── Discriminator ──────────────────────────────────────────────────────────
+	// Selects how the row is interpreted and which fields below are authoritative.
+	// "pat" (default): PAT in the destination Password; the client authors the whole row.
+	// "github_app": GitHub App installation token (base64 PEM private key in the destination
+	// Password) with the App/Installation IDs below; the callbacks author the identity/credential
+	// fields, the client only authors the target selection. See github.AuthMethodPAT / AuthMethodGitHubApp.
+	AuthMethod string `gorm:"default:pat" json:"authMethod"`
+
+	// ── Target selection (client-owned in BOTH modes) ─────────────────────────
+	// The user picks these via the config UI. In github_app mode UpsertGitRepoConfig applies ONLY
+	// these onto an existing row; everything below is left untouched.
+	Provider string `gorm:"not null" json:"provider"` // see github.Provider constants
+	Repo     string `gorm:"not null" json:"repo"`     // repository name
+	Enabled  bool   `gorm:"default:false" json:"enabled"`
+
+	// ── Connection identity (pat: client-owned · github_app: callback-owned) ───
+	// pat mode: entered in the form. github_app mode: written by the manifest callback
+	// (DestinationName = "github-app-<slug>", Owner = App creator) and treated as backend
+	// source of truth — never taken from the client on update.
 	DestinationName string `gorm:"not null" json:"destinationName"` // BTP Destination → resolves to API URL + credentials
 	Owner           string `gorm:"not null" json:"owner"`           // GitHub org or user
-	Repo            string `gorm:"not null" json:"repo"`            // repository name
-	Enabled         bool   `gorm:"default:false" json:"enabled"`
+
+	// ── github_app credentials (callback-owned; github_app mode only) ──────────
+	// Non-secret App/Installation IDs written by the manifest/setup callbacks; zero/omitted in pat mode.
+	GithubAppID          int64  `json:"githubAppId,omitempty"`          // App ID (manifest callback)
+	GithubInstallationID int64  `json:"githubInstallationId,omitempty"` // Installation ID (setup callback)
+	GithubOwnerType      string `json:"githubOwnerType,omitempty"`      // "User" | "Organization" (manifest callback) — selects the org-vs-personal shape of the App settings/advanced page URL used by the disconnect flow
+	GithubAppSlug        string `json:"githubAppSlug,omitempty"`        // App URL name (manifest callback) — the human-readable slug GitHub requires in /settings/apps/<slug>/advanced; NOT the numeric GithubAppID. Persisted so the disconnect deep-link needn't reverse-parse it from DestinationName.
 }
 
 // GitArtifactSnapshot records a single sync event — one artifact version pushed to GitHub.

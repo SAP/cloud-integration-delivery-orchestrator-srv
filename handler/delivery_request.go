@@ -12,9 +12,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"mmt-delivery/db"
-	"mmt-delivery/pkg/lifecycle"
-	"mmt-delivery/service"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/lifecycle"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/service"
 )
 
 func (h *Handler) CreateDr(c *gin.Context) {

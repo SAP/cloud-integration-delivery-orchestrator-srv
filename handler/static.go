@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"mmt-delivery/pkg/auth"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/auth"
 )
 
 // SetupStaticRoutes registers the embedded frontend as a NoRoute fallback.

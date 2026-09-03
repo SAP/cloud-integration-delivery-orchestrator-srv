@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"time"
 
-	"mmt-delivery/consts"
-	"mmt-delivery/db"
-	"mmt-delivery/pkg/env"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/consts"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/env"
 )
 
 type TMSNodesResp struct {

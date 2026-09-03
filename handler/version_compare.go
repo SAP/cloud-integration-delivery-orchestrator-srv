@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"mmt-delivery/consts"
-	"mmt-delivery/service"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/consts"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/service"
 
 	"github.com/gin-gonic/gin"
 )

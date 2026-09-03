@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"mmt-delivery/pkg/otel"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/otel"
 )
 
 // HttpResponseError represents a non-2xx HTTP response from an external API.

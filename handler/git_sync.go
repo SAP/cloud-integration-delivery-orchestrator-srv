@@ -1,13 +1,16 @@
 package handler
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
 
-	"mmt-delivery/db"
-	gh "mmt-delivery/pkg/github"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/errcode"
+	gh "github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/github"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -29,7 +32,7 @@ func (h *Handler) GetGitSnapshots(ctx *gin.Context) {
 		return
 	}
 
-	tenantID, err := strconv.ParseUint(tenantIDStr, 10, 64)
+	tenantID, err := strconv.ParseUint(tenantIDStr, 10, 32)
 	if err != nil {
 		Fail(ctx, http.StatusBadRequest, "invalid 'tenantId'")
 		return
@@ -79,7 +82,7 @@ func (h *Handler) gitRepoBrowserURL(ctx *gin.Context) string {
 // GET /api/v1/gitSync/snapshots/:id/files
 func (h *Handler) GetGitSnapshotFiles(ctx *gin.Context) {
 	idStr := ctx.Param("id")
-	snapshotID, err := strconv.ParseUint(idStr, 10, 64)
+	snapshotID, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
 		Fail(ctx, http.StatusBadRequest, "invalid snapshot ID")
 		return
@@ -93,11 +96,39 @@ func (h *Handler) GetGitSnapshotFiles(ctx *gin.Context) {
 
 	resp, err := h.svc.GetSnapshotFiles(ctx.Request.Context(), uint(snapshotID), gitClient)
 	if err != nil {
+		// Orphaned snapshot (pinned commit unreadable in current repo) → 409 +
+		// machine-readable code so the frontend offers a Re-sync path instead of
+		// a dead error banner. All other errors keep their current mapping.
+		var orphan *service.OrphanedSnapshotError
+		if errors.As(err, &orphan) {
+			FailCode(ctx, http.StatusConflict, errcode.SnapshotOrphaned,
+				"This snapshot's version is no longer available in the current repository. Re-sync to rebuild it.")
+			return
+		}
 		Fail(ctx, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	OK(ctx, resp)
+}
+
+// InvalidateGitSnapshot marks a completed-but-orphaned snapshot as failed, so the
+// existing failed→pending reclaim path can re-push it to the current repo on the
+// next Re-sync. POST /api/v1/gitSync/snapshots/:id/invalidate (RFC 010 · 13).
+func (h *Handler) InvalidateGitSnapshot(ctx *gin.Context) {
+	idStr := ctx.Param("id")
+	snapshotID, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		Fail(ctx, http.StatusBadRequest, "invalid snapshot ID")
+		return
+	}
+
+	if err := h.svc.InvalidateSnapshot(uint(snapshotID)); err != nil {
+		Fail(ctx, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	OK(ctx, gin.H{"invalidated": true})
 }
 
 // resolveGitClient reads GitRepoConfig from DB, resolves BTP Destination, and creates a GitArtifactClient.
@@ -106,5 +137,9 @@ func (h *Handler) resolveGitClient(ctx *gin.Context) (gh.GitArtifactClient, erro
 	if err := h.db.Where("enabled = ?", true).First(&config).Error; err != nil {
 		return nil, fmt.Errorf("no enabled Git Repository Configuration found: %w", err)
 	}
-	return gh.NewGitClient(ctx.Request.Context(), gh.Provider(config.Provider), config.DestinationName, config.Owner, config.Repo, h.destSvc)
+	return gh.NewGitClient(ctx.Request.Context(), gh.Provider(config.Provider), config.DestinationName, config.Owner, config.Repo, gh.AuthConfig{
+		Method:         gh.AuthMethod(config.AuthMethod),
+		AppID:          config.GithubAppID,
+		InstallationID: config.GithubInstallationID,
+	}, h.destSvc)
 }

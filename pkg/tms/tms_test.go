@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"mmt-delivery/pkg/env"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/env"
 )
 
 // testTransportNode is a local type for testing, mirrors db.TransportNode

@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"mmt-delivery/consts"
-	"mmt-delivery/pkg/env"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/consts"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/env"
 )
 
 // createTestClient creates a CpiClient for testing with the given API URL

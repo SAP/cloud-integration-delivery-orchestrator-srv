@@ -5,15 +5,18 @@ import (
 	"crypto/sha1"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"path"
 	"strings"
 
+	"github.com/bradleyfalzon/ghinstallation/v2"
 	"github.com/google/go-github/v89/github"
 
-	"mmt-delivery/pkg/cf"
-	"mmt-delivery/pkg/env"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cf"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/env"
 )
 
 // Git tree entry file modes
@@ -30,9 +33,19 @@ type GoGitHubClient struct {
 	repo   string
 }
 
+// destinationResolver is the narrow, consumer-side view of the destination service that
+// newGoGitHubClient needs: resolve a destination by name. *cf.DestinationServiceClient
+// satisfies it implicitly, so callers pass their concrete client unchanged; tests supply a fake.
+type destinationResolver interface {
+	GetDestination(ctx context.Context, name string) (*cf.Destination, error)
+}
+
 // newGoGitHubClient creates a GoGitHubClient by resolving a BTP Destination for auth/URL.
-// The destination must be BasicAuthentication type with Password = GitHub PAT.
-func newGoGitHubClient(ctx context.Context, destName string, owner, repo string, resolver *cf.DestinationServiceClient) (*GoGitHubClient, error) {
+// The destination is BasicAuthentication type; its Password field carries either a GitHub PAT
+// (auth.Method == AuthMethodPAT) or a base64-encoded GitHub App private key (auth.Method ==
+// AuthMethodGitHubApp). The auth method — not the destination content — is the sole discriminator
+// of how Password is interpreted, so the two modes never cross paths.
+func newGoGitHubClient(ctx context.Context, destName string, owner, repo string, auth AuthConfig, resolver destinationResolver) (*GoGitHubClient, error) {
 	dest, err := resolver.GetDestination(ctx, destName)
 	if err != nil {
 		return nil, fmt.Errorf("github destination %s not found: %w", destName, err)
@@ -41,18 +54,46 @@ func newGoGitHubClient(ctx context.Context, destName string, owner, repo string,
 		return nil, fmt.Errorf("github destination %s not found", destName)
 	}
 
-	token := dest.Password
-	if token == "" {
-		return nil, fmt.Errorf("github destination %s has no password (PAT token)", destName)
+	// Classify the destination URL: public github.com vs GHES, and build the GHES API/upload base
+	// URLs ourselves. Tolerant of scheme-less / trailing-slash / wrong-path user input.
+	isGHES, apiBaseURL, uploadURL := resolveGitHubBaseURLs(dest.URL)
+
+	var opts []github.ClientOptionsFunc
+	switch auth.Method {
+	case AuthMethodGitHubApp:
+		// github_app mode: Password holds base64(PEM) of the App private key.
+		if dest.Password == "" {
+			return nil, fmt.Errorf("github destination %s has no password (base64 app private key)", destName)
+		}
+		keyPEM, err := base64.StdEncoding.DecodeString(dest.Password)
+		if err != nil {
+			return nil, fmt.Errorf("decode github app private key from destination %s: %w", destName, err)
+		}
+		// ghinstallation transport auto-signs a ≤10min JWT and exchanges it for a 1h
+		// installation token, refreshing it before expiry — no token lifecycle management here.
+		itr, err := ghinstallation.New(http.DefaultTransport, auth.AppID, auth.InstallationID, keyPEM)
+		if err != nil {
+			return nil, fmt.Errorf("create github app transport: %w", err)
+		}
+		// GHES: ghinstallation's token-fetch call does NOT normalize URLs, so hand it the fully
+		// resolved /api/v3 base directly.
+		if isGHES {
+			itr.BaseURL = apiBaseURL
+		}
+		opts = append(opts, github.WithTransport(itr))
+	default:
+		// pat mode (also covers empty AuthMethod for backward compatibility): Password holds a PAT.
+		token := dest.Password
+		if token == "" {
+			return nil, fmt.Errorf("github destination %s has no password (PAT token)", destName)
+		}
+		opts = append(opts, github.WithAuthToken(token))
 	}
 
-	// Build client options
-	opts := []github.ClientOptionsFunc{github.WithAuthToken(token)}
-
-	// For GHE Server, override the base URL (destination URL should point to HOSTNAME)
-	apiURL := normalizeGitURL(dest.URL)
-	if apiURL != "" && apiURL != "https://api.github.com" {
-		opts = append(opts, github.WithEnterpriseURLs(apiURL, apiURL))
+	// GHES: hand go-github the already-resolved /api/v3 and /api/uploads URLs; its appender is a
+	// verified no-op since the expected suffixes are already present.
+	if isGHES {
+		opts = append(opts, github.WithEnterpriseURLs(apiBaseURL, uploadURL))
 	}
 
 	client, err := github.NewClient(opts...)
@@ -66,12 +107,42 @@ func newGoGitHubClient(ctx context.Context, destName string, owner, repo string,
 func (g *GoGitHubClient) TagExists(ctx context.Context, tag string) (bool, string, error) {
 	ref, resp, err := g.client.Git.GetRef(ctx, g.owner, g.repo, "tags/"+tag)
 	if err != nil {
+		if resp != nil && resp.StatusCode == 409 {
+			// 409 = Git Repository is empty — no refs at all.
+			// Bootstrap the repo via Contents API so all subsequent Git Data API
+			// calls work, then return "tag not found" (an empty repo has no tags).
+			if bErr := g.bootstrapEmptyRepo(ctx); bErr != nil {
+				return false, "", fmt.Errorf("bootstrap empty repo: %w", bErr)
+			}
+			return false, "", nil
+		}
 		if resp != nil && resp.StatusCode == 404 {
 			return false, "", nil
 		}
 		return false, "", fmt.Errorf("TagExists(%s): %w", tag, err)
 	}
 	return true, ref.GetObject().GetSHA(), nil
+}
+
+// bootstrapEmptyRepo creates an initial commit on the default branch via the
+// Contents API — the only GitHub REST endpoint that works on a completely empty
+// repository. After this call the Git Data API (trees, commits, refs) becomes
+// functional. Concurrent callers racing to bootstrap the same repo are handled
+// gracefully: the loser gets a 422 (file already exists) which is treated as success.
+func (g *GoGitHubClient) bootstrapEmptyRepo(ctx context.Context) error {
+	_, _, err := g.client.Repositories.CreateFile(ctx, g.owner, g.repo, "README.md", &github.RepositoryContentFileOptions{
+		Message: github.Ptr("init: bootstrap empty repository"),
+		Content: []byte("# " + g.repo + "\n"),
+	})
+	if err != nil {
+		// 422 = file already exists (concurrent bootstrap) — repo is already initialized.
+		var ghErr *github.ErrorResponse
+		if errors.As(err, &ghErr) && ghErr.Response != nil && ghErr.Response.StatusCode == 422 {
+			return nil
+		}
+		return fmt.Errorf("create initial README.md: %w", err)
+	}
+	return nil
 }
 
 const commitMaxRetries = 3
@@ -325,6 +396,42 @@ func (g *GoGitHubClient) ListRepos(ctx context.Context, owner string, ownerType 
 	return repos, nil
 }
 
+// ListAccessibleRepos returns the repositories the current credential is authorized to access
+// (GitHub App mode: GET /installation/repositories). Requires an installation-authed client
+// (AuthMethodGitHubApp); the installation token scopes the result to exactly the repos the admin
+// granted at install time. This is the scoped-credential discovery path (OP-1) — distinct from
+// PAT-mode ListRepos, which browses an arbitrary owner.
+func (g *GoGitHubClient) ListAccessibleRepos(ctx context.Context) ([]RepoInfo, error) {
+	var repos []RepoInfo
+	opts := &github.ListOptions{PerPage: 100}
+	for {
+		list, resp, err := g.client.Apps.ListRepos(ctx, opts)
+		if err != nil {
+			return nil, fmt.Errorf("list installation repos: %w", err)
+		}
+		for _, r := range list.Repositories {
+			repos = append(repos, RepoInfo{Name: r.GetName(), FullName: r.GetFullName(), Private: r.GetPrivate()})
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	return repos, nil
+}
+
+// HTTPStatusOf extracts the HTTP status code from a go-github *ErrorResponse
+// found anywhere in the error chain (errors.As over the %w chain). Returns
+// (code, true) when a GitHub API error is present, so callers can classify by
+// the stable REST status-code contract instead of parsing message text.
+func HTTPStatusOf(err error) (int, bool) {
+	var ghErr *github.ErrorResponse
+	if errors.As(err, &ghErr) && ghErr.Response != nil {
+		return ghErr.Response.StatusCode, true
+	}
+	return 0, false
+}
+
 func (g *GoGitHubClient) ReadTree(ctx context.Context, commitSHA string, treePath string) (FileMap, error) {
 	// Get the tree at commitSHA recursively
 	tree, _, err := g.client.Git.GetTree(ctx, g.owner, g.repo, commitSHA, true)
@@ -370,16 +477,52 @@ func (g *GoGitHubClient) ReadTree(ctx context.Context, commitSHA string, treePat
 	return files, nil
 }
 
-// normalizeGitURL parses a destination URL and forces HTTPS scheme.
-// GitHub API (both github.com and GHE Server) never uses plain HTTP.
-func normalizeGitURL(raw string) string {
+// isPublicGitHubHost reports whether host is a well-known public GitHub host that must map to the
+// default api.github.com client rather than GitHub Enterprise Server handling.
+func isPublicGitHubHost(host string) bool {
+	switch host {
+	case "github.com", "www.github.com", "api.github.com":
+		return true
+	}
+	return false
+}
+
+// resolveGitHubBaseURLs classifies a destination URL into public github.com vs GHES and, for GHES,
+// builds the fully-formed API base and upload URLs itself. Centralizing the "/api/v3" (and
+// "/api/uploads") convention here means neither consumer depends on the other to derive it:
+// ghinstallation's token-fetch transport does not normalize URLs at all, and go-github's
+// WithEnterpriseURLs appender becomes a verified no-op because we already supply the expected
+// suffixes. Correctness of the hostname itself remains the user's responsibility — we canonicalize
+// form, not reachability.
+//
+// It is deliberately tolerant of user input: the scheme is optional, and any path the user appends
+// (/api, /api/v3, /api/v1, /v1, trailing slashes, ...) is discarded — only the clean host root is
+// used to reconstruct canonical URLs.
+//
+//   - isGHES:      false for public github.com and for empty/unparseable input → caller uses the
+//     default go-github (api.github.com) and default ghinstallation base URLs.
+//   - apiBaseURL:  "https://<host>/api/v3"      — for both ghinstallation.Transport.BaseURL and the
+//     base argument of github.WithEnterpriseURLs.
+//   - uploadURL:   "https://<host>/api/uploads" — for the upload argument of WithEnterpriseURLs.
+//
+// For non-GHES results apiBaseURL/uploadURL are empty (the defaults are already correct).
+func resolveGitHubBaseURLs(raw string) (isGHES bool, apiBaseURL, uploadURL string) {
+	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return ""
+		return false, "", "" // default: public github.com
 	}
-	parsed, err := url.Parse(raw)
-	if err == nil && parsed.Host != "" {
-		parsed.Scheme = "https"
-		return strings.TrimRight(parsed.String(), "/")
+	// Ensure a scheme so url.Parse populates Host instead of Path (GitHub API is always HTTPS).
+	if !strings.Contains(raw, "://") {
+		raw = "https://" + raw
 	}
-	return strings.TrimRight(raw, "/")
+	host := ""
+	if parsed, err := url.Parse(raw); err == nil {
+		host = parsed.Host
+	}
+	host = strings.ToLower(strings.TrimSpace(host))
+	if host == "" || isPublicGitHubHost(host) {
+		return false, "", "" // unparseable or public github.com → default clients
+	}
+	root := "https://" + host
+	return true, root + "/api/v3", root + "/api/uploads"
 }

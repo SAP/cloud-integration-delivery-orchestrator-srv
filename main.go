@@ -10,17 +10,18 @@ import (
 	"strings"
 	"time"
 
-	"mmt-delivery/db"
-	"mmt-delivery/handler"
-	"mmt-delivery/pkg/auth"
-	"mmt-delivery/pkg/cas"
-	"mmt-delivery/pkg/cf"
-	"mmt-delivery/pkg/cpi"
-	"mmt-delivery/pkg/env"
-	"mmt-delivery/pkg/xsuaa"
-	cpiotel "mmt-delivery/pkg/otel"
-	"mmt-delivery/service"
-	"mmt-delivery/web"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/handler"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/auth"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cas"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cf"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cpi"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/env"
+	gh "github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/github"
+	cpiotel "github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/otel"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/xsuaa"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/service"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/web"
 
 	ginzap "github.com/gin-contrib/zap"
 	"github.com/gin-gonic/gin"
@@ -73,7 +74,7 @@ func main() {
 			return cpiManager.Get(ctx, tenant)
 		},
 		GetUserEmail: xsuaa.GetUserEmail,
-		Notifier:     service.NewDefaultNotifier(resolver, database),
+		Notifier:     service.NewJiraNotifier(resolver, database),
 		Hub:          hub,
 		SyncTracker:  service.NewSyncTracker(),
 		ProviderDest: resolver,
@@ -88,7 +89,8 @@ func main() {
 	})
 
 	// --- Build handler with all injected dependencies ---
-	h := handler.NewHandler(svc, database, env.Logger(), cpiManager, xsuaaClient, resolver, hub)
+	gitAppState := gh.NewStateStore(gh.DefaultStateTTL)
+	h := handler.NewHandler(svc, database, env.Logger(), cpiManager, xsuaaClient, resolver, hub, gitAppState)
 
 	// --- OAuth2 setup ---
 	oauthCfg, err := auth.LoadOAuthConfigFromEnv()

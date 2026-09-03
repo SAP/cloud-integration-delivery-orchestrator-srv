@@ -10,11 +10,11 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	oteltrace "go.opentelemetry.io/otel/trace"
 
-	"mmt-delivery/consts"
-	"mmt-delivery/db"
-	"mmt-delivery/pkg/lifecycle"
-	cpiotel "mmt-delivery/pkg/otel"
-	"mmt-delivery/pkg/tms"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/consts"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/lifecycle"
+	cpiotel "github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/otel"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/tms"
 )
 
 // ErrSyncAlreadyInProgress is returned when a concurrent sync is already running for the same DR.
@@ -537,7 +537,7 @@ func (s *Service) PostJiraComment(jiraLink string, drID uint, message string, st
 		return
 	}
 	go func() {
-		if err := s.Notifier.AddDeliveryComment(issueKey, drID, message, status); err != nil {
+		if err := s.Notifier.OnDeliveryComment(issueKey, drID, message, status); err != nil {
 			s.Logger.Errorw("failed to post JIRA comment", "dr_id", drID, "status", status, "error", err)
 		}
 	}()

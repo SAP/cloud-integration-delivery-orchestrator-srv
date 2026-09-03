@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	. "mmt-delivery/consts"
-	"mmt-delivery/pkg/env"
+	. "github.com/SAP/cloud-integration-delivery-orchestrator-srv/consts"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/env"
 	"net/http"
 	"time"
 )

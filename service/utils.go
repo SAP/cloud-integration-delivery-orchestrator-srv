@@ -1,7 +1,7 @@
 package service
 
 import (
-	"mmt-delivery/db"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
 	"strconv"
 
 	"github.com/gin-gonic/gin"

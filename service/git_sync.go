@@ -12,12 +12,12 @@ import (
 	"sync"
 	"time"
 
-	"mmt-delivery/consts"
-	"mmt-delivery/db"
-	"mmt-delivery/pkg/env"
-	gh "mmt-delivery/pkg/github"
-	"mmt-delivery/pkg/lifecycle"
-	cpiotel "mmt-delivery/pkg/otel"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/consts"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/env"
+	gh "github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/github"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/lifecycle"
+	cpiotel "github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/otel"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -176,9 +176,9 @@ func (s *Service) gitSync(ctx context.Context, req GitSyncRequest, gitClient gh.
 	lock.Lock()
 	defer lock.Unlock()
 
-	commitMessage := fmt.Sprintf("sync(%s): v%s from %s [%s]\n\nPackage: %s\nArtifact Type: %s\nTrigger: %s",
-		req.ArtifactID, req.Version, req.TenantName, req.TriggerSource,
-		req.PackageID, req.ArtifactType, req.TriggerSource)
+	commitMessage := fmt.Sprintf("Sync: %s, Version: %s\n\nTenant: %s(#%d)\nPackage: %s\nArtifact Type: %s\nTrigger: %s",
+		req.ArtifactID, req.Version,
+		req.TenantName, req.CpiTenantID, req.PackageID, req.ArtifactType, req.TriggerSource)
 	commitSHA, err := gitClient.Commit(ctx, branch, treePath, files, gh.CommitMeta{Message: commitMessage})
 	if err != nil {
 		completeSnapshot(GitSnapshotFailed, "", err.Error())
@@ -379,6 +379,33 @@ func (s *Service) claimGitSyncSnapshot(req GitSyncRequest, branch, treePath, tag
 // Snapshot Read (files API)
 // =============================================================================
 
+// OrphanedSnapshotError marks a completed snapshot whose pinned commit is no
+// longer resolvable in the currently-configured repo. GitHub signals this with
+// one of {404, 409, 422} on the tree read (empty repo / commit unreachable /
+// invalid SHA) — all bucketed together because the recovery path is identical:
+// a user-initiated Re-sync against the current repo (RFC 010 · 13, D2/D3).
+type OrphanedSnapshotError struct {
+	SnapshotID uint
+	StatusCode int
+	Err        error
+}
+
+func (e *OrphanedSnapshotError) Error() string {
+	return fmt.Sprintf("snapshot %d orphaned: commit unreachable in current repo (github status %d): %v",
+		e.SnapshotID, e.StatusCode, e.Err)
+}
+
+func (e *OrphanedSnapshotError) Unwrap() error { return e.Err }
+
+// isOrphanStatus reports whether a GitHub status code means the pinned commit's
+// content is unavailable in the current repo. Deliberately excludes {429,5xx}
+// (transient) and {401,403} (auth) so those are not misclassified as orphaned.
+func isOrphanStatus(code int) bool {
+	return code == http.StatusNotFound || // 404: commit unreachable / repo gone
+		code == http.StatusConflict || // 409: empty repo (no commits)
+		code == http.StatusUnprocessableEntity // 422: invalid/unresolvable SHA
+}
+
 // SnapshotFileEntry represents a single file's content in the response.
 type SnapshotFileEntry struct {
 	Path     string `json:"path"`
@@ -411,6 +438,12 @@ func (s *Service) GetSnapshotFiles(ctx context.Context, snapshotID uint, gitClie
 
 	files, err := gitClient.ReadTree(ctx, snapshot.CommitSHA, snapshot.TreePath)
 	if err != nil {
+		// Classify by GitHub HTTP status (stable REST contract), never by
+		// message text. {404,409,422} → orphaned bucket (Re-sync recovery);
+		// everything else (transient/auth) falls through unchanged. RFC 010·13.
+		if code, ok := gh.HTTPStatusOf(err); ok && isOrphanStatus(code) {
+			return nil, &OrphanedSnapshotError{SnapshotID: snapshotID, StatusCode: code, Err: err}
+		}
 		return nil, fmt.Errorf("read tree: %w", err)
 	}
 
@@ -421,6 +454,30 @@ func (s *Service) GetSnapshotFiles(ctx context.Context, snapshotID uint, gitClie
 		Tenant:     tenant.Name,
 		Files:      buildFileEntries(files),
 	}, nil
+}
+
+// InvalidateSnapshot marks a completed-but-orphaned snapshot as failed so the
+// existing failed→pending reclaim path (claimGitSyncSnapshot) can re-push it to
+// the currently-configured repo on the next Re-sync. This is the write half of
+// the orphan recovery: the read path (GetSnapshotFiles) only classifies and
+// never mutates state (RFC 010 · 13, D4/D5). The atomic guard (status=completed)
+// makes concurrent invalidations idempotent and leaves non-completed rows alone.
+func (s *Service) InvalidateSnapshot(snapshotID uint) error {
+	var snapshot db.GitArtifactSnapshot
+	if err := s.DB.First(&snapshot, snapshotID).Error; err != nil {
+		return fmt.Errorf("snapshot %d not found: %w", snapshotID, err)
+	}
+	result := s.DB.Model(&snapshot).
+		Where("status = ?", GitSnapshotCompleted).
+		Select("Status", "Error").
+		Updates(db.GitArtifactSnapshot{
+			Status: GitSnapshotFailed,
+			Error:  "Snapshot orphaned: commit unreachable in current repo, re-sync required",
+		})
+	if result.Error != nil {
+		return fmt.Errorf("invalidate snapshot %d: %w", snapshotID, result.Error)
+	}
+	return nil
 }
 
 // GetSnapshots returns all snapshots for a given artifact + tenant (all statuses).
@@ -514,7 +571,11 @@ func (s *Service) TriggerGitSync(ctx context.Context, artifactID, packageID stri
 		return fmt.Errorf("git sync: tenant %d not found: %w", tenantID, err)
 	}
 
-	gitClient, err := gh.NewGitClient(ctx, gh.Provider(config.Provider), config.DestinationName, config.Owner, config.Repo, s.ProviderDest)
+	gitClient, err := gh.NewGitClient(ctx, gh.Provider(config.Provider), config.DestinationName, config.Owner, config.Repo, gh.AuthConfig{
+		Method:         gh.AuthMethod(config.AuthMethod),
+		AppID:          config.GithubAppID,
+		InstallationID: config.GithubInstallationID,
+	}, s.ProviderDest)
 	if err != nil {
 		return fmt.Errorf("git sync: failed to create git client: %w", err)
 	}

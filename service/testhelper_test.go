@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"mmt-delivery/consts"
-	"mmt-delivery/db"
-	"mmt-delivery/pkg/cas"
-	"mmt-delivery/pkg/cpi"
-	"mmt-delivery/pkg/env"
-	"mmt-delivery/pkg/tms"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/consts"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cas"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cpi"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/env"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/tms"
 
 	"go.uber.org/zap"
 	"gorm.io/driver/postgres"
@@ -470,28 +470,28 @@ func (m *mockTMSClient) GetNodeTransportRequests(ctx context.Context, nodeID uin
 // mockNotifier implements Notifier as a no-op for testing.
 type mockNotifier struct{}
 
-func (m *mockNotifier) SendApprovalRequest(to []string, drID uint, requestor string, description string) error {
+func (m *mockNotifier) OnApprovalRequested(drID uint, requestor string, description string) error {
 	return nil
 }
-func (m *mockNotifier) SendDeliveryNotification(to []string, drID uint, status string, message string) error {
+func (m *mockNotifier) OnStatusChanged(drID uint, status string, message string) error {
 	return nil
 }
-func (m *mockNotifier) AddDeliveryComment(issueKey string, drID uint, message string, status string) error {
+func (m *mockNotifier) OnDeliveryComment(issueKey string, drID uint, message string, status string) error {
 	return nil
 }
 
-// failingNotifier implements Notifier but returns an error for email notifications.
+// failingNotifier implements Notifier but returns an error for all notifications.
 type failingNotifier struct {
 	err error
 }
 
-func (m *failingNotifier) SendApprovalRequest(to []string, drID uint, requestor string, description string) error {
+func (m *failingNotifier) OnApprovalRequested(drID uint, requestor string, description string) error {
 	return m.err
 }
-func (m *failingNotifier) SendDeliveryNotification(to []string, drID uint, status string, message string) error {
+func (m *failingNotifier) OnStatusChanged(drID uint, status string, message string) error {
 	return m.err
 }
-func (m *failingNotifier) AddDeliveryComment(issueKey string, drID uint, message string, status string) error {
+func (m *failingNotifier) OnDeliveryComment(issueKey string, drID uint, message string, status string) error {
 	return m.err
 }
 

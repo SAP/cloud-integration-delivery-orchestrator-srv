@@ -5,46 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"mmt-delivery/db"
-	"mmt-delivery/pkg/env"
-
-	"gorm.io/gorm/clause"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/env"
 )
-
-// --- Integration Config CRUD ---
-
-// GetIntegrationConfig retrieves an integration config by type.
-func (s *Service) GetIntegrationConfig(integrationType string) (*db.IntegrationConfig, error) {
-	var config db.IntegrationConfig
-	if err := s.DB.Where("type = ?", integrationType).First(&config).Error; err != nil {
-		return nil, err
-	}
-	return &config, nil
-}
-
-// GetAllIntegrationConfigs retrieves all integration configs.
-func (s *Service) GetAllIntegrationConfigs() ([]db.IntegrationConfig, error) {
-	var configs []db.IntegrationConfig
-	if err := s.DB.Find(&configs).Error; err != nil {
-		return nil, err
-	}
-	return configs, nil
-}
-
-// UpdateIntegrationConfig updates DestinationName, Enabled, and Description for a given type.
-func (s *Service) UpdateIntegrationConfig(integrationType string, destName string, enabled bool, description string) (*db.IntegrationConfig, error) {
-	var config db.IntegrationConfig
-	if err := s.DB.Where("type = ?", integrationType).First(&config).Error; err != nil {
-		return nil, err
-	}
-	config.DestinationName = destName
-	config.Enabled = enabled
-	config.Description = description
-	if err := s.DB.Save(&config).Error; err != nil {
-		return nil, err
-	}
-	return &config, nil
-}
 
 // --- Connectivity Check ---
 
@@ -54,12 +17,6 @@ type ConnectivityStatus struct {
 	Type    string `json:"type"`
 	Status  string `json:"status"`
 	Message string `json:"message,omitempty"`
-}
-
-// ConnectivityReport is a collection of check results with a timestamp.
-type ConnectivityReport struct {
-	CheckedAt time.Time            `json:"checkedAt"`
-	Results   []ConnectivityStatus `json:"results"`
 }
 
 // CheckDatabase verifies database connectivity via SQL ping.
@@ -98,83 +55,6 @@ func (s *Service) CheckTenants(ctx context.Context) []ConnectivityStatus {
 		results = append(results, s.checkDestinationAuth(ctx, t.Name, "cpi_tenant", t.PirApiDestinationName))
 	}
 	return results
-}
-
-// CheckIntegration verifies a single integration's destination connectivity.
-func (s *Service) CheckIntegration(ctx context.Context, cfg db.IntegrationConfig) ConnectivityStatus {
-	return s.checkDestinationAuth(ctx, cfg.Type, "integration", cfg.DestinationName)
-}
-
-// CheckAllIntegrations verifies all integration destinations.
-func (s *Service) CheckAllIntegrations(ctx context.Context) []ConnectivityStatus {
-	configs, _ := s.GetAllIntegrationConfigs()
-	var results []ConnectivityStatus
-	for _, cfg := range configs {
-		results = append(results, s.CheckIntegration(ctx, cfg))
-	}
-	return results
-}
-
-// CheckAll runs full connectivity check across all dependencies.
-func (s *Service) CheckAll(ctx context.Context) ConnectivityReport {
-	var results []ConnectivityStatus
-	results = append(results, s.CheckDatabase())
-	results = append(results, s.CheckTMS(ctx))
-	results = append(results, s.CheckTenants(ctx)...)
-	results = append(results, s.CheckAllIntegrations(ctx)...)
-	return ConnectivityReport{CheckedAt: time.Now(), Results: results}
-}
-
-// PersistConnectivityResults saves check results to the database.
-func (s *Service) PersistConnectivityResults(results []ConnectivityStatus) error {
-	now := time.Now()
-	var dbResults []db.ConnectivityCheckResult
-	for _, r := range results {
-		dbResults = append(dbResults, db.ConnectivityCheckResult{
-			Type: r.Type, Name: r.Name, Status: r.Status, Message: r.Message, CheckedAt: now,
-		})
-	}
-	if len(dbResults) == 0 {
-		return nil
-	}
-	return s.DB.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "type"}, {Name: "name"}},
-		DoUpdates: clause.AssignmentColumns([]string{"status", "message", "checked_at"}),
-	}).Create(&dbResults).Error
-}
-
-// PersistConnectivityResult saves a single check result.
-func (s *Service) PersistConnectivityResult(r ConnectivityStatus) error {
-	record := db.ConnectivityCheckResult{
-		Type: r.Type, Name: r.Name, Status: r.Status, Message: r.Message, CheckedAt: time.Now(),
-	}
-	return s.DB.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "type"}, {Name: "name"}},
-		DoUpdates: clause.AssignmentColumns([]string{"status", "message", "checked_at"}),
-	}).Create(&record).Error
-}
-
-// GetLastConnectivityReport returns the cached results from the database.
-func (s *Service) GetLastConnectivityReport() (*ConnectivityReport, error) {
-	var dbResults []db.ConnectivityCheckResult
-	if err := s.DB.Find(&dbResults).Error; err != nil {
-		return nil, err
-	}
-	if len(dbResults) == 0 {
-		return nil, fmt.Errorf("no connectivity check has been performed yet")
-	}
-
-	var results []ConnectivityStatus
-	var latestAt time.Time
-	for _, r := range dbResults {
-		results = append(results, ConnectivityStatus{
-			Name: r.Name, Type: r.Type, Status: r.Status, Message: r.Message,
-		})
-		if r.CheckedAt.After(latestAt) {
-			latestAt = r.CheckedAt
-		}
-	}
-	return &ConnectivityReport{CheckedAt: latestAt, Results: results}, nil
 }
 
 // --- internal helper ---

@@ -2,7 +2,7 @@ package db
 
 import (
 	"fmt"
-	"mmt-delivery/consts"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/consts"
 	"testing"
 	"time"
 

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"mmt-delivery/pkg/env"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/env"
 )
 
 func TestNewManager_InitializesClientCache(t *testing.T) {

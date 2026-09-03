@@ -3,11 +3,13 @@ package handler
 import (
 	"errors"
 	"net/http"
+	"net/url"
 
-	"mmt-delivery/pkg/cf"
-	"mmt-delivery/pkg/cpi"
-	"mmt-delivery/pkg/xsuaa"
-	"mmt-delivery/service"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cf"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cpi"
+	gh "github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/github"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/xsuaa"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/service"
 
 	"github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
@@ -19,13 +21,14 @@ import (
 // Handler holds all injected dependencies for the HTTP handler layer.
 // All gin handler functions are methods on this struct.
 type Handler struct {
-	svc     *service.Service
-	db      *gorm.DB
-	logger  *zap.SugaredLogger
-	cpi     *cpi.Manager
-	xsuaa   *xsuaa.UaaClient
-	destSvc *cf.DestinationServiceClient
-	hub     *service.WSHub
+	svc         *service.Service
+	db          *gorm.DB
+	logger      *zap.SugaredLogger
+	cpi         *cpi.Manager
+	xsuaa       *xsuaa.UaaClient
+	destSvc     *cf.DestinationServiceClient
+	hub         *service.WSHub
+	gitAppState *gh.StateStore
 }
 
 type StatusCount struct {
@@ -66,6 +69,29 @@ func FailCodeErrors(c *gin.Context, status int, code, message string, errors any
 	c.AbortWithStatusJSON(status, gin.H{"code": code, "message": message, "errors": errors})
 }
 
+// RedirectSPA issues a 302 back to the SPA after a browser-facing callback,
+// mirroring the OKMsg()/Fail() JSON helpers but for top-level redirect flows.
+// Because a 302 has no body, the toast directive rides the query string: the SPA
+// reads ?toast=<severity>&msg=<message> and shows it generically (severity is
+// "success" or "error"), exactly like OKMsg carries a backend-authored message.
+// The frontend never interprets the outcome — the message is authored here, the
+// single source of truth. `extra` carries optional action flags (e.g.
+// openGitDialog=1) the destination view honors as a normal deep link.
+func RedirectSPA(c *gin.Context, path, severity, message string, extra url.Values) {
+	if path == "" {
+		path = "/"
+	}
+	q := url.Values{}
+	q.Set("toast", severity)
+	q.Set("msg", message)
+	for k, vs := range extra {
+		for _, v := range vs {
+			q.Add(k, v)
+		}
+	}
+	c.Redirect(http.StatusFound, path+"?"+q.Encode())
+}
+
 // isUniqueViolation reports whether err is a Postgres unique-constraint
 // violation (SQLSTATE 23505). Used to translate duplicate-key errors into
 // 409 Conflict responses instead of a raw 500.
@@ -82,15 +108,17 @@ func NewHandler(
 	xsuaaClient *xsuaa.UaaClient,
 	destSvc *cf.DestinationServiceClient,
 	hub *service.WSHub,
+	gitAppState *gh.StateStore,
 ) *Handler {
 	return &Handler{
-		svc:     svc,
-		db:      db,
-		logger:  logger,
-		cpi:     cpiManager,
-		xsuaa:   xsuaaClient,
-		destSvc: destSvc,
-		hub:     hub,
+		svc:         svc,
+		db:          db,
+		logger:      logger,
+		cpi:         cpiManager,
+		xsuaa:       xsuaaClient,
+		destSvc:     destSvc,
+		hub:         hub,
+		gitAppState: gitAppState,
 	}
 }
 
@@ -273,28 +301,38 @@ func (h *Handler) SetupRoutes(v1 *gin.RouterGroup, v2 *gin.RouterGroup, requireS
 	gitSyncOperate.Use(requireScope("DeliveryRequest.Operate"))
 	{
 		gitSyncOperate.POST("/gitSync/trigger", h.TriggerGitSync)
+		gitSyncOperate.POST("/gitSync/snapshots/:id/invalidate", h.InvalidateGitSnapshot)
 	}
 
 	// --- System Configuration (CpiTenant.Manage scope — admin-level) ---
 	system := v1.Group("/system")
 	system.Use(requireScope("CpiTenant.Manage"))
 	{
-		system.GET("/integrations", h.GetIntegrations)
-		system.PUT("/integrations/:type", h.UpdateIntegration)
+		system.GET("/jiraConfig", h.GetJiraConfig)
+		system.PUT("/jiraConfig", h.UpdateJiraConfig)
+		system.POST("/jiraConfig/test", h.TestJiraConnection)
 		system.GET("/gitRepoConfig", h.GetGitRepoConfig)
 		system.GET("/gitRepoConfig/providers", h.GetGitProviders)
 		system.GET("/gitRepoConfig/owners", h.GetGitOwners)
 		system.GET("/gitRepoConfig/repos", h.GetGitRepos)
 		system.PUT("/gitRepoConfig", h.UpsertGitRepoConfig)
 		system.POST("/gitRepoConfig/test", h.TestGitRepoConnection)
+		// GitHub App manifest flow (RFC 010 doc 12 §9). callback/setup are browser
+		// redirects from GitHub carrying the SameSite=Lax session cookie (RP-1).
+		system.GET("/gitApp/manifest", h.StartGitAppManifest)
+		system.GET("/gitApp/callback", h.GitAppManifestCallback)
+		system.GET("/gitApp/setup", h.GitAppSetupCallback)
+		// App-mode read-back discovery (OP-1): lists repos the installation was granted.
+		system.GET("/gitApp/repos", h.GetGitAppRepos)
+		// Install-pending helper: install deep-link for a registered-but-not-yet-installed App.
+		system.GET("/gitApp/installUrl", h.GetGitAppInstallURL)
+		// Exit mechanism (§10): uninstall + delete destination + unbind config, returns the
+		// Advanced-page deep-link for the UI-only App-registration deletion.
+		system.DELETE("/gitApp", h.GitAppDisconnect)
 		system.GET("/database/info", h.GetDatabaseInfo)
 		system.GET("/connectivity/database", h.CheckConnectivityDatabase)
 		system.GET("/connectivity/tms", h.CheckConnectivityTMS)
 		system.GET("/connectivity/tenants", h.CheckConnectivityTenants)
-		system.GET("/connectivity/integrations", h.CheckConnectivityIntegrations)
-		system.GET("/connectivity/integration/:type", h.TestIntegration)
-		system.POST("/connectivity/all", h.CheckConnectivity)
-		system.GET("/connectivity/last", h.GetLastConnectivity)
 	}
 
 	// --- v2 API (DeliveryRequest.Operate) ---

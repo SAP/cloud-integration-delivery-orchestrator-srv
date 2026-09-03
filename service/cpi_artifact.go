@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"sync"
 
-	"mmt-delivery/consts"
-	"mmt-delivery/pkg/cpi"
-	"mmt-delivery/pkg/env"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/consts"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cpi"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/env"
 )
 
 type PackageArtifact struct {

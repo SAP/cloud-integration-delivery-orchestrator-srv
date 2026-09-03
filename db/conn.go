@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"mmt-delivery/pkg/env"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/env"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -54,17 +54,11 @@ func Connect() (*gorm.DB, error) {
 	if err := db.AutoMigrate(
 		&CpiTenant{}, &DeliveryRule{}, &DeliveryRequest{}, &ArtifactTenantOperation{}, &BatchJob{},
 		&Condition{}, &VersionCompareSnapshot{}, &VersionCompareIncludedPackage{},
-		&IntegrationConfig{},
+		&JiraConfig{},
 		&CentralTmsContext{}, &TenantBootstrapJob{},
-		&ConnectivityCheckResult{},
 		&GitRepoConfig{}, &GitArtifactSnapshot{},
 	); err != nil {
 		return nil, fmt.Errorf("failed to migrate: %w", err)
-	}
-
-	// Seed predefined integration types (idempotent — skips existing records)
-	if err := SeedIntegrationConfigs(db); err != nil {
-		return nil, fmt.Errorf("failed to seed integration configs: %w", err)
 	}
 
 	return db, nil

@@ -1,7 +1,7 @@
 package db
 
 import (
-	"mmt-delivery/pkg/lifecycle"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/lifecycle"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"

@@ -4,13 +4,30 @@ import (
 	"context"
 	"fmt"
 
-	"mmt-delivery/pkg/cf"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cf"
 )
 
 // Provider identifies a Git hosting provider.
 type Provider string
 
 const ProviderGitHub Provider = "github"
+
+// AuthMethod identifies how the GitHub client authenticates.
+// Stored as a plain string in db.GitRepoConfig.AuthMethod; convert at the boundary (like Provider).
+type AuthMethod string
+
+const (
+	AuthMethodPAT       AuthMethod = "pat"        // static Personal Access Token in destination Password
+	AuthMethodGitHubApp AuthMethod = "github_app" // GitHub App installation token (base64 PEM private key in destination Password)
+)
+
+// AuthConfig carries the auth method and GitHub App parameters used when creating a client.
+// An empty Method is treated as AuthMethodPAT for backward compatibility with existing deployments.
+type AuthConfig struct {
+	Method         AuthMethod // AuthMethodPAT (default) | AuthMethodGitHubApp
+	AppID          int64      // GitHub App ID (github_app mode)
+	InstallationID int64      // GitHub App Installation ID (github_app mode)
+}
 
 // SupportedProviders returns all providers the system can create clients for.
 func SupportedProviders() []Provider {
@@ -63,15 +80,24 @@ type GitArtifactClient interface {
 	// ListRepos returns repositories accessible to the authenticated user under the given owner.
 	// ownerType should be "User" or "Organization" (from ListOwners result) to avoid an extra API call.
 	ListRepos(ctx context.Context, owner string, ownerType string) ([]RepoInfo, error)
+
+	// ListAccessibleRepos returns the repositories the current credential is authorized to access,
+	// without browsing an arbitrary owner. This is the discovery shape for scoped credentials:
+	//   - GitHub App: the installation's granted repos (GET /installation/repositories).
+	//   - (future) GitLab project/group access token, Bitbucket repo/workspace token, ... map to
+	//     their native "list repos this token can see" endpoint.
+	// Distinct from ListOwners/ListRepos, which require a broad user-scoped token to browse owners.
+	ListAccessibleRepos(ctx context.Context) ([]RepoInfo, error)
 }
 
 // NewGitClient is the factory that creates a GitArtifactClient based on provider type.
 // All callers must go through this factory — never instantiate provider-specific clients directly.
 // For discovery-only usage (ListOwners/ListRepos), pass empty owner and repo.
-func NewGitClient(ctx context.Context, provider Provider, destName, owner, repo string, resolver *cf.DestinationServiceClient) (GitArtifactClient, error) {
+// auth selects the authentication method (PAT vs GitHub App); a zero AuthConfig means PAT.
+func NewGitClient(ctx context.Context, provider Provider, destName, owner, repo string, auth AuthConfig, resolver *cf.DestinationServiceClient) (GitArtifactClient, error) {
 	switch provider {
 	case ProviderGitHub:
-		return newGoGitHubClient(ctx, destName, owner, repo, resolver)
+		return newGoGitHubClient(ctx, destName, owner, repo, auth, resolver)
 	default:
 		return nil, fmt.Errorf("unsupported git provider: %q", provider)
 	}

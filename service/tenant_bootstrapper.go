@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"time"
 
-	"mmt-delivery/db"
-	"mmt-delivery/pkg/cf"
-	"mmt-delivery/pkg/lifecycle"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cf"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/lifecycle"
 
 	"gorm.io/gorm"
 )

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"mmt-delivery/db"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
 
 	"gorm.io/gorm"
 )

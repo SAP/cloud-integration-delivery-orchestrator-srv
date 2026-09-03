@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"mmt-delivery/db"
-	"mmt-delivery/pkg/cpi"
-	"mmt-delivery/pkg/lifecycle"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cpi"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/lifecycle"
 )
 
 func TestRecoverActiveSyncs_OnlyRecoversDRsWithActiveOps(t *testing.T) {
