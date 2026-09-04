@@ -186,10 +186,10 @@ func (s *StateStore) gcLocked() {
 // Browser-facing GitHub URLs (RP-4)
 // =============================================================================
 
-// resolveGitHubWebBase returns the web base ("https://<host>") for browser-facing
-// GitHub App pages. Public github.com → "https://github.com"; GHES → its host.
-// Reuses resolveGitHubBaseURLs so host classification stays in one place.
-func resolveGitHubWebBase(destURL string) string {
+// ResolveGitHubWebBase returns the web base ("https://<host>") for browser-facing
+// GitHub pages. Public github.com → "https://github.com"; GHES → its host.
+// Handles bare hostnames (no scheme), trailing slashes, and /api/v3 paths.
+func ResolveGitHubWebBase(destURL string) string {
 	isGHES, apiBaseURL, _ := resolveGitHubBaseURLs(destURL)
 	if !isGHES {
 		return "https://github.com"
@@ -205,7 +205,7 @@ func resolveGitHubWebBase(destURL string) string {
 // so ownership must match the sync-target account. The browser POSTs the manifest
 // (with ?state=<csrf>) here.
 func NewAppURL(destURL, org string) string {
-	base := resolveGitHubWebBase(destURL)
+	base := ResolveGitHubWebBase(destURL)
 	if org == "" {
 		return base + "/settings/apps/new"
 	}
@@ -223,7 +223,7 @@ func NewAppURL(destURL, org string) string {
 // public /apps/<slug>/installations/new flow, not the settings install page, so
 // the setup_url callback cannot rely on it (see handler.GitAppSetupCallback).
 func InstallURL(destURL, ownerType, owner, slug string) string {
-	base := resolveGitHubWebBase(destURL)
+	base := ResolveGitHubWebBase(destURL)
 	if strings.EqualFold(ownerType, "Organization") {
 		return base + "/organizations/" + url.PathEscape(owner) + "/settings/apps/" + url.PathEscape(slug) + "/installations"
 	}
@@ -234,7 +234,7 @@ func InstallURL(destURL, ownerType, owner, slug string) string {
 // view the App name, description, permissions, and navigate to installations or
 // the advanced (delete) page. ownerType selects the path like InstallURL.
 func AppSettingsURL(destURL, ownerType, owner, slug string) string {
-	base := resolveGitHubWebBase(destURL)
+	base := ResolveGitHubWebBase(destURL)
 	if strings.EqualFold(ownerType, "Organization") {
 		return base + "/organizations/" + url.PathEscape(owner) + "/settings/apps/" + url.PathEscape(slug)
 	}
@@ -249,7 +249,7 @@ func AppSettingsURL(destURL, ownerType, owner, slug string) string {
 // <web-base>/organizations/<owner>/settings/apps/<slug>/advanced; anything else
 // (personal) → <web-base>/settings/apps/<slug>/advanced.
 func AppAdvancedURL(destURL, ownerType, owner, slug string) string {
-	base := resolveGitHubWebBase(destURL)
+	base := ResolveGitHubWebBase(destURL)
 	if strings.EqualFold(ownerType, "Organization") {
 		return base + "/organizations/" + url.PathEscape(owner) + "/settings/apps/" + url.PathEscape(slug) + "/advanced"
 	}

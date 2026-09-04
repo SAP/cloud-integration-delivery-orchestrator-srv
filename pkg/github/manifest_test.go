@@ -93,8 +93,8 @@ func TestResolveGitHubWebBase(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := resolveGitHubWebBase(tt.destURL); got != tt.want {
-				t.Errorf("resolveGitHubWebBase(%q) = %q, want %q", tt.destURL, got, tt.want)
+			if got := ResolveGitHubWebBase(tt.destURL); got != tt.want {
+				t.Errorf("ResolveGitHubWebBase(%q) = %q, want %q", tt.destURL, got, tt.want)
 			}
 		})
 	}
