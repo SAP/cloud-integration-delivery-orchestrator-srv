@@ -64,6 +64,19 @@ func (h *Handler) TestJiraConnection(ctx *gin.Context) {
 	OK(ctx, result)
 }
 
+// --- ANS Status (read-only) ---
+
+// GET /api/v1/system/ansStatus
+func (h *Handler) GetAnsStatus(ctx *gin.Context) {
+	OK(ctx, h.svc.GetAnsStatus())
+}
+
+// POST /api/v1/system/ansStatus/test
+func (h *Handler) TestAnsConnection(ctx *gin.Context) {
+	result := h.svc.TestAnsConnection(ctx.Request.Context())
+	OK(ctx, result)
+}
+
 // --- Database Info ---
 
 func (h *Handler) GetDatabaseInfo(ctx *gin.Context) {

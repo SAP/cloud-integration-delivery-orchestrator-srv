@@ -9,7 +9,6 @@ import (
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cas"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cf"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cpi"
-	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/notify"
 	cpiotel "github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/otel"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/tms"
 
@@ -105,41 +104,4 @@ type Service struct {
 // When ctx has no active span (e.g. CLS not enabled), returns s.Logger unchanged.
 func (s *Service) L(ctx context.Context) *zap.SugaredLogger {
 	return cpiotel.WithTrace(ctx, s.Logger)
-}
-
-// --- Jira Notifier implementation ---
-
-type jiraNotifier struct {
-	resolver *cf.DestinationServiceClient
-	database *gorm.DB
-}
-
-func NewJiraNotifier(resolver *cf.DestinationServiceClient, database *gorm.DB) Notifier {
-	return &jiraNotifier{resolver: resolver, database: database}
-}
-
-func (n *jiraNotifier) jiraDest() string {
-	var cfg db.JiraConfig
-	if err := n.database.First(&cfg).Error; err != nil || !cfg.Enabled {
-		return ""
-	}
-	return cfg.DestinationName
-}
-
-// OnApprovalRequested is a no-op — pending ANS integration (RFC 027 Phase 4).
-func (n *jiraNotifier) OnApprovalRequested(drID uint, requestor string, description string) error {
-	return nil
-}
-
-// OnStatusChanged is a no-op — pending ANS integration (RFC 027 Phase 4).
-func (n *jiraNotifier) OnStatusChanged(drID uint, status string, message string) error {
-	return nil
-}
-
-func (n *jiraNotifier) OnDeliveryComment(issueKey string, drID uint, message string, status string) error {
-	dest := n.jiraDest()
-	if dest == "" {
-		return nil // JIRA not configured, silently skip
-	}
-	return notify.AddDeliveryComment(n.resolver, dest, issueKey, drID, message, status)
 }

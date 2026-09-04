@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/cloudfoundry-community/go-cfenv"
 	cpiotel "github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/otel"
@@ -109,7 +110,39 @@ func PostgreUri() string {
 	}
 	uri, _ := services[0].CredentialString("uri")
 	return uri
+}
 
+// AnsCredential returns parsed ANS binding credentials from VCAP_SERVICES.
+// Returns nil if alert-notification is not bound (optional service).
+func AnsCredential() *Credentials {
+	if appEnv == nil {
+		return nil
+	}
+	services, err := appEnv.Services.WithLabel("alert-notification")
+	if err != nil || len(services) == 0 {
+		return nil
+	}
+	svc := services[0]
+	clientID, _ := svc.CredentialString("client_id")
+	clientSecret, _ := svc.CredentialString("client_secret")
+	oauthURL, _ := svc.CredentialString("oauth_url")
+	apiURL, _ := svc.CredentialString("url")
+	if clientID == "" || clientSecret == "" || oauthURL == "" || apiURL == "" {
+		return nil
+	}
+	// ANS oauth_url may contain the full token path + query params
+	// (e.g. ".../oauth/token?grant_type=client_credentials").
+	// env.NewClient expects the base URL and appends /oauth/token itself,
+	// so strip everything from /oauth/token onwards.
+	if idx := strings.Index(oauthURL, "/oauth/token"); idx != -1 {
+		oauthURL = oauthURL[:idx]
+	}
+	return &Credentials{
+		Clientid:     clientID,
+		Clientsecret: clientSecret,
+		AuthUrl:      oauthURL,
+		ApiUrl:       apiURL,
+	}
 }
 
 type Credentials struct {
