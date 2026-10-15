@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strconv"
 
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
@@ -67,15 +66,8 @@ func (h *Handler) gitRepoBrowserURL(ctx *gin.Context) string {
 	if err != nil || dest == nil {
 		return ""
 	}
-	parsed, err := url.Parse(dest.URL)
-	if err != nil || parsed.Host == "" {
-		return ""
-	}
-	host := parsed.Host
-	if host == "api.github.com" {
-		host = "github.com"
-	}
-	return fmt.Sprintf("https://%s/%s/%s", host, config.Owner, config.Repo)
+	webBase := gh.ResolveGitHubWebBase(dest.URL)
+	return fmt.Sprintf("%s/%s/%s", webBase, config.Owner, config.Repo)
 }
 
 // GetGitSnapshotFiles returns the normalized file content for a single snapshot.

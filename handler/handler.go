@@ -311,6 +311,8 @@ func (h *Handler) SetupRoutes(v1 *gin.RouterGroup, v2 *gin.RouterGroup, requireS
 		system.GET("/jiraConfig", h.GetJiraConfig)
 		system.PUT("/jiraConfig", h.UpdateJiraConfig)
 		system.POST("/jiraConfig/test", h.TestJiraConnection)
+		system.GET("/ansStatus", h.GetAnsStatus)
+		system.POST("/ansStatus/test", h.TestAnsConnection)
 		system.GET("/gitRepoConfig", h.GetGitRepoConfig)
 		system.GET("/gitRepoConfig/providers", h.GetGitProviders)
 		system.GET("/gitRepoConfig/owners", h.GetGitOwners)

@@ -18,6 +18,7 @@ import (
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cpi"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/env"
 	gh "github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/github"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/notify"
 	cpiotel "github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/otel"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/xsuaa"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/service"
@@ -74,7 +75,17 @@ func main() {
 			return cpiManager.Get(ctx, tenant)
 		},
 		GetUserEmail: xsuaa.GetUserEmail,
-		Notifier:     service.NewJiraNotifier(resolver, database),
+		Notifier: notify.NewCompositeNotifier(
+			func() string {
+				var cfg db.JiraConfig
+				if err := database.First(&cfg).Error; err != nil || !cfg.Enabled {
+					return ""
+				}
+				return cfg.DestinationName
+			},
+			resolver,
+			notify.NewAnsClient(),
+		),
 		Hub:          hub,
 		SyncTracker:  service.NewSyncTracker(),
 		ProviderDest: resolver,
