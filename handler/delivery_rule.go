@@ -2,7 +2,6 @@ package handler
 
 import (
 	"fmt"
-	"regexp"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -57,10 +56,9 @@ func (h *Handler) UpsertDeliveryRule(ctx *gin.Context) {
 		Fail(ctx, 400, "VersionPattern cannot be empty")
 		return
 	}
-	// Validate VersionPattern: allow formats like 5.8.* , 6.2.*
-	vpRe := regexp.MustCompile(`^\d+\.\d+\.\*$`)
-	if !vpRe.MatchString(rule.VersionPattern) {
-		Fail(ctx, 400, "invalid VersionPattern: expected format X.Y.* (e.g., 5.8.*, 6.2.*)")
+	// Compile VersionPattern via the service layer (glob syntax check).
+	if err := service.CompileVersionPattern(rule.VersionPattern); err != nil {
+		Fail(ctx, 400, err.Error())
 		return
 	}
 

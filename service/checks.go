@@ -48,6 +48,17 @@ func checkDraftVersion(op *db.ArtifactTenantOperation) error {
 	return nil
 }
 
+// CompileVersionPattern checks whether pattern is a valid glob that can be
+// compiled by gobwas/glob.  Call this at save-time so that invalid patterns
+// never reach the database.
+func CompileVersionPattern(pattern string) error {
+	_, err := glob.Compile(pattern)
+	if err != nil {
+		return fmt.Errorf("invalid VersionPattern %q: %w", pattern, err)
+	}
+	return nil
+}
+
 // matchVersionPattern checks if a version string matches a glob pattern.
 // Returns true if pattern is empty or if the version matches.
 //

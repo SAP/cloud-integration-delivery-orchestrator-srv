@@ -191,6 +191,62 @@ func TestBatchTrExist_AggregatesFailures(t *testing.T) {
 	}
 }
 
+func TestMatchVersionPattern(t *testing.T) {
+	tests := []struct {
+		version string
+		pattern string
+		want    bool
+	}{
+		// X.Y.* — existing behaviour
+		{"5.2.3", "5.2.*", true},
+		{"5.2.0", "5.2.*", true},
+		{"5.3.0", "5.2.*", false},
+		{"6.2.3", "5.2.*", false},
+
+		// X.*.* — match by major only
+		{"5.0.0", "5.*.*", true},
+		{"5.9.99", "5.*.*", true},
+		{"6.0.0", "5.*.*", false},
+
+		// *.*.* — match everything
+		{"1.0.0", "*.*.*", true},
+		{"99.99.99", "*.*.*", true},
+
+		// X.* — shorter pattern
+		{"5.2.3", "5.*", true},
+		{"5.0.0", "5.*", true},
+		{"6.0.0", "5.*", false},
+
+		// empty pattern matches all
+		{"1.2.3", "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.version+"_vs_"+tt.pattern, func(t *testing.T) {
+			got := matchVersionPattern(tt.version, tt.pattern)
+			if got != tt.want {
+				t.Errorf("matchVersionPattern(%q, %q) = %v, want %v", tt.version, tt.pattern, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCompileVersionPattern(t *testing.T) {
+	valid := []string{"5.2.*", "5.*.*", "*.*.*", "5.*", "*", "5.2.3"}
+	for _, p := range valid {
+		if err := CompileVersionPattern(p); err != nil {
+			t.Errorf("CompileVersionPattern(%q) should pass, got %v", p, err)
+		}
+	}
+
+	invalid := []string{"[invalid"}
+	for _, p := range invalid {
+		if err := CompileVersionPattern(p); err == nil {
+			t.Errorf("CompileVersionPattern(%q) should fail", p)
+		}
+	}
+}
+
 func TestDeliveryRuleCheck_RejectsPatternMismatchWithoutCallingCPI(t *testing.T) {
 	callCount := 0
 	svc := newTestService(func(ctx context.Context, tenant string) (IntegrationService, error) {
