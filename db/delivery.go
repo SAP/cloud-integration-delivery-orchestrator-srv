@@ -88,6 +88,7 @@ type ArtifactTenantOperation struct {
 
 // BatchJob orchestrates a bulk set of operations (IMPORT or DEPLOY) across a collection
 // of artifacts and/or tenants. It aggregates progress and exposes a summarized status.
+// TODO: delete this table
 type BatchJob struct {
 	gorm.Model
 
