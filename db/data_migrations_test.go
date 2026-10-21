@@ -127,7 +127,7 @@ func TestCpiTenant_IsOnboarded(t *testing.T) {
 		want   bool
 	}{
 		{"ready with dest", CpiTenant{LifecycleState: lifecycle.TenantReady, PirApiDestinationName: "CPIDELIVERY_PIR_1"}, true},
-		{"ready no dest", CpiTenant{LifecycleState: lifecycle.TenantReady}, false},
+		{"ready no dest", CpiTenant{LifecycleState: lifecycle.TenantReady}, true},
 		{"not ready with dest", CpiTenant{LifecycleState: lifecycle.TenantConfigured, PirApiDestinationName: "CPIDELIVERY_PIR_1"}, false},
 		{"draft", CpiTenant{LifecycleState: lifecycle.TenantDraft}, false},
 	}

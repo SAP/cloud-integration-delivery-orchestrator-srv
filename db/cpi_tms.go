@@ -170,10 +170,9 @@ func (t *CpiTenant) CfApiURL() string {
 	return t.CfApiEndpoint
 }
 
-// IsOnboarded returns true if the tenant has completed the base bootstrap
-// and has a working PIR API destination.
+// IsOnboarded returns true if the tenant has completed the base bootstrap.
 func (t *CpiTenant) IsOnboarded() bool {
-	return t.LifecycleState == lifecycle.TenantReady && t.PirApiDestinationName != ""
+	return t.LifecycleState == lifecycle.TenantReady
 }
 
 // IsTmsReady returns true if the TMS extension is fully configured and ready.

@@ -315,6 +315,26 @@ func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string,
 		markReady("pir_api_status")
 	}
 
+	// Rule 3 (RFC 032 §5.4): if PIR key was newly created (old key deleted externally),
+	// the subscriber-side CloudIntegration destination holds stale credentials.
+	// Invalidate TMS extension so operator re-applies it.
+	pirKeyCreated := false
+	for _, a := range acts {
+		if a.ActionType == "created" {
+			pirKeyCreated = true
+			break
+		}
+	}
+	if pirKeyCreated && tenant.TmsExtensionState == lifecycle.TmsBootstrapped {
+		if err := s.TransitionTms(tenant.ID, TmsEventInvalidated); err != nil {
+			s.L(ctx).Warnw("rule 3: failed to invalidate TMS extension after PIR key recreation",
+				"component", "bootstrap", "tenant_id", tenant.ID, "error", err)
+		} else {
+			_ = s.DB.Model(&db.CpiTenant{}).Where("id = ?", tenant.ID).
+				Update("tms_blocking_reason", lifecycle.TmsReasonPirKeyChanged)
+		}
+	}
+
 	// ENSURE_PIR_PROVIDER_DEST → write CPIDELIVERY_PIR_{id} into provider Destination Service
 	setStep(StepEnsurePirProviderDest)
 	if s.ProviderDest == nil {
@@ -647,7 +667,7 @@ func (b *bootstrapApplier) ensurePirProviderDestination(ctx context.Context, ten
 }
 
 // ensureProviderDestinations writes both CPIDELIVERY_PIR_{id} and CPIDELIVERY_CAS_{id}.
-// Deprecated: kept for TMS extension bootstrap (T4) until it gets its own CAS-only version.
+// Deprecated: kept until the old ensureProviderDestinations callers are fully removed.
 func (b *bootstrapApplier) ensureProviderDestinations(ctx context.Context, tenant *db.CpiTenant, result *InspectionResult) ([]credentialAction, error) {
 	if b.providerDest == nil {
 		return nil, fmt.Errorf("ensureProviderDestinations: ProviderDest is nil — provider Destination Service client was not injected at startup")

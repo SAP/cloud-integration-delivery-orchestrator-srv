@@ -2,11 +2,13 @@ package handler
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/lifecycle"
 )
 
 // centralTmsContextResponse is the API response for GET /api/v1/centralTmsContext.
@@ -41,8 +43,20 @@ func (h *Handler) GetCentralTmsContext(ctx *gin.Context) {
 	OK(ctx, resp)
 }
 
+// upsertCentralTmsResponse extends the saved record with the count of tenants
+// whose TMS extension was invalidated by Rule 4.
+type upsertCentralTmsResponse struct {
+	db.CentralTmsContext
+	AffectedTenants int64 `json:"affectedTenants"`
+}
+
 // UpsertCentralTmsContext creates or fully replaces the CentralTmsContext.
 // v1 supports a single record; subsequent PUT calls overwrite it in place.
+//
+// Rule 4 (RFC 032 §5.4): if TmsApiDestinationName is changed and tenants exist
+// with TmsExtensionState=bootstrapped, they are invalidated to bootstrap_failed
+// (their subscriber TransportManagementService destination holds stale credentials).
+// If any tenant is in TmsExtensionState=bootstrapping, the modification is rejected (409).
 func (h *Handler) UpsertCentralTmsContext(ctx *gin.Context) {
 	var input db.CentralTmsContext
 	if err := ctx.ShouldBindJSON(&input); err != nil {
@@ -50,7 +64,6 @@ func (h *Handler) UpsertCentralTmsContext(ctx *gin.Context) {
 		return
 	}
 
-	// Attempt to load an existing record so we can preserve its ID.
 	var existing db.CentralTmsContext
 	err := h.db.First(&existing).Error
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -63,9 +76,42 @@ func (h *Handler) UpsertCentralTmsContext(ctx *gin.Context) {
 		input.ID = existing.ID
 	}
 
+	// Rule 4: check if TmsApiDestinationName actually changed.
+	destNameChanged := existing.ID != 0 && existing.TmsApiDestinationName != input.TmsApiDestinationName
+
+	var affectedCount int64
+	if destNameChanged {
+		// Reject if any tenant is currently bootstrapping TMS extension.
+		var bootstrappingCount int64
+		h.db.Model(&db.CpiTenant{}).
+			Where("tms_extension_state = ?", lifecycle.TmsBootstrapping).
+			Count(&bootstrappingCount)
+		if bootstrappingCount > 0 {
+			FailCode(ctx, 409, "TMS_BOOTSTRAP_IN_PROGRESS",
+				fmt.Sprintf("%d tenant(s) have TMS extension bootstrap running; wait for completion before changing Central TMS destination", bootstrappingCount))
+			return
+		}
+
+		// Invalidate all bootstrapped tenants.
+		result := h.db.Model(&db.CpiTenant{}).
+			Where("tms_extension_state = ?", lifecycle.TmsBootstrapped).
+			Updates(map[string]any{
+				"tms_extension_state": lifecycle.TmsBootstrapFailed,
+				"tms_blocking_reason": lifecycle.TmsReasonCentralTmsChanged,
+			})
+		if result.Error != nil {
+			Fail(ctx, 500, fmt.Sprintf("rule 4: invalidate tenants: %v", result.Error))
+			return
+		}
+		affectedCount = result.RowsAffected
+	}
+
 	if err := h.db.Save(&input).Error; err != nil {
 		Fail(ctx, 500, err.Error())
 		return
 	}
-	OK(ctx, input)
+	OK(ctx, upsertCentralTmsResponse{
+		CentralTmsContext: input,
+		AffectedTenants:   affectedCount,
+	})
 }
