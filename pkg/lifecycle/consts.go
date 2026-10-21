@@ -108,9 +108,12 @@ const (
 	// TenantReadying means a bootstrap apply or retry job is actively running.
 	TenantReadying TenantLifecycleState = "readying"
 
-	// TenantReady means all local prerequisites are satisfied AND the TMS source
-	// node is registered in the central TMS context.  This is equivalent to
-	// "Transport Ready" — the Generate TRs flow is unblocked.
+	// TenantReady means all base bootstrap prerequisites are satisfied: the PIR
+	// API service instance, service key, and provider-side destination are in place.
+	// This is equivalent to "Onboarded" — the tenant can use Version Compare,
+	// BPMN Diff, deploy, and other PIR-dependent capabilities.
+	//
+	// TMS readiness is tracked separately by TmsExtensionState (TmsState field).
 	TenantReady TenantLifecycleState = "ready"
 )
 
@@ -181,7 +184,45 @@ const (
 	PrereqMissing     PrerequisiteStatus = "missing"     // resource does not exist yet
 	PrereqReady       PrerequisiteStatus = "ready"       // resource exists and is correctly configured
 	PrereqFailed      PrerequisiteStatus = "failed"      // resource exists but is in an error state
-	PrereqRegistering PrerequisiteStatus = "registering" // TMS Node: technically confirmed, awaiting operator Route configuration
+	PrereqRegistering PrerequisiteStatus = "registering" // Deprecated: superseded by TmsExtensionState.
+)
+
+// ── RFC 032 P0: TMS Extension State ─────────────────────────────────────────
+
+// TmsExtensionState is the authoritative readiness state of the TMS extension
+// for a CpiTenant.  It tracks whether the tenant has completed the TMS-specific
+// bootstrap steps (CAS instances, subscriber destinations, TMS node binding)
+// needed to participate in TMS-mode delivery.
+//
+// Only the TMS extension lifecycle (transitionTmsWithTx) may write this field.
+type TmsExtensionState string
+
+const (
+	TmsNotStarted      TmsExtensionState = "not_started"      // TMS extension has not been started for this tenant
+	TmsNodePending     TmsExtensionState = "node_pending"     // operator selected a node, awaiting Route confirmation
+	TmsNodeConfirmed   TmsExtensionState = "node_confirmed"   // node + route confirmed, ready for Apply
+	TmsBootstrapping   TmsExtensionState = "bootstrapping"    // TMS extension bootstrap job is running
+	TmsBootstrapped    TmsExtensionState = "bootstrapped"     // all TMS prerequisites satisfied
+	TmsBootstrapFailed TmsExtensionState = "bootstrap_failed" // TMS extension bootstrap failed or invalidated
+)
+
+// TMS extension blocking/invalidation reason codes.
+const (
+	TmsReasonBaseNotReady            = "BASE_NOT_READY"
+	TmsReasonCentralTmsNotConfigured = "CENTRAL_TMS_NOT_CONFIGURED"
+	TmsReasonNodeNotRegistered       = "TMS_NODE_NOT_REGISTERED"
+	TmsReasonNodeChanged             = "TMS_NODE_CHANGED"
+	TmsReasonPirKeyChanged           = "PIR_KEY_CHANGED"
+	TmsReasonCentralTmsChanged       = "CENTRAL_TMS_CHANGED"
+)
+
+// BootstrapLayer distinguishes tenant bootstrap (BASE) from TMS extension
+// bootstrap (TMS) in TenantBootstrapJob records.
+type BootstrapLayer string
+
+const (
+	LayerBase BootstrapLayer = "BASE"
+	LayerTMS  BootstrapLayer = "TMS"
 )
 
 // DeriveImport maps TMS transport node state to our ImportState.

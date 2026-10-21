@@ -42,6 +42,10 @@ func main() {
 		panic("failed to connect database: " + err.Error())
 	}
 
+	if err := db.RunDataMigrations(database); err != nil {
+		panic("failed to run data migrations: " + err.Error())
+	}
+
 	ctx := context.Background()
 
 	// --- Create Destination Service client (provider-side, TTL cache enabled) ---

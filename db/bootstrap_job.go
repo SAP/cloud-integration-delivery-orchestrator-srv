@@ -58,6 +58,11 @@ type TenantBootstrapJob struct {
 	// Indexed for fast "latest job for tenant X" queries.
 	CpiTenantID uint `gorm:"index;not null"`
 
+	// Layer distinguishes tenant bootstrap jobs (BASE) from TMS extension
+	// bootstrap jobs (TMS).  Empty string indicates a legacy job created before
+	// the P0 split.
+	Layer lifecycle.BootstrapLayer
+
 	// JobType distinguishes why this job was created.
 	JobType lifecycle.BootstrapJobType `gorm:"not null"`
 

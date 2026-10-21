@@ -57,6 +57,7 @@ func Connect() (*gorm.DB, error) {
 		&JiraConfig{},
 		&CentralTmsContext{}, &TenantBootstrapJob{},
 		&GitRepoConfig{}, &GitArtifactSnapshot{},
+		&DataMigration{},
 	); err != nil {
 		return nil, fmt.Errorf("failed to migrate: %w", err)
 	}

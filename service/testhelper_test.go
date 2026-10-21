@@ -77,6 +77,8 @@ func TestMain(m *testing.M) {
 		&db.ArtifactTenantOperation{},
 		&db.Condition{},
 		&db.GitArtifactSnapshot{},
+		&db.TenantBootstrapJob{},
+		&db.DataMigration{},
 	); err != nil {
 		fmt.Printf("FATAL: failed to migrate: %v\n", err)
 		os.Exit(1)
