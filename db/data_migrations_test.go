@@ -19,7 +19,7 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open test db: %v", err)
 	}
-	if err := database.AutoMigrate(&CpiTenant{}, &DataMigration{}); err != nil {
+	if err := database.AutoMigrate(&CpiTenant{}, &TenantBootstrapJob{}, &DataMigration{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return database

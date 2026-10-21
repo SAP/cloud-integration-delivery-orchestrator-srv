@@ -448,8 +448,7 @@ func (h *Handler) HandleCancelDr(c *gin.Context) {
 //	}
 //
 // Preconditions (hard-blocked, 400):
-//   - tenant.LifecycleState == ready
-//   - tenant.TmsNodeRegistrationStatus == ready
+//   - tenant.IsTmsReady() == true (TmsExtensionState == bootstrapped)
 //
 // DB loading, CAS catalog resolution, ContentResource grouping, and TR write-back
 // are all handled by the service layer.

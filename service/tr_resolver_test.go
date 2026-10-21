@@ -31,6 +31,7 @@ func setupTRTest(t *testing.T) trTestSetup {
 
 	tenant := seedTenant(t, tc, "tr-src-"+suffix)
 	tenant.LifecycleState = lifecycle.TenantReady
+	tenant.TmsExtensionState = lifecycle.TmsBootstrapped
 	tenant.TmsNodeRegistrationStatus = lifecycle.PrereqReady
 	tenant.TmsSourceNodeID = tenant.ID + 1000
 	tenant.TmsSourceNodeName = "source-node-" + suffix
@@ -385,13 +386,13 @@ func TestGenerateTransportRequest_TenantNotReady(t *testing.T) {
 	}
 }
 
-func TestGenerateTransportRequest_TmsNodeNotReady(t *testing.T) {
+func TestGenerateTransportRequest_TmsExtensionNotReady(t *testing.T) {
 	suffix := t.Name()
 	tc := newTestCleanup(t)
 
 	tenant := seedTenant(t, tc, "tr-tmsnotready-"+suffix)
 	tenant.LifecycleState = lifecycle.TenantReady
-	// TmsNodeRegistrationStatus left at zero value (not ready).
+	// TmsExtensionState left at default (not_started) — TR generation should be rejected.
 	if err := testDB.Save(&tenant).Error; err != nil {
 		t.Fatalf("save tenant: %v", err)
 	}
@@ -418,6 +419,7 @@ func TestGenerateTransportRequest_MissingTmsSourceNodeInfo(t *testing.T) {
 
 	tenant := seedTenant(t, tc, "tr-missingnode-"+suffix)
 	tenant.LifecycleState = lifecycle.TenantReady
+	tenant.TmsExtensionState = lifecycle.TmsBootstrapped
 	tenant.TmsNodeRegistrationStatus = lifecycle.PrereqReady
 	if err := testDB.Save(&tenant).Error; err != nil {
 		t.Fatalf("save tenant: %v", err)

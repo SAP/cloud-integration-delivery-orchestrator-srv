@@ -185,17 +185,21 @@ func (h *Handler) SetupRoutes(v1 *gin.RouterGroup, v2 *gin.RouterGroup, requireS
 		tenantManage.POST("/cf/orgs", h.ListCfOrgs)
 		tenantManage.POST("/cf/spaces", h.ListCfSpaces)
 
-		// RFC 013: bootstrap lifecycle endpoints
+		// RFC 013: bootstrap lifecycle endpoints (BASE layer only)
 		tenantManage.POST("/cpiTenant/:id/bootstrap/preview", h.PreviewBootstrap)
 		tenantManage.POST("/cpiTenant/:id/bootstrap/apply", h.ApplyBootstrap)
 		tenantManage.GET("/cpiTenant/:id/bootstrap/status", h.GetBootstrapStatus)
 		tenantManage.POST("/cpiTenant/:id/bootstrap/retry", h.RetryBootstrap)
 		tenantManage.POST("/cpiTenant/:id/bootstrap/reset", h.ResetBootstrap)
 
-		// RFC 013 Phase 3: TMS Node registration (sync, independent of bootstrap)
-		tenantManage.POST("/cpiTenant/:id/tms-node/register", h.RegisterTmsNode)
-		tenantManage.GET("/cpiTenant/:id/tms-node/routes", h.GetCurrentNodeRoutes)
-		tenantManage.POST("/cpiTenant/:id/tms-node/confirm", h.ConfirmTmsRoutes)
+		// RFC 032 P0: TMS extension endpoints (replaces /tms-node/*)
+		tenantManage.GET("/cpiTenant/:id/tms-extension", h.GetTmsExtension)
+		tenantManage.POST("/cpiTenant/:id/tms-extension/node", h.SelectTmsNode)
+		tenantManage.GET("/cpiTenant/:id/tms-extension/routes", h.GetTmsExtensionRoutes)
+		tenantManage.POST("/cpiTenant/:id/tms-extension/confirm", h.ConfirmTmsExtensionRoutes)
+		tenantManage.POST("/cpiTenant/:id/tms-extension/preview", h.PreviewTmsExtension)
+		tenantManage.POST("/cpiTenant/:id/tms-extension/apply", h.ApplyTmsExtension)
+		tenantManage.POST("/cpiTenant/:id/tms-extension/reset", h.ResetTmsExtension)
 
 		// RFC 013: central TMS context (admin-level, single record per v1 deployment)
 		tenantManage.GET("/centralTmsContext", h.GetCentralTmsContext)

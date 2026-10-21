@@ -21,8 +21,6 @@ const (
 	StepCheckCasStandard        = "CHECK_CAS_STANDARD"
 	StepCheckServiceKeys        = "CHECK_SERVICE_KEYS"
 	StepCheckDestinations       = "CHECK_DESTINATIONS"
-	StepRegisterTmsNode         = "REGISTER_TMS_NODE"
-	StepValidateTransport       = "VALIDATE_TRANSPORT_READY"
 
 	// BASE bootstrap steps (P0)
 	StepEnsurePirProviderDest = "ENSURE_PIR_PROVIDER_DEST"

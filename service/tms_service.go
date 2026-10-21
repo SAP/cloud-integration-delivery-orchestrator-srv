@@ -58,7 +58,6 @@ func NewTmsFactory(database *gorm.DB, providerDest *cf.DestinationServiceClient)
 }
 
 // loadTmsContext loads the single CentralTmsContext record from the DB.
-// Used by NewTmsFactory and tms_node_registrar.go.
 func loadTmsContext(database *gorm.DB) (*db.CentralTmsContext, error) {
 	var tmsCtx db.CentralTmsContext
 	if err := database.First(&tmsCtx).Error; err != nil {
@@ -67,8 +66,12 @@ func loadTmsContext(database *gorm.DB) (*db.CentralTmsContext, error) {
 	return &tmsCtx, nil
 }
 
+// LoadCentralTmsContext is the exported wrapper for loadTmsContext.
+func (s *Service) LoadCentralTmsContext() (*db.CentralTmsContext, error) {
+	return loadTmsContext(s.DB)
+}
+
 // buildTmsClient constructs a *tms.TmsClient from CentralTmsContext + ProviderDest.
-// Used by NewTmsFactory and tms_node_registrar.go.
 func buildTmsClient(ctx context.Context, tmsCtx *db.CentralTmsContext, providerDest *cf.DestinationServiceClient) (*tms.TmsClient, error) {
 	if providerDest == nil {
 		return nil, fmt.Errorf("ProviderDest not injected; cannot resolve TMS credentials")

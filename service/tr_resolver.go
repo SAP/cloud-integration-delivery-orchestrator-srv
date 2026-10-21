@@ -58,14 +58,12 @@ func (s *Service) acquireTenantForTR(ctx context.Context, tenantID uint) (db.Cpi
 			First(&tenant, tenantID).Error; err != nil {
 			return fmt.Errorf("load tenant %d: %w", tenantID, err)
 		}
-		if tenant.LifecycleState != lifecycle.TenantReady {
-			return fmt.Errorf("tenant %d lifecycleState=%q, must be ready", tenantID, tenant.LifecycleState)
+		if !tenant.IsTmsReady() {
+			return fmt.Errorf("tenant %d TmsExtensionState=%q, must be bootstrapped: TMS_EXTENSION_NOT_READY",
+				tenantID, tenant.TmsExtensionState)
 		}
-		if tenant.TmsNodeRegistrationStatus != lifecycle.PrereqReady {
-			return fmt.Errorf("tenant %d tmsNodeRegistrationStatus=%q, must be ready", tenantID, tenant.TmsNodeRegistrationStatus)
-		}
-		if tenant.TmsSourceNodeName == "" || tenant.TmsSourceNodeID == 0 {
-			return fmt.Errorf("tenant %d has no TmsSourceNodeName or TmsSourceNodeID", tenantID)
+		if tenant.TmsSourceNodeID == 0 {
+			return fmt.Errorf("tenant %d has no TmsSourceNodeID", tenantID)
 		}
 		return nil
 	})

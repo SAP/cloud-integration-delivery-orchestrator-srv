@@ -25,6 +25,7 @@ type migrationEntry struct {
 // registry lists all data migrations in execution order.
 var registry = []migrationEntry{
 	{"p0_tms_state_backfill", p0TmsStateBackfill},
+	{"p0_job_layer_backfill", p0JobLayerBackfill},
 }
 
 // RunDataMigrations executes any pending data migrations.
@@ -85,5 +86,16 @@ func p0TmsStateBackfill(tx *gorm.DB) error {
 	}
 
 	// 4. everything else: column default is 'not_started', no action needed.
+	return nil
+}
+
+// p0JobLayerBackfill sets Layer=BASE on all legacy bootstrap jobs (Layer="").
+// Pre-P0 jobs were combined BASE+TMS; going forward they map to BASE.
+func p0JobLayerBackfill(tx *gorm.DB) error {
+	if err := tx.Model(&TenantBootstrapJob{}).
+		Where("layer = ? OR layer IS NULL", "").
+		Update("layer", lifecycle.LayerBase).Error; err != nil {
+		return fmt.Errorf("backfill job layer: %w", err)
+	}
 	return nil
 }

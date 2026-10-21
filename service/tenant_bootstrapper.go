@@ -140,10 +140,10 @@ func (s *Service) ApplyBootstrap(ctx context.Context, tenantID uint, cfToken str
 	return job.ID, nil
 }
 
-// GetBootstrapStatus returns the most recent TenantBootstrapJob for the tenant.
+// GetBootstrapStatus returns the most recent BASE TenantBootstrapJob for the tenant.
 func (s *Service) GetBootstrapStatus(tenantID uint) (*db.TenantBootstrapJob, error) {
 	var job db.TenantBootstrapJob
-	err := s.DB.Where("cpi_tenant_id = ?", tenantID).
+	err := s.DB.Where("cpi_tenant_id = ? AND layer = ?", tenantID, lifecycle.LayerBase).
 		Order("created_at DESC").
 		First(&job).Error
 	if err != nil {

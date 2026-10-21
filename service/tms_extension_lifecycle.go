@@ -12,6 +12,7 @@ package service
 // not by the transition function itself.
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -94,7 +95,57 @@ var allowedTmsTransitions = map[lifecycle.TmsExtensionState]map[TmsEvent]lifecyc
 	},
 }
 
-// TransitionTms applies a TMS event to the tenant's TmsState within its own
+// SelectTmsNode atomically transitions to node_pending and writes node fields.
+// If changing from node_confirmed/bootstrapped/bootstrap_failed, also marks
+// TransportManagement destination as stale and sets TMS_NODE_CHANGED reason.
+func (s *Service) SelectTmsNode(ctx context.Context, tenantID uint, nodeID uint, nodeName string) error {
+	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var tenant db.CpiTenant
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			First(&tenant, tenantID).Error; err != nil {
+			return err
+		}
+		if err := s.transitionTmsWithTx(tx, tenantID, TmsEventNodeSelected); err != nil {
+			return err
+		}
+		updates := map[string]any{
+			"tms_source_node_name": nodeName,
+			"tms_source_node_id":   nodeID,
+		}
+		return tx.Model(&db.CpiTenant{}).Where("id = ?", tenantID).Updates(updates).Error
+	})
+}
+
+// ConfirmTmsRoutesAndTransition fetches routes from TMS, then atomically writes
+// CentralTmsContextID and transitions to node_confirmed in a single transaction.
+func (s *Service) ConfirmTmsRoutesAndTransition(ctx context.Context, tenantID uint, nodeID uint) (*ConfirmTmsRoutesResult, error) {
+	// External TMS API call — outside the DB transaction.
+	tmsCtx, err := loadTmsContext(s.DB)
+	if err != nil {
+		return nil, fmt.Errorf("ConfirmTmsRoutesAndTransition: %w", err)
+	}
+	routes, err := s.fetchRoutesForNodeID(ctx, tmsCtx, nodeID)
+	if err != nil {
+		return nil, fmt.Errorf("ConfirmTmsRoutesAndTransition: fetch routes: %w", err)
+	}
+	if len(routes) == 0 {
+		return nil, ErrRoutesNotConfigured
+	}
+
+	// Atomic DB write: CentralTmsContextID + state transition.
+	if err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&db.CpiTenant{}).Where("id = ?", tenantID).
+			Update("central_tms_context_id", tmsCtx.ID).Error; err != nil {
+			return err
+		}
+		return s.transitionTmsWithTx(tx, tenantID, TmsEventRouteConfirmed)
+	}); err != nil {
+		return nil, fmt.Errorf("ConfirmTmsRoutesAndTransition: %w", err)
+	}
+
+	return &ConfirmTmsRoutesResult{Routes: routes}, nil
+}
+
 // transaction.  Convenience wrapper around transitionTmsWithTx.
 func (s *Service) TransitionTms(tenantID uint, event TmsEvent) error {
 	return s.DB.Transaction(func(tx *gorm.DB) error {
@@ -136,4 +187,70 @@ func (s *Service) transitionTmsWithTx(tx *gorm.DB, tenantID uint, event TmsEvent
 			nextState, tenantID, err)
 	}
 	return nil
+}
+
+// ── Route queries ───────────────────────────────────────────────────────────
+
+// ErrNodeNotRegistered is returned by GetCurrentNodeRoutes when no TMS node
+// has been registered for the tenant yet (TmsSourceNodeID == 0).
+var ErrNodeNotRegistered = fmt.Errorf("routes can only be queried after a TMS node has been registered")
+
+// ErrRoutesNotConfigured is returned when the Route list fetched from TMS is empty.
+var ErrRoutesNotConfigured = fmt.Errorf("routes not configured: no routes found for this source node")
+
+// ConfirmTmsRoutesResult holds the routes returned by a successful confirm call.
+type ConfirmTmsRoutesResult struct {
+	Routes []db.TransportRoute
+}
+
+// GetCurrentNodeRoutesResult holds the result of a successful GetCurrentNodeRoutes call.
+type GetCurrentNodeRoutesResult struct {
+	NodeName string
+	Routes   []db.TransportRoute
+}
+
+// GetCurrentNodeRoutes fetches all Routes where the tenant's registered
+// TmsSourceNodeID appears as either source or target.
+//
+// Returns ErrNodeNotRegistered if no TMS node has been registered yet.
+func (s *Service) GetCurrentNodeRoutes(ctx context.Context, tenantID uint) (*GetCurrentNodeRoutesResult, error) {
+	var tenant db.CpiTenant
+	if err := s.DB.Select("id", "tms_source_node_id", "tms_source_node_name").
+		First(&tenant, tenantID).Error; err != nil {
+		return nil, err
+	}
+	if tenant.TmsSourceNodeID == 0 {
+		return nil, ErrNodeNotRegistered
+	}
+
+	tmsCtx, err := loadTmsContext(s.DB)
+	if err != nil {
+		return nil, fmt.Errorf("GetCurrentNodeRoutes: get central TMS context: %w", err)
+	}
+
+	routes, err := s.fetchRoutesForNodeID(ctx, tmsCtx, tenant.TmsSourceNodeID)
+	if err != nil {
+		return nil, fmt.Errorf("GetCurrentNodeRoutes: fetch routes: %w", err)
+	}
+	return &GetCurrentNodeRoutesResult{NodeName: tenant.TmsSourceNodeName, Routes: routes}, nil
+}
+
+// fetchRoutesForNodeID builds a TMS client and returns all v2 routes where
+// nodeID appears as source or target.
+func (s *Service) fetchRoutesForNodeID(ctx context.Context, tmsCtx *db.CentralTmsContext, nodeID uint) ([]db.TransportRoute, error) {
+	tmsClient, err := buildTmsClient(ctx, tmsCtx, s.ProviderDest)
+	if err != nil {
+		return nil, fmt.Errorf("fetchRoutesForNodeID: build TMS client: %w", err)
+	}
+	all, err := tmsClient.GetRoutes(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("fetchRoutesForNodeID: get routes: %w", err)
+	}
+	var result []db.TransportRoute
+	for _, r := range all {
+		if r.SourceNodeID == nodeID || r.TargetNodeID == nodeID {
+			result = append(result, r)
+		}
+	}
+	return result, nil
 }

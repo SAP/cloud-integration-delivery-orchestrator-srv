@@ -1,10 +1,16 @@
 package service
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cf"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/lifecycle"
 
 	"gorm.io/driver/sqlite"
@@ -188,4 +194,88 @@ func newTestDB(t *testing.T) *gorm.DB {
 
 func errorContains(err error, substr string) bool {
 	return err != nil && strings.Contains(err.Error(), substr)
+}
+
+// ── Route query helpers & tests (merged from tms_node_registrar_test.go) ─────
+
+func seedCentralTmsContext(t *testing.T, destinationName string) db.CentralTmsContext {
+	t.Helper()
+	if err := testDB.Unscoped().Where("1 = 1").Delete(&db.CentralTmsContext{}).Error; err != nil {
+		t.Fatalf("clear central TMS context: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = testDB.Unscoped().Where("1 = 1").Delete(&db.CentralTmsContext{}).Error
+	})
+	ctx := db.CentralTmsContext{TmsApiDestinationName: destinationName}
+	if err := testDB.Create(&ctx).Error; err != nil {
+		t.Fatalf("seed central TMS context: %v", err)
+	}
+	return ctx
+}
+
+func newProviderDestForRoutes(t *testing.T, destinationName string, routes []db.TransportRoute) *cf.DestinationServiceClient {
+	t.Helper()
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/oauth/token":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "test-token", "expires_in": 3600})
+		case r.Method == http.MethodGet && r.URL.Path == "/destination-configuration/v1/subaccountDestinations/"+destinationName:
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(cf.Destination{
+				Name: destinationName, URL: server.URL, Authentication: "OAuth2ClientCredentials",
+				TokenServiceURL: server.URL + "/oauth/token", ClientId: "tms-client", ClientSecret: "tms-secret",
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/v2/routes":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"routes": routes})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	client, err := cf.NewDestinationServiceClient(context.Background(), map[string]any{
+		"clientid": "provider-client", "clientsecret": "provider-secret",
+		"url": server.URL, "uri": server.URL,
+	})
+	if err != nil {
+		t.Fatalf("create provider destination client: %v", err)
+	}
+	return client
+}
+
+func TestGetCurrentNodeRoutes_RequiresRegistrationAndReturnsFilteredRoutes(t *testing.T) {
+	tc := newTestCleanup(t)
+	tenant := seedTenant(t, tc, "current-routes-"+t.Name())
+
+	svc := newTestService(nil)
+	_, err := svc.GetCurrentNodeRoutes(context.Background(), tenant.ID)
+	if !errors.Is(err, ErrNodeNotRegistered) {
+		t.Fatalf("expected ErrNodeNotRegistered, got %v", err)
+	}
+
+	tenant.TmsSourceNodeID = 400
+	tenant.TmsSourceNodeName = "NODE-400"
+	if err := testDB.Save(&tenant).Error; err != nil {
+		t.Fatalf("save tenant: %v", err)
+	}
+
+	ctx := seedCentralTmsContext(t, "tms-api-routes")
+	svc.ProviderDest = newProviderDestForRoutes(t, ctx.TmsApiDestinationName, []db.TransportRoute{
+		{ID: 10, SourceNodeID: 400, TargetNodeID: 401, Name: "outbound"},
+		{ID: 11, SourceNodeID: 402, TargetNodeID: 400, Name: "inbound"},
+		{ID: 12, SourceNodeID: 500, TargetNodeID: 501, Name: "unrelated"},
+	})
+
+	result, err := svc.GetCurrentNodeRoutes(context.Background(), tenant.ID)
+	if err != nil {
+		t.Fatalf("GetCurrentNodeRoutes failed: %v", err)
+	}
+	if result.NodeName != tenant.TmsSourceNodeName {
+		t.Fatalf("node name = %q, want %q", result.NodeName, tenant.TmsSourceNodeName)
+	}
+	if len(result.Routes) != 2 {
+		t.Fatalf("expected 2 filtered routes, got %d", len(result.Routes))
+	}
 }
