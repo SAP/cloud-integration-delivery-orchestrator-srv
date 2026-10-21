@@ -85,10 +85,14 @@ func (h *Handler) UpsertCpiTenant(ctx *gin.Context) {
 		return
 	}
 
-	// Callers must not set LifecycleState directly; preserve the current value.
-	input.LifecycleState = existing.LifecycleState
-
-	if err := h.db.Save(&input).Error; err != nil {
+	// Whitelist update: only allow operator-editable fields.
+	// All other fields (lifecycle, TMS extension, prerequisites, destinations)
+	// are managed exclusively by their owning service modules.
+	if err := h.db.Model(&existing).Updates(map[string]any{
+		"name":       input.Name,
+		"group":      input.Group,
+		"updated_by": input.UpdatedBy,
+	}).Error; err != nil {
 		if isUniqueViolation(err) {
 			FailCode(ctx, 409, "TENANT_NAME_EXISTS", fmt.Sprintf("tenant name %q already exists", input.Name))
 			return
@@ -96,7 +100,12 @@ func (h *Handler) UpsertCpiTenant(ctx *gin.Context) {
 		Fail(ctx, 500, err.Error())
 		return
 	}
-	OK(ctx, input)
+	// Re-read the full record to return current state.
+	if err := h.db.First(&existing, input.ID).Error; err != nil {
+		Fail(ctx, 500, err.Error())
+		return
+	}
+	OK(ctx, existing)
 }
 
 // SaveCfIdentity persists the CF identity fields (CfApiEndpoint, CfOrg, CfSpace)

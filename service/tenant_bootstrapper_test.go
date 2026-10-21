@@ -3,9 +3,6 @@ package service
 import (
 	"strings"
 	"testing"
-
-	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
-	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/lifecycle"
 )
 
 func TestTransportModuleURL_TrimsTrailingSlash(t *testing.T) {
@@ -100,45 +97,6 @@ func TestBuildOAuthDestination_RejectsIncompleteCredentials(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "incomplete service key credentials") {
 		t.Fatalf("expected incomplete credentials error, got %v", err)
-	}
-}
-
-func TestCheckCentralTmsContext_AppendsWaitingActionOnlyWhenMissing(t *testing.T) {
-	if err := testDB.Unscoped().Where("1 = 1").Delete(&db.CentralTmsContext{}).Error; err != nil {
-		t.Fatalf("clear central TMS context: %v", err)
-	}
-
-	svc := newTestService(nil)
-	missing := &InspectionResult{}
-	svc.checkCentralTmsContext(missing)
-	if len(missing.WaitingUserAction) != 1 || missing.WaitingUserAction[0] != "CENTRAL_TMS_NOT_CONFIGURED" {
-		t.Fatalf("expected missing central TMS action, got %+v", missing.WaitingUserAction)
-	}
-
-	seedCentralTmsContext(t, "tms-api-configured")
-	configured := &InspectionResult{}
-	svc.checkCentralTmsContext(configured)
-	if len(configured.WaitingUserAction) != 0 {
-		t.Fatalf("expected no waiting action when context configured, got %+v", configured.WaitingUserAction)
-	}
-}
-
-func TestCheckTmsSourceNode_RequiresReadyRegistration(t *testing.T) {
-	svc := newTestService(nil)
-
-	waiting := &InspectionResult{}
-	svc.checkTmsSourceNode(&db.CpiTenant{}, waiting)
-	if len(waiting.WaitingUserAction) != 1 || waiting.WaitingUserAction[0] != "TMS_NODE_NOT_REGISTERED" {
-		t.Fatalf("expected waiting action for missing TMS node, got %+v", waiting.WaitingUserAction)
-	}
-
-	ready := &InspectionResult{}
-	svc.checkTmsSourceNode(&db.CpiTenant{
-		TmsSourceNodeName:         "NODE-READY",
-		TmsNodeRegistrationStatus: lifecycle.PrereqReady,
-	}, ready)
-	if len(ready.WaitingUserAction) != 0 {
-		t.Fatalf("expected no waiting action for ready node, got %+v", ready.WaitingUserAction)
 	}
 }
 

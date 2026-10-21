@@ -11,6 +11,7 @@ import (
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/lifecycle"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // ── Public service entry points ───────────────────────────────────────────────
@@ -39,8 +40,6 @@ func (s *Service) PreviewBootstrap(ctx context.Context, tenantID uint, cfToken s
 	if err != nil {
 		return nil, fmt.Errorf("preview: inspect: %w", err)
 	}
-	s.checkTmsSourceNode(tenant, result)
-	s.checkCentralTmsContext(result)
 
 	return buildPreview(tenant, result), nil
 }
@@ -74,23 +73,26 @@ func (s *Service) ApplyBootstrap(ctx context.Context, tenantID uint, cfToken str
 	}
 
 	// ── Phase 1: Atomically claim readying state ──────────────────────────────
-	// TransitionLifecycle uses SELECT FOR UPDATE inside its own short transaction,
-	// so the check-and-write is atomic across all instances.  EventBootstrapStarted
-	// is not a valid edge from TenantReadying (allowedTransitions), so any concurrent
-	// caller that already claimed readying is rejected here with ErrTransitionNotAllowed
-	// — before either caller makes a single CF API call.
-	if err := s.TransitionLifecycle(tenantID, EventBootstrapStarted); err != nil {
+	// Guard: reject if TMS extension bootstrap is running (only one job at a time).
+	// Then transition lifecycle to readying via the same SELECT FOR UPDATE.
+	if err := s.DB.Transaction(func(tx *gorm.DB) error {
+		var t db.CpiTenant
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Select("id", "lifecycle_state", "tms_extension_state").
+			First(&t, tenantID).Error; err != nil {
+			return err
+		}
+		if t.TmsExtensionState == lifecycle.TmsBootstrapping {
+			return fmt.Errorf("TMS extension bootstrap is running; only one bootstrap job at a time")
+		}
+		return s.transitionLifecycleWithTx(tx, tenantID, EventBootstrapStarted)
+	}); err != nil {
 		return 0, fmt.Errorf("apply: %w", err)
 	}
-	// Reset all prerequisite statuses and clear stale error from any previous run.
+	// Reset only base bootstrap prerequisite status; TMS extension statuses are untouched.
 	if err := s.DB.Model(&db.CpiTenant{}).Where("id = ?", tenantID).Updates(map[string]any{
-		"blocking_reason":                  "",
-		"pir_api_status":                   lifecycle.PrereqMissing,
-		"cas_application_status":           lifecycle.PrereqMissing,
-		"cas_standard_status":              lifecycle.PrereqMissing,
-		"cloud_integration_dest_status":    lifecycle.PrereqMissing,
-		"content_assembly_dest_status":     lifecycle.PrereqMissing,
-		"transport_management_dest_status": lifecycle.PrereqMissing,
+		"blocking_reason": "",
+		"pir_api_status":  lifecycle.PrereqMissing,
 	}).Error; err != nil {
 		s.L(ctx).Warnw("failed to reset prereq statuses", "component", "bootstrap", "tenant_id", tenantID, "error", err)
 	}
@@ -108,8 +110,6 @@ func (s *Service) ApplyBootstrap(ctx context.Context, tenantID uint, cfToken str
 		_ = s.TransitionLifecycle(tenantID, EventBootstrapFailed)
 		return 0, fmt.Errorf("apply: inspect: %w", err)
 	}
-	s.checkTmsSourceNode(tenant, result)
-	s.checkCentralTmsContext(result)
 	if len(result.PermissionIssues) > 0 {
 		_ = s.TransitionLifecycle(tenantID, EventBootstrapFailed)
 		return 0, fmt.Errorf("apply: permission issues: %v", result.PermissionIssues)
@@ -125,6 +125,7 @@ func (s *Service) ApplyBootstrap(ctx context.Context, tenantID uint, cfToken str
 	missingJSON, _ := json.Marshal(result.MissingItems)
 	job := &db.TenantBootstrapJob{
 		CpiTenantID:          tenantID,
+		Layer:                lifecycle.LayerBase,
 		JobType:              jobType,
 		State:                lifecycle.JobRunning,
 		MissingPrerequisites: missingJSON,
@@ -293,6 +294,8 @@ func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string,
 
 	var credentialActions []credentialAction
 
+	// ── BASE bootstrap: PIR only ─────────────────────────────────────────────
+
 	// CHECK_PIR_API → create instance + service key if missing
 	setStep(StepCheckPirApi)
 	acts, err := bootstrapper.ensureInstanceAndKey(ctx, offeringPIR, planPirApi,
@@ -312,107 +315,21 @@ func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string,
 		markReady("pir_api_status")
 	}
 
-	// CHECK_CAS_APPLICATION → create instance + service key if missing.
-	// Note: the CAS application service key is NOT used to build a subscriber-side
-	// destination here.  It will be consumed by TrResolver (Phase 4) via the
-	// provider-side CPIDELIVERY_CAS_{id} destination.
-	setStep(StepCheckCasApplication)
-	acts, err = bootstrapper.ensureInstanceAndKey(ctx, offeringCAS, planCasApplication,
-		instanceNameCasApplication, keyNameCasApplication,
-		missingCodeCasApplication, &result.CasApplicationInstanceGUID, result,
-		map[string]any{
-			"roles": []string{"Security Operator", "Admin", "Read", "Import", "Export"},
-		})
-	if err != nil {
-		fail(lifecycle.FailureRemoteSystemError, StepCheckCasApplication, err.Error())
-		return
-	}
-	credentialActions = append(credentialActions, acts...)
-	if result.CasApplicationInstanceGUID != "" {
-		markReady("cas_application_status")
-	}
-
-	// CHECK_CAS_STANDARD → create instance + service key if missing
-	setStep(StepCheckCasStandard)
-	acts, err = bootstrapper.ensureInstanceAndKey(ctx, offeringCAS, planCasStandard,
-		instanceNameCasStandard, keyNameCasStandard,
-		missingCodeCasStandard, &result.CasStandardInstanceGUID, result,
-		map[string]any{
-			"roles": []string{"Assemble"},
-		})
-	if err != nil {
-		fail(lifecycle.FailureRemoteSystemError, StepCheckCasStandard, err.Error())
-		return
-	}
-	credentialActions = append(credentialActions, acts...)
-	if result.CasStandardInstanceGUID != "" {
-		markReady("cas_standard_status")
-	}
-
-	// CHECK_DESTINATION_SERVICE → create instance if missing.
-	// Grouped with CHECK_DESTINATIONS: the instance is the vehicle for writing
-	// the destination configs that depend on the PIR/CAS credentials above.
-	//
-	// Unlike PIR/CAS, the Destination Service does NOT need a persistent service
-	// key managed here.  ensureSubscriberDestinations creates a short-lived temporary key
-	// (deleted via defer) solely to call the Destination Service REST API, so
-	// ensureInstanceAndKey is not used for this service.
-	setStep(StepCheckDestinationService)
-	if result.DestinationServiceInstanceGUID == "" {
-		guid, err := bootstrapper.ensureServiceInstance(ctx, offeringDestination, planDestinationLite,
-			instanceNameDestinationLite, nil)
-		if err != nil {
-			fail(lifecycle.FailureRemoteSystemError, StepCheckDestinationService, err.Error())
-			return
-		}
-		result.DestinationServiceInstanceGUID = guid
-	}
-
-	// CHECK_DESTINATIONS → write subscriber-side destinations into the subscriber's Destination Service instance
-	setStep(StepCheckDestinations)
-	tmsCtx, err := loadTmsContext(s.DB)
-	if err != nil {
-		fail(lifecycle.FailureWaitingUserAction, StepCheckCentralTmsContext,
-			"CENTRAL_TMS_NOT_CONFIGURED: "+err.Error())
-		return
-	}
-	destActs, err := bootstrapper.ensureSubscriberDestinations(ctx, tenant, result, tmsCtx)
-	if err != nil {
-		fail(lifecycle.FailureRemoteSystemError, StepCheckDestinations, err.Error())
-		return
-	}
-	credentialActions = append(credentialActions, destActs...)
-	// CloudIntegration and ContentAssemblyService are both written by ensureSubscriberDestinations.
-	// Mark them ready only if the underlying service instance (and thus key) was present.
-	if result.PirApiInstanceGUID != "" {
-		markReady("cloud_integration_dest_status")
-	}
-	if result.CasStandardInstanceGUID != "" {
-		markReady("content_assembly_dest_status")
-	}
-	if tmsCtx != nil && s.ProviderDest != nil {
-		markReady("transport_management_dest_status")
-	}
-
-	// Write provider-side CPIDELIVERY_PIR_{id} and CPIDELIVERY_CAS_{id} into
-	// cpi-delivery's own Destination Service.  Both destinations are runtime-critical:
-	// TrResolver depends on them for deploy and TR generation.
-	// ProviderDest is guaranteed non-nil at startup (main.go panics on init failure);
-	// a nil here indicates a programming error and must surface immediately.
+	// ENSURE_PIR_PROVIDER_DEST → write CPIDELIVERY_PIR_{id} into provider Destination Service
+	setStep(StepEnsurePirProviderDest)
 	if s.ProviderDest == nil {
-		fail(lifecycle.FailureRemoteSystemError, StepCheckDestinations,
+		fail(lifecycle.FailureRemoteSystemError, StepEnsurePirProviderDest,
 			"ProviderDest is nil — provider Destination Service client was not injected at startup")
 		return
 	}
-	provActs, err := bootstrapper.ensureProviderDestinations(ctx, tenant, result)
+	provActs, err := bootstrapper.ensurePirProviderDestination(ctx, tenant, result)
 	if err != nil {
-		fail(lifecycle.FailureRemoteSystemError, StepCheckDestinations, err.Error())
+		fail(lifecycle.FailureRemoteSystemError, StepEnsurePirProviderDest, err.Error())
 		return
 	}
 	credentialActions = append(credentialActions, provActs...)
 
-	// Persist credential action log (no secrets — names and action types only).
-	// Audit-only; failure is best-effort.
+	// Persist credential action log (audit-only; failure is best-effort).
 	actsJSON, _ := json.Marshal(credentialActions)
 	if err := s.DB.Model(&db.TenantBootstrapJob{}).Where("id = ?", jobID).
 		Update("credential_actions", actsJSON).Error; err != nil {
@@ -420,26 +337,16 @@ func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string,
 			"component", "bootstrap", "tenant_id", tenant.ID, "jobID", jobID, "error", err)
 	}
 
-	// Persist provider-side destination names on tenant.
-	// Runtime-critical: TrResolver uses these names on every deploy / TR generation.
-	// A failure here must abort bootstrap — marking the tenant ready without these
-	// names would cause all runtime operations to fail silently after a restart.
+	// Persist provider-side PIR destination name on tenant.
 	persistUpdates := map[string]any{
-		"cas_engine_destination_name": tenant.CasEngineDestinationName,
-		"pir_api_destination_name":    tenant.PirApiDestinationName,
-		"pir_api_url":                 tenant.PirApiUrl,
+		"pir_api_destination_name": tenant.PirApiDestinationName,
+		"pir_api_url":              tenant.PirApiUrl,
 	}
 	if err := s.DB.Model(&db.CpiTenant{}).Where("id = ?", tenant.ID).Updates(persistUpdates).Error; err != nil {
-		fail(lifecycle.FailureRemoteSystemError, StepCheckDestinations,
+		fail(lifecycle.FailureRemoteSystemError, StepEnsurePirProviderDest,
 			fmt.Sprintf("persist destination names: %s", err))
 		return
 	}
-
-	// REGISTER_TMS_NODE is handled by the independent TMS Node registration
-	// lifecycle (Phase 3 — service/tms_node_registrar.go).  Bootstrap finishes
-	// here; the operator triggers TMS registration separately via
-	// POST /tms-node/register after bootstrap completes.
-	setStep(StepRegisterTmsNode)
 
 	finish()
 }
@@ -703,6 +610,44 @@ func (b *bootstrapApplier) buildSubscriberDestinations(ctx context.Context, resu
 // This function names, creates, and records the provider-side destinations.
 // Unlike subscriber-side destinations (which use a temporary CF service key),
 // these are written directly via cf.DestinationServiceClient.UpsertDestination.
+// ensurePirProviderDestination writes CPIDELIVERY_PIR_{id} into the provider-side
+// Destination Service.  This is the only provider destination written by the BASE
+// bootstrap; CPIDELIVERY_CAS_{id} is written by the TMS extension bootstrap.
+func (b *bootstrapApplier) ensurePirProviderDestination(ctx context.Context, tenant *db.CpiTenant, result *InspectionResult) ([]credentialAction, error) {
+	if b.providerDest == nil {
+		return nil, fmt.Errorf("ensurePirProviderDestination: ProviderDest is nil")
+	}
+
+	tenant.PirApiDestinationName = fmt.Sprintf("CPIDELIVERY_PIR_%d", tenant.ID)
+
+	if result.PirApiInstanceGUID == "" {
+		return nil, fmt.Errorf("ensurePirProviderDestination: PIR API instance not found")
+	}
+	pirKeyGUID, ok := result.ServiceKeyGUIDs[result.PirApiInstanceGUID]
+	if !ok {
+		return nil, fmt.Errorf("ensurePirProviderDestination: no service key GUID for PIR instance %q", result.PirApiInstanceGUID)
+	}
+	pirCreds, err := b.cfClient.GetServiceKeyCredentials(ctx, pirKeyGUID)
+	if err != nil {
+		return nil, fmt.Errorf("get PIR api key credentials for provider dest: %w", err)
+	}
+	pirDest, err := buildOAuthDestination(tenant.PirApiDestinationName, nil, tenant.ID, pirCreds)
+	if err != nil {
+		return nil, err
+	}
+	if err := b.providerDest.UpsertDestination(ctx, pirDest); err != nil {
+		return nil, fmt.Errorf("upsert provider dest %q: %w", pirDest.Name, err)
+	}
+	if pirDest.URL == "" {
+		return nil, fmt.Errorf("ensurePirProviderDestination: PIR destination %q has empty URL", pirDest.Name)
+	}
+	tenant.PirApiUrl = pirDest.URL
+
+	return []credentialAction{{DestinationName: pirDest.Name, ActionType: "upserted"}}, nil
+}
+
+// ensureProviderDestinations writes both CPIDELIVERY_PIR_{id} and CPIDELIVERY_CAS_{id}.
+// Deprecated: kept for TMS extension bootstrap (T4) until it gets its own CAS-only version.
 func (b *bootstrapApplier) ensureProviderDestinations(ctx context.Context, tenant *db.CpiTenant, result *InspectionResult) ([]credentialAction, error) {
 	if b.providerDest == nil {
 		return nil, fmt.Errorf("ensureProviderDestinations: ProviderDest is nil — provider Destination Service client was not injected at startup")
@@ -870,29 +815,6 @@ func buildOAuthDestination(name string, urlTransform func(string) string, tenant
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-// checkCentralTmsContext checks whether the CentralTmsContext is configured in the
-// DB (TmsApiDestinationName non-empty).  If not, it appends "CENTRAL_TMS_NOT_CONFIGURED"
-// to result.WaitingUserAction, which causes ApplyBootstrap and PreviewBootstrap to
-// surface a clear blocking signal to the operator before any CF API calls are made.
-func (s *Service) checkCentralTmsContext(result *InspectionResult) {
-	tmsCtx, err := loadTmsContext(s.DB)
-	if err != nil || tmsCtx.TmsApiDestinationName == "" {
-		result.WaitingUserAction = append(result.WaitingUserAction, "CENTRAL_TMS_NOT_CONFIGURED")
-	}
-}
-
-// checkTmsSourceNode verifies that TMS Node registration is complete before
-// bootstrap apply is allowed.  Without TmsSourceNodeName the bootstrap cannot
-// write the sourceSystemId field on the TransportManagementService destination.
-//
-// This is a DB-only check (no CF API call) — analogous to checkCentralTmsContext.
-// The operator must complete TMS Node registration (wizard Step 2) before Apply.
-func (s *Service) checkTmsSourceNode(tenant *db.CpiTenant, result *InspectionResult) {
-	if tenant.TmsSourceNodeName == "" || tenant.TmsNodeRegistrationStatus != lifecycle.PrereqReady {
-		result.WaitingUserAction = append(result.WaitingUserAction, "TMS_NODE_NOT_REGISTERED")
-	}
-}
 
 func (s *Service) getTenantForBootstrap(tenantID uint) (*db.CpiTenant, error) {
 	var tenant db.CpiTenant

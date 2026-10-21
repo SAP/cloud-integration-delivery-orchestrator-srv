@@ -99,35 +99,44 @@ func (s *Service) SaveCfIdentity(ctx context.Context, tenantID uint, input CfIde
 	// lifecycle_state is intentionally excluded from updates: it is written
 	// exclusively by transitionLifecycleWithTx via the allowedTransitions table.
 	updates := map[string]any{
-		"cf_api_endpoint":                  input.CfApiEndpoint,
-		"cf_org":                           input.CfOrg,
-		"cf_space":                         input.CfSpace,
-		"blocking_reason":                  "",
-		"pir_api_status":                   lifecycle.PrereqMissing,
-		"cas_application_status":           lifecycle.PrereqMissing,
-		"cas_standard_status":              lifecycle.PrereqMissing,
-		"cloud_integration_dest_status":    lifecycle.PrereqMissing,
-		"content_assembly_dest_status":     lifecycle.PrereqMissing,
-		"transport_management_dest_status": lifecycle.PrereqMissing,
-		"tms_node_registration_status":     lifecycle.PrereqMissing,
-		"tms_source_node_name":             "",
-		"tms_source_node_id":               0,
-		"central_tms_context_id":           nil,
-		"pir_api_url":                      "",
-		"pir_api_destination_name":         "",
-		"cas_engine_destination_name":      "",
+		"cf_api_endpoint":  input.CfApiEndpoint,
+		"cf_org":           input.CfOrg,
+		"cf_space":         input.CfSpace,
+		"blocking_reason":  "",
+		"pir_api_status":   lifecycle.PrereqMissing,
+		"pir_api_url":      "",
+		"pir_api_destination_name": "",
 	}
 	if err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var t db.CpiTenant
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Select("id", "lifecycle_state").First(&t, tenantID).Error; err != nil {
+			Select("id", "lifecycle_state", "tms_extension_state").First(&t, tenantID).Error; err != nil {
 			return err
 		}
 		if t.LifecycleState == lifecycle.TenantReadying {
 			return fmt.Errorf("bootstrap is currently running; wait for it to complete or call ResetBootstrap first")
 		}
+		if t.TmsExtensionState == lifecycle.TmsBootstrapping {
+			return fmt.Errorf("TMS extension bootstrap is currently running; wait for it to complete or call TMS reset first")
+		}
 		if err := tx.Model(&db.CpiTenant{}).Where("id = ?", tenantID).Updates(updates).Error; err != nil {
 			return err
+		}
+		// Rule 1 (RFC 032 §5.4): reset TMS extension to not_started.
+		if err := tx.Model(&db.CpiTenant{}).Where("id = ?", tenantID).Updates(map[string]any{
+			"tms_extension_state":              lifecycle.TmsNotStarted,
+			"tms_blocking_reason":              "",
+			"tms_source_node_name":             "",
+			"tms_source_node_id":               0,
+			"central_tms_context_id":           nil,
+			"cas_engine_destination_name":      "",
+			"cas_application_status":           lifecycle.PrereqMissing,
+			"cas_standard_status":              lifecycle.PrereqMissing,
+			"cloud_integration_dest_status":    lifecycle.PrereqMissing,
+			"content_assembly_dest_status":     lifecycle.PrereqMissing,
+			"transport_management_dest_status": lifecycle.PrereqMissing,
+		}).Error; err != nil {
+			return fmt.Errorf("rule 1: reset TMS extension: %w", err)
 		}
 		return s.transitionLifecycleWithTx(tx, tenantID, EventCfIdentityConfigured)
 	}); err != nil {

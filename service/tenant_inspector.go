@@ -23,6 +23,12 @@ const (
 	StepCheckDestinations       = "CHECK_DESTINATIONS"
 	StepRegisterTmsNode         = "REGISTER_TMS_NODE"
 	StepValidateTransport       = "VALIDATE_TRANSPORT_READY"
+
+	// BASE bootstrap steps (P0)
+	StepEnsurePirProviderDest = "ENSURE_PIR_PROVIDER_DEST"
+
+	// TMS extension bootstrap steps (P0, used by tms_extension_bootstrapper.go)
+	StepEnsureCasProviderDest = "ENSURE_CAS_PROVIDER_DEST"
 )
 
 // ── CF service offering / plan constants ──────────────────────────────────────
@@ -163,22 +169,17 @@ func NewTenantInspector(cfAPIURL, bearerToken string) (*TenantInspector, error) 
 	return &TenantInspector{cfClient: cfcl, userID: userID}, nil
 }
 
-// InspectCfSubaccount runs all CHECK_* steps against the subscriber's CF
-// subaccount and returns an InspectionResult.  It does NOT modify any
-// resources — it is purely read-only.
+// InspectCfSubaccount runs base bootstrap CHECK_* steps against the subscriber's
+// CF subaccount and returns an InspectionResult.  It does NOT modify any resources.
 //
-// Step sequence:
+// Base bootstrap steps (P0):
 //
-//	CHECK_SPACE_CONTEXT       → resolve org, verify space accessibility + operator permissions
-//	CHECK_DESTINATION_SERVICE → entitlement + instance for the Destination Service jumpboard
-//	CHECK_PIR_API             → entitlement (PIR plan visible = IS subscribed) + instance
-//	CHECK_CAS_APPLICATION     → entitlement + instance
-//	CHECK_CAS_STANDARD        → entitlement + instance
-//	CHECK_SERVICE_KEYS        → service key existence per instance
-//	CHECK_DESTINATIONS        → CloudIntegration / ContentAssemblyService / TMS destinations
+//	CHECK_SPACE_CONTEXT  → resolve org, verify space accessibility + operator permissions
+//	CHECK_PIR_API        → entitlement (PIR plan visible = IS subscribed) + instance
+//	CHECK_SERVICE_KEYS   → service key existence for PIR instance
 //
-// Steps are sequential; early failures (e.g. space not accessible) cause later
-// dependent steps to be skipped gracefully.
+// CAS, destination/lite, and subscriber destination checks are handled by the
+// TMS extension bootstrap (tms_extension_bootstrapper.go).
 func (i *TenantInspector) InspectCfSubaccount(ctx context.Context, tenant *db.CpiTenant) (*InspectionResult, error) {
 	result := &InspectionResult{
 		ServiceKeyGUIDs:   make(map[string]string),
@@ -186,9 +187,6 @@ func (i *TenantInspector) InspectCfSubaccount(ctx context.Context, tenant *db.Cp
 	}
 
 	// ── CHECK_SPACE_CONTEXT ──────────────────────────────────────────────────
-	//
-	// Resolve CF space → org GUID and verify that the operator token holds the
-	// space_developer role.  Does NOT check any service instances.
 	if err := i.checkSpaceContext(ctx, tenant, result); err != nil {
 		return result, fmt.Errorf("inspector: %s: %w", StepCheckSpaceContext, err)
 	}
@@ -201,53 +199,15 @@ func (i *TenantInspector) InspectCfSubaccount(ctx context.Context, tenant *db.Cp
 		return result, nil
 	}
 
-	// ── CHECK_DESTINATION_SERVICE ────────────────────────────────────────────
-	//
-	// Two-layer check for the Destination Service instance.  This instance is
-	// used as the "jumpboard" in CHECK_DESTINATIONS to manage subaccount
-	// destinations via the Destination Service REST API.
-	if err := i.checkServiceInstance(ctx, result.OrgGUID, tenant.CfSpace, offeringDestination, planDestinationLite,
-		instanceNameDestinationLite, missingCodeDestinationService, &result.DestinationServiceInstanceGUID, result); err != nil {
-		return result, fmt.Errorf("inspector: %s: %w", StepCheckDestinationService, err)
-	}
-
 	// ── CHECK_PIR_API ────────────────────────────────────────────────────────
-	//
-	// Entitlement layer: PIR plan visibility in the CF org marketplace.
-	// PIR_API_ENTITLEMENT_MISSING implies Integration Suite is not subscribed.
 	if err := i.checkServiceInstance(ctx, result.OrgGUID, tenant.CfSpace, offeringPIR, planPirApi,
 		instanceNamePirApi, missingCodePirApi, &result.PirApiInstanceGUID, result); err != nil {
 		return result, fmt.Errorf("inspector: %s: %w", StepCheckPirApi, err)
 	}
 
-	// ── CHECK_CAS_APPLICATION ────────────────────────────────────────────────
-	if err := i.checkServiceInstance(ctx, result.OrgGUID, tenant.CfSpace, offeringCAS, planCasApplication,
-		instanceNameCasApplication, missingCodeCasApplication, &result.CasApplicationInstanceGUID, result); err != nil {
-		return result, fmt.Errorf("inspector: %s: %w", StepCheckCasApplication, err)
-	}
-
-	// ── CHECK_CAS_STANDARD ───────────────────────────────────────────────────
-	if err := i.checkServiceInstance(ctx, result.OrgGUID, tenant.CfSpace, offeringCAS, planCasStandard,
-		instanceNameCasStandard, missingCodeCasStandard, &result.CasStandardInstanceGUID, result); err != nil {
-		return result, fmt.Errorf("inspector: %s: %w", StepCheckCasStandard, err)
-	}
-
-	// ── CHECK_SERVICE_KEYS ───────────────────────────────────────────────────
-	//
-	// For each instance that exists, check whether a service key already exists.
-	// Absent keys are noted in MissingItems (apply will create them).
+	// ── CHECK_SERVICE_KEYS (PIR only) ────────────────────────────────────────
 	if err := i.checkServiceKeys(ctx, result); err != nil {
 		return result, fmt.Errorf("inspector: %s: %w", StepCheckServiceKeys, err)
-	}
-
-	// ── CHECK_DESTINATIONS ───────────────────────────────────────────────────
-	//
-	// Check the three required subaccount destinations using a temporary service
-	// key on the Destination Service instance.
-	if result.DestinationServiceInstanceGUID != "" {
-		if err := i.checkDestinations(ctx, result); err != nil {
-			return result, fmt.Errorf("inspector: %s: %w", StepCheckDestinations, err)
-		}
 	}
 
 	return result, nil
