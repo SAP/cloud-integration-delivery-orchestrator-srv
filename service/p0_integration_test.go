@@ -339,3 +339,191 @@ func TestApplyBootstrap_ResetsOnlyBasePrereqs(t *testing.T) {
 			got.TransportManagementDestStatus, lifecycle.PrereqReady)
 	}
 }
+
+// ── Reset: TMS bootstrapping blocks ResetTmsExtension ───────────────────────
+
+func TestResetTmsExtension_BlockedByBootstrapping(t *testing.T) {
+	svc, database := newTestSvc(t)
+
+	tenant := db.CpiTenant{
+		Name:              "tms-reset-blocked",
+		CfApiEndpoint:     "https://api.cf.reset1.example.com",
+		CfOrg:             "org-reset1",
+		LifecycleState:    lifecycle.TenantReady,
+		TmsExtensionState: lifecycle.TmsBootstrapping,
+		TmsSourceNodeName: "node-x",
+		TmsSourceNodeID:   42,
+	}
+	database.Create(&tenant)
+
+	err := svc.ResetTmsExtension(tenant.ID)
+	if err == nil {
+		t.Fatal("expected error for reset from bootstrapping, got nil")
+	}
+
+	// Fields must be untouched (transaction rolled back).
+	var got db.CpiTenant
+	database.First(&got, tenant.ID)
+	if got.TmsExtensionState != lifecycle.TmsBootstrapping {
+		t.Errorf("TmsExtensionState = %q, want %q (should be unchanged)", got.TmsExtensionState, lifecycle.TmsBootstrapping)
+	}
+	if got.TmsSourceNodeName != "node-x" {
+		t.Errorf("TmsSourceNodeName = %q, want %q (should be unchanged)", got.TmsSourceNodeName, "node-x")
+	}
+}
+
+// ── Reset: BASE readying blocks ResetBootstrap ──────────────────────────────
+
+func TestResetBootstrap_BlockedByReadying(t *testing.T) {
+	svc, database := newTestSvc(t)
+
+	tenant := db.CpiTenant{
+		Name:              "base-reset-blocked",
+		CfApiEndpoint:     "https://api.cf.reset2.example.com",
+		CfOrg:             "org-reset2",
+		LifecycleState:    lifecycle.TenantReadying,
+		PirApiStatus:      lifecycle.PrereqReady,
+		PirApiDestinationName: "PIR_DEST",
+	}
+	database.Create(&tenant)
+
+	err := svc.ResetBootstrap(tenant.ID)
+	if err == nil {
+		t.Fatal("expected error for reset from readying, got nil")
+	}
+
+	// Fields must be untouched (transaction rolled back).
+	var got db.CpiTenant
+	database.First(&got, tenant.ID)
+	if got.LifecycleState != lifecycle.TenantReadying {
+		t.Errorf("LifecycleState = %q, want %q (should be unchanged)", got.LifecycleState, lifecycle.TenantReadying)
+	}
+	if got.PirApiDestinationName != "PIR_DEST" {
+		t.Errorf("PirApiDestinationName = %q, want %q (should be unchanged)", got.PirApiDestinationName, "PIR_DEST")
+	}
+}
+
+// ── Reset: BASE draft blocks ResetBootstrap ─────────────────────────────────
+
+func TestResetBootstrap_BlockedByDraft(t *testing.T) {
+	svc, database := newTestSvc(t)
+
+	tenant := db.CpiTenant{
+		Name:           "base-reset-draft",
+		CfApiEndpoint:  "https://api.cf.reset3.example.com",
+		CfOrg:          "org-reset3",
+		LifecycleState: lifecycle.TenantDraft,
+	}
+	database.Create(&tenant)
+
+	err := svc.ResetBootstrap(tenant.ID)
+	if err == nil {
+		t.Fatal("expected error for reset from draft, got nil")
+	}
+}
+
+// ── Reset: TMS bootstrap_failed allows ResetTmsExtension ────────────────────
+
+func TestResetTmsExtension_FromBootstrapFailed(t *testing.T) {
+	svc, database := newTestSvc(t)
+
+	tenant := db.CpiTenant{
+		Name:                          "tms-reset-ok",
+		CfApiEndpoint:                 "https://api.cf.reset4.example.com",
+		CfOrg:                         "org-reset4",
+		LifecycleState:                lifecycle.TenantReady,
+		TmsExtensionState:             lifecycle.TmsBootstrapFailed,
+		TmsBlockingReason:             lifecycle.TmsReasonCentralTmsChanged,
+		TmsSourceNodeName:             "old-node",
+		TmsSourceNodeID:               7,
+		CasApplicationStatus:          lifecycle.PrereqReady,
+		CasStandardStatus:             lifecycle.PrereqReady,
+		CloudIntegrationDestStatus:    lifecycle.PrereqReady,
+		ContentAssemblyDestStatus:     lifecycle.PrereqReady,
+		TransportManagementDestStatus: lifecycle.PrereqReady,
+		CasEngineDestinationName:      "CAS_DEST",
+	}
+	database.Create(&tenant)
+
+	if err := svc.ResetTmsExtension(tenant.ID); err != nil {
+		t.Fatalf("ResetTmsExtension: %v", err)
+	}
+
+	var got db.CpiTenant
+	database.First(&got, tenant.ID)
+
+	if got.TmsExtensionState != lifecycle.TmsNotStarted {
+		t.Errorf("TmsExtensionState = %q, want %q", got.TmsExtensionState, lifecycle.TmsNotStarted)
+	}
+	if got.TmsBlockingReason != "OPERATOR_RESET" {
+		t.Errorf("TmsBlockingReason = %q, want %q", got.TmsBlockingReason, "OPERATOR_RESET")
+	}
+	if got.TmsSourceNodeName != "" {
+		t.Errorf("TmsSourceNodeName = %q, want empty", got.TmsSourceNodeName)
+	}
+	if got.TmsSourceNodeID != 0 {
+		t.Errorf("TmsSourceNodeID = %d, want 0", got.TmsSourceNodeID)
+	}
+	if got.CasApplicationStatus != lifecycle.PrereqMissing {
+		t.Errorf("CasApplicationStatus = %q, want %q", got.CasApplicationStatus, lifecycle.PrereqMissing)
+	}
+	if got.TransportManagementDestStatus != lifecycle.PrereqMissing {
+		t.Errorf("TransportManagementDestStatus = %q, want %q", got.TransportManagementDestStatus, lifecycle.PrereqMissing)
+	}
+	if got.CasEngineDestinationName != "" {
+		t.Errorf("CasEngineDestinationName = %q, want empty", got.CasEngineDestinationName)
+	}
+}
+
+// ── Reset: BASE not_ready allows ResetBootstrap ─────────────────────────────
+
+func TestResetBootstrap_FromNotReady(t *testing.T) {
+	svc, database := newTestSvc(t)
+
+	tenant := db.CpiTenant{
+		Name:                  "base-reset-ok",
+		CfApiEndpoint:         "https://api.cf.reset5.example.com",
+		CfOrg:                 "org-reset5",
+		CfSpace:               "space-reset5",
+		LifecycleState:        lifecycle.TenantNotReady,
+		BlockingReason:        "CF_SPACE_NOT_FOUND",
+		PirApiStatus:          lifecycle.PrereqReady,
+		PirApiUrl:             "https://pir.example.com",
+		PirApiDestinationName: "PIR_DEST",
+		// TMS fields should be untouched by BASE reset.
+		TmsExtensionState: lifecycle.TmsBootstrapped,
+		TmsSourceNodeName: "keep-this",
+		TmsSourceNodeID:   99,
+	}
+	database.Create(&tenant)
+
+	if err := svc.ResetBootstrap(tenant.ID); err != nil {
+		t.Fatalf("ResetBootstrap: %v", err)
+	}
+
+	var got db.CpiTenant
+	database.First(&got, tenant.ID)
+
+	if got.LifecycleState != lifecycle.TenantConfigured {
+		t.Errorf("LifecycleState = %q, want %q", got.LifecycleState, lifecycle.TenantConfigured)
+	}
+	if got.BlockingReason != "OPERATOR_RESET" {
+		t.Errorf("BlockingReason = %q, want %q", got.BlockingReason, "OPERATOR_RESET")
+	}
+	if got.PirApiStatus != lifecycle.PrereqMissing {
+		t.Errorf("PirApiStatus = %q, want %q", got.PirApiStatus, lifecycle.PrereqMissing)
+	}
+	if got.PirApiUrl != "" {
+		t.Errorf("PirApiUrl = %q, want empty", got.PirApiUrl)
+	}
+	if got.PirApiDestinationName != "" {
+		t.Errorf("PirApiDestinationName = %q, want empty", got.PirApiDestinationName)
+	}
+	// TMS fields must be untouched.
+	if got.TmsExtensionState != lifecycle.TmsBootstrapped {
+		t.Errorf("TmsExtensionState = %q, want %q (BASE reset must not touch TMS)", got.TmsExtensionState, lifecycle.TmsBootstrapped)
+	}
+	if got.TmsSourceNodeName != "keep-this" {
+		t.Errorf("TmsSourceNodeName = %q, want %q (BASE reset must not touch TMS)", got.TmsSourceNodeName, "keep-this")
+	}
+}

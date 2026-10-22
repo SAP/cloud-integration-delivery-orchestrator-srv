@@ -93,11 +93,14 @@ func (h *Handler) UpsertCentralTmsContext(ctx *gin.Context) {
 		}
 
 		// Invalidate all bootstrapped tenants.
+		// Also reset TransportManagementDestStatus because the subscriber destination
+		// holds credentials derived from the old Central TMS destination.
 		result := h.db.Model(&db.CpiTenant{}).
 			Where("tms_extension_state = ?", lifecycle.TmsBootstrapped).
 			Updates(map[string]any{
-				"tms_extension_state": lifecycle.TmsBootstrapFailed,
-				"tms_blocking_reason": lifecycle.TmsReasonCentralTmsChanged,
+				"tms_extension_state":              lifecycle.TmsBootstrapFailed,
+				"tms_blocking_reason":              lifecycle.TmsReasonCentralTmsChanged,
+				"transport_management_dest_status": lifecycle.PrereqMissing,
 			})
 		if result.Error != nil {
 			Fail(ctx, 500, fmt.Sprintf("rule 4: invalidate tenants: %v", result.Error))

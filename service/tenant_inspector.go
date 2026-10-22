@@ -86,46 +86,46 @@ const (
 type InspectionResult struct {
 	// OrgGUID is the CF org GUID derived from the tenant's CfSpace.
 	// Resolved during CHECK_SPACE_CONTEXT; required for entitlement queries.
-	OrgGUID string
+	OrgGUID string `json:"orgGuid"`
 
 	// SpaceAccessible is true when the CfSpace GUID resolves to a real space.
-	SpaceAccessible bool
+	SpaceAccessible bool `json:"spaceAccessible"`
 
 	// HasSpaceDeveloperRole is true when the operator token's user holds the
 	// space_developer role in the CfSpace.
-	HasSpaceDeveloperRole bool
+	HasSpaceDeveloperRole bool `json:"hasSpaceDeveloperRole"`
 
 	// DestinationServiceEntitled is true when the "destination/lite" plan is
 	// visible in the CF org marketplace.
-	DestinationServiceEntitled bool
+	DestinationServiceEntitled bool `json:"destinationServiceEntitled"`
 
 	// DestinationServiceInstanceGUID is set when a destination service instance
 	// already exists in the space.  Empty if not yet created.
-	DestinationServiceInstanceGUID string
+	DestinationServiceInstanceGUID string `json:"destinationServiceInstanceGuid"`
 
 	// PirApiInstanceGUID is set when a PIR api service instance exists.
-	PirApiInstanceGUID string
+	PirApiInstanceGUID string `json:"pirApiInstanceGuid"`
 
 	// CasApplicationInstanceGUID is set when a CAS application service instance exists.
-	CasApplicationInstanceGUID string
+	CasApplicationInstanceGUID string `json:"casApplicationInstanceGuid"`
 
 	// CasStandardInstanceGUID is set when a CAS standard service instance exists.
-	CasStandardInstanceGUID string
+	CasStandardInstanceGUID string `json:"casStandardInstanceGuid"`
 
 	// ServiceKeyGUIDs maps instance GUID → service key binding GUID for instances
 	// that already have a service key.
-	ServiceKeyGUIDs map[string]string
+	ServiceKeyGUIDs map[string]string `json:"serviceKeyGuids"`
 
 	// DestinationExists maps destination name → true for each of the three required
 	// subaccount destinations: CloudIntegration, ContentAssemblyService, TransportManagementService.
-	DestinationExists map[string]bool
+	DestinationExists map[string]bool `json:"destinationExists"`
 
 	// MissingItems lists blocking reason codes for every absent prerequisite.
 	// These are written into TenantBootstrapJob.MissingPrerequisites on job creation.
-	MissingItems []string
+	MissingItems []string `json:"missingItems"`
 
 	// PermissionIssues lists items where the bootstrap principal lacks permission.
-	PermissionIssues []string
+	PermissionIssues []string `json:"permissionIssues"`
 
 	// WaitingUserAction lists items that require a human to act before bootstrap
 	// can continue.  A PIR_API_ENTITLEMENT_MISSING entry implies Integration Suite
@@ -136,7 +136,7 @@ type InspectionResult struct {
 	//                             operator must correct the GUID in the tenant record.
 	//   CF_TOKEN_UNAUTHORIZED   — the cfToken is expired or invalid;
 	//                             operator must re-authenticate and retry.
-	WaitingUserAction []string
+	WaitingUserAction []string `json:"waitingUserAction"`
 }
 
 // TenantInspector performs read-only prerequisite checks against a subscriber

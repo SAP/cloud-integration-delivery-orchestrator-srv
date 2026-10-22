@@ -50,11 +50,13 @@ func TestRule4_UpsertCentralTms_InvalidatesBootstrappedTenants(t *testing.T) {
 	bootstrapped1 := db.CpiTenant{
 		Name: "tenant-boot1", LifecycleState: lifecycle.TenantReady,
 		TmsExtensionState: lifecycle.TmsBootstrapped,
+		TransportManagementDestStatus: lifecycle.PrereqReady,
 		CfApiEndpoint: "https://api.cf.eu10.example.com", CfOrg: "org-1", CfSpace: "space-1",
 	}
 	bootstrapped2 := db.CpiTenant{
 		Name: "tenant-boot2", LifecycleState: lifecycle.TenantReady,
 		TmsExtensionState: lifecycle.TmsBootstrapped,
+		TransportManagementDestStatus: lifecycle.PrereqReady,
 		CfApiEndpoint: "https://api.cf.eu10.example.com", CfOrg: "org-2", CfSpace: "space-2",
 	}
 	notStarted := db.CpiTenant{
@@ -107,6 +109,13 @@ func TestRule4_UpsertCentralTms_InvalidatesBootstrappedTenants(t *testing.T) {
 	}
 	if t2.TmsExtensionState != lifecycle.TmsBootstrapFailed {
 		t.Errorf("tenant2 TmsExtensionState = %q, want %q", t2.TmsExtensionState, lifecycle.TmsBootstrapFailed)
+	}
+	// Rule 4 must also reset TransportManagementDestStatus to missing.
+	if t1.TransportManagementDestStatus != lifecycle.PrereqMissing {
+		t.Errorf("tenant1 TransportManagementDestStatus = %q, want %q", t1.TransportManagementDestStatus, lifecycle.PrereqMissing)
+	}
+	if t2.TransportManagementDestStatus != lifecycle.PrereqMissing {
+		t.Errorf("tenant2 TransportManagementDestStatus = %q, want %q", t2.TransportManagementDestStatus, lifecycle.PrereqMissing)
 	}
 	// not_started tenant should be unaffected.
 	if t3.TmsExtensionState != lifecycle.TmsNotStarted {

@@ -36,6 +36,12 @@ const (
 	// EventBootstrapFailed is fired when a bootstrap job reaches a terminal
 	// non-finished state (failed, waiting_user_action, partially_applied).
 	EventBootstrapFailed LifecycleEvent = "bootstrap_failed"
+
+	// EventReset is fired by ResetBootstrap to roll back to configured state,
+	// clearing all bootstrap product fields (PIR status/url/destination).
+	// Valid from: configured (idempotent), not_ready, ready.
+	// NOT valid from: draft (nothing to reset) or readying (job running).
+	EventReset LifecycleEvent = "reset"
 )
 
 // allowedTransitions defines the valid (currentState, event) → nextState edges.
@@ -55,6 +61,8 @@ var allowedTransitions = map[lifecycle.TenantLifecycleState]map[LifecycleEvent]l
 		// CfSpace after a typo).  Self-transition keeps the state at configured so
 		// SaveCfIdentity no longer needs to write lifecycle_state = draft directly.
 		EventCfIdentityConfigured: lifecycle.TenantConfigured,
+		// Reset: idempotent (already configured).
+		EventReset: lifecycle.TenantConfigured,
 	},
 	lifecycle.TenantNotReady: {
 		EventBootstrapStarted: lifecycle.TenantReadying,
@@ -62,6 +70,8 @@ var allowedTransitions = map[lifecycle.TenantLifecycleState]map[LifecycleEvent]l
 		// (e.g. correcting the CfSpace GUID after a CF_SPACE_NOT_FOUND failure).
 		// Transitions to configured so the wizard can re-run apply.
 		EventCfIdentityConfigured: lifecycle.TenantConfigured,
+		// Reset: roll back to configured so the operator can re-apply.
+		EventReset: lifecycle.TenantConfigured,
 	},
 	lifecycle.TenantReadying: {
 		EventBootstrapFinished: lifecycle.TenantReady,
@@ -74,6 +84,8 @@ var allowedTransitions = map[lifecycle.TenantLifecycleState]map[LifecycleEvent]l
 		// Operator re-saves CF identity on a ready tenant (e.g. updating CfSpace
 		// after a space migration).  Transitions to configured so they can re-run apply.
 		EventCfIdentityConfigured: lifecycle.TenantConfigured,
+		// Reset: roll back to configured, clearing all bootstrap products.
+		EventReset: lifecycle.TenantConfigured,
 	},
 }
 

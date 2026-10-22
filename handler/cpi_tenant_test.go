@@ -14,7 +14,6 @@ import (
 
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/lifecycle"
-	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/service"
 )
 
 // newTestHandler creates a Handler with an in-memory SQLite DB for use in handler tests.
@@ -50,54 +49,6 @@ func postJSON(t *testing.T, handlerFunc gin.HandlerFunc, body any) *httptest.Res
 	c.Request.Header.Set("Content-Type", "application/json")
 	handlerFunc(c)
 	return w
-}
-
-// newTestHandlerWithSvc creates a Handler with an in-memory SQLite DB and a
-// real service.Service wired to the same DB, for tests that exercise paths
-// that call h.svc (e.g. TransitionLifecycle).
-func newTestHandlerWithSvc(t *testing.T) (*Handler, *gorm.DB) {
-	t.Helper()
-	dsn := "file:" + t.Name() + "?mode=memory&cache=private"
-	database, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Silent),
-	})
-	if err != nil {
-		t.Fatalf("open test db: %v", err)
-	}
-	if err := database.AutoMigrate(&db.CpiTenant{}); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	svc := &service.Service{DB: database}
-	h := &Handler{db: database, svc: svc}
-	return h, database
-}
-
-// --- UpsertCpiTenant update path ---
-
-// TestUpsertCpiTenant_Update_RejectsCfIdentityChange verifies that updating CF
-// identity fields via UpsertCpiTenant returns 400; those fields must go through
-// PUT /api/v1/cpiTenant/:id/cfIdentity.
-func TestUpsertCpiTenant_Update_RejectsCfIdentityChange(t *testing.T) {
-	h, database := newTestHandlerWithSvc(t)
-
-	tenant := db.CpiTenant{
-		Name:          "test-tenant",
-		CfApiEndpoint: "https://api.cf.eu10.hana.ondemand.com",
-		CfOrg:         "org-guid-abc",
-		CfSpace:       "space-guid-xyz",
-		LifecycleState: lifecycle.TenantConfigured,
-	}
-	if err := database.Create(&tenant).Error; err != nil {
-		t.Fatalf("seed tenant: %v", err)
-	}
-	t.Cleanup(func() { database.Unscoped().Delete(&tenant) })
-
-	update := tenant
-	update.CfOrg = "org-guid-NEW"
-	w := postJSON(t, h.UpsertCpiTenant, update)
-	if w.Code != 400 {
-		t.Errorf("expected 400 when changing CF identity via UpsertCpiTenant, got %d: %s", w.Code, w.Body.String())
-	}
 }
 
 // --- UpsertCpiTenant create path ---

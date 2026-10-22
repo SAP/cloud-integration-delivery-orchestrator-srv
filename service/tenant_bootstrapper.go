@@ -162,34 +162,47 @@ func (s *Service) GetBootstrapStatus(tenantID uint) (*db.TenantBootstrapJob, err
 // RetryBootstrap can be issued.
 //
 // POST /api/v1/cpiTenant/:id/bootstrap/reset
+// ResetBootstrap rolls the tenant's base bootstrap back to configured state,
+// clearing all bootstrap product fields (PIR status, URL, destination name).
+//
+// Allowed from: configured (idempotent), not_ready, ready.
+// Rejected by state machine for: draft (no EventReset edge), readying (no EventReset edge).
+//
+// All writes are atomic in a single transaction. The state transition runs
+// first (SELECT FOR UPDATE), so readying/draft are rejected before any
+// field cleanup or job marking occurs.
 func (s *Service) ResetBootstrap(tenantID uint) error {
-	tenant, err := s.getTenantForBootstrap(tenantID)
-	if err != nil {
-		return err
-	}
+	return s.DB.Transaction(func(tx *gorm.DB) error {
+		// State transition first: validates state + acquires row lock.
+		// draft/readying are rejected here → rollback, zero side effects.
+		if err := s.transitionLifecycleWithTx(tx, tenantID, EventReset); err != nil {
+			return fmt.Errorf("reset: %w", err)
+		}
 
-	if tenant.LifecycleState != lifecycle.TenantReadying {
-		return fmt.Errorf("reset: tenant %d is not in readying state (current: %s); nothing to reset",
-			tenantID, tenant.LifecycleState)
-	}
-
-	// Mark the most recent running job as failed.
-	now := time.Now()
-	if err := s.DB.Model(&db.TenantBootstrapJob{}).
-		Where("cpi_tenant_id = ? AND state = ?", tenantID, lifecycle.JobRunning).
-		Updates(map[string]any{
-			"state":        lifecycle.JobFailed,
-			"failure_type": lifecycle.FailureRemoteSystemError,
-			"ended_at":     &now,
+		// Clear bootstrap product fields.
+		if err := tx.Model(&db.CpiTenant{}).Where("id = ?", tenantID).Updates(map[string]any{
+			"blocking_reason":          "OPERATOR_RESET",
+			"pir_api_status":           lifecycle.PrereqMissing,
+			"pir_api_url":              "",
+			"pir_api_destination_name": "",
 		}).Error; err != nil {
-		return fmt.Errorf("reset: mark job failed: %w", err)
-	}
+			return fmt.Errorf("reset: clear bootstrap fields: %w", err)
+		}
 
-	// Transition tenant back to not_ready so RetryBootstrap can proceed.
-	if err := s.TransitionLifecycle(tenantID, EventBootstrapFailed); err != nil {
-		return fmt.Errorf("reset: transition lifecycle: %w", err)
-	}
-	return nil
+		// Defensive: mark any stale running BASE jobs as failed.
+		now := time.Now()
+		if err := tx.Model(&db.TenantBootstrapJob{}).
+			Where("cpi_tenant_id = ? AND layer = ? AND state = ?", tenantID, lifecycle.LayerBase, lifecycle.JobRunning).
+			Updates(map[string]any{
+				"state":        lifecycle.JobFailed,
+				"failure_type": lifecycle.FailureRemoteSystemError,
+				"ended_at":     &now,
+			}).Error; err != nil {
+			return fmt.Errorf("reset: mark stale jobs failed: %w", err)
+		}
+
+		return nil
+	})
 }
 
 // ── BootstrapPreview ──────────────────────────────────────────────────────────

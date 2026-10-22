@@ -75,19 +75,10 @@ func (h *Handler) UpsertCpiTenant(ctx *gin.Context) {
 		return
 	}
 
-	// CF identity fields (CfApiEndpoint, CfOrg, CfSpace) may only be changed via
-	// PUT /api/v1/cpiTenant/:id/cfIdentity (SaveCfIdentity / Wizard Step 1).
-	// That endpoint owns the bootstrap lifecycle reset; this endpoint does not.
-	if input.CfApiEndpoint != existing.CfApiEndpoint ||
-		input.CfOrg != existing.CfOrg ||
-		input.CfSpace != existing.CfSpace {
-		Fail(ctx, 400, "CF identity fields (cfApiEndpoint, cfOrg, cfSpace) must be updated via PUT /api/v1/cpiTenant/:id/cfIdentity")
-		return
-	}
-
 	// Whitelist update: only allow operator-editable fields.
-	// All other fields (lifecycle, TMS extension, prerequisites, destinations)
-	// are managed exclusively by their owning service modules.
+	// All other fields (CF identity, lifecycle, TMS extension, prerequisites,
+	// destinations) are managed exclusively by their owning service modules
+	// and are never written here — no guard needed.
 	if err := h.db.Model(&existing).Updates(map[string]any{
 		"name":       input.Name,
 		"group":      input.Group,

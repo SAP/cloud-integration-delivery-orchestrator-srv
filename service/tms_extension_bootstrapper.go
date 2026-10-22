@@ -128,32 +128,53 @@ func (s *Service) ApplyTmsExtension(ctx context.Context, tenantID uint, cfToken 
 	return job.ID, nil
 }
 
-// ResetTmsExtension is the escape hatch for tenants stuck in bootstrapping state.
+// ResetTmsExtension rolls the tenant's TMS extension back to not_started,
+// clearing all TMS product fields (node binding, CAS statuses, destination statuses).
+//
+// Allowed from: all states except bootstrapping (no TmsEventReset edge).
+// The state machine handles idempotency for not_started → not_started.
+//
+// All writes are atomic in a single transaction. The state transition runs
+// first (SELECT FOR UPDATE), so bootstrapping is rejected before any
+// field cleanup or job marking occurs.
 func (s *Service) ResetTmsExtension(tenantID uint) error {
-	tenant, err := s.getTenantForBootstrap(tenantID)
-	if err != nil {
-		return err
-	}
-	if tenant.TmsExtensionState != lifecycle.TmsBootstrapping {
-		return fmt.Errorf("tms reset: tenant %d TmsExtensionState=%s, not bootstrapping",
-			tenantID, tenant.TmsExtensionState)
-	}
+	return s.DB.Transaction(func(tx *gorm.DB) error {
+		// State transition first: validates state + acquires row lock.
+		// bootstrapping is rejected here → rollback, zero side effects.
+		if err := s.transitionTmsWithTx(tx, tenantID, TmsEventReset); err != nil {
+			return fmt.Errorf("tms reset: %w", err)
+		}
 
-	now := time.Now()
-	if err := s.DB.Model(&db.TenantBootstrapJob{}).
-		Where("cpi_tenant_id = ? AND layer = ? AND state = ?", tenantID, lifecycle.LayerTMS, lifecycle.JobRunning).
-		Updates(map[string]any{
-			"state":        lifecycle.JobFailed,
-			"failure_type": lifecycle.FailureRemoteSystemError,
-			"ended_at":     &now,
+		// Clear all TMS product fields (same set as SaveCfIdentity Rule 1).
+		if err := tx.Model(&db.CpiTenant{}).Where("id = ?", tenantID).Updates(map[string]any{
+			"tms_blocking_reason":              "OPERATOR_RESET",
+			"tms_source_node_name":             "",
+			"tms_source_node_id":               0,
+			"central_tms_context_id":           nil,
+			"cas_engine_destination_name":      "",
+			"cas_application_status":           lifecycle.PrereqMissing,
+			"cas_standard_status":              lifecycle.PrereqMissing,
+			"cloud_integration_dest_status":    lifecycle.PrereqMissing,
+			"content_assembly_dest_status":     lifecycle.PrereqMissing,
+			"transport_management_dest_status": lifecycle.PrereqMissing,
 		}).Error; err != nil {
-		return fmt.Errorf("tms reset: mark job failed: %w", err)
-	}
+			return fmt.Errorf("tms reset: clear TMS fields: %w", err)
+		}
 
-	if err := s.TransitionTms(tenantID, TmsEventApplyFailed); err != nil {
-		return fmt.Errorf("tms reset: transition: %w", err)
-	}
-	return nil
+		// Defensive: mark any stale running TMS jobs as failed.
+		now := time.Now()
+		if err := tx.Model(&db.TenantBootstrapJob{}).
+			Where("cpi_tenant_id = ? AND layer = ? AND state = ?", tenantID, lifecycle.LayerTMS, lifecycle.JobRunning).
+			Updates(map[string]any{
+				"state":        lifecycle.JobFailed,
+				"failure_type": lifecycle.FailureRemoteSystemError,
+				"ended_at":     &now,
+			}).Error; err != nil {
+			return fmt.Errorf("tms reset: mark stale jobs failed: %w", err)
+		}
+
+		return nil
+	})
 }
 
 // inspectTmsExtension checks TMS-specific resources (CAS, destination/lite, subscriber destinations).
