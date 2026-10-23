@@ -330,7 +330,9 @@ func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string,
 
 	// Rule 3 (RFC 032 §5.4): if PIR key was newly created (old key deleted externally),
 	// the subscriber-side CloudIntegration destination holds stale credentials.
-	// Invalidate TMS extension so operator re-applies it.
+	// Attempt to invalidate TMS extension — the state machine (SELECT FOR UPDATE)
+	// checks the real current state; if it's not bootstrapped, no action is needed
+	// (no stale destination exists in earlier states).
 	pirKeyCreated := false
 	for _, a := range acts {
 		if a.ActionType == "created" {
@@ -338,10 +340,12 @@ func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string,
 			break
 		}
 	}
-	if pirKeyCreated && tenant.TmsExtensionState == lifecycle.TmsBootstrapped {
+	if pirKeyCreated {
 		if err := s.TransitionTms(tenant.ID, TmsEventInvalidated); err != nil {
-			s.L(ctx).Warnw("rule 3: failed to invalidate TMS extension after PIR key recreation",
-				"component", "bootstrap", "tenant_id", tenant.ID, "error", err)
+			// State doesn't support invalidation (e.g., not_started, node_pending) —
+			// no stale CloudIntegration destination exists. Safe to ignore.
+			s.L(ctx).Debugw("rule 3: PIR key recreated but TMS invalidation not applicable",
+				"component", "bootstrap", "tenant_id", tenant.ID, "info", err)
 		} else {
 			_ = s.DB.Model(&db.CpiTenant{}).Where("id = ?", tenant.ID).
 				Update("tms_blocking_reason", lifecycle.TmsReasonPirKeyChanged)
@@ -486,7 +490,6 @@ func (b *bootstrapApplier) ensureInstanceAndKey(
 
 	return []credentialAction{{DestinationName: keyName, ActionType: "created"}}, nil
 }
-
 
 // ensureProviderDestinations writes the two per-tenant destinations into
 // cpi-delivery's own provider-side Destination Service.
