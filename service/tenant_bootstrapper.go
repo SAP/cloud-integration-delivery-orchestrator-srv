@@ -74,7 +74,8 @@ func (s *Service) ApplyBootstrap(ctx context.Context, tenantID uint, cfToken str
 
 	// ── Phase 1: Atomically claim readying state ──────────────────────────────
 	// Guard: reject if TMS extension bootstrap is running (only one job at a time).
-	// Then transition lifecycle to readying via the same SELECT FOR UPDATE.
+	// Reset base bootstrap prerequisite statuses and transition lifecycle to readying,
+	// all in a single transaction (consistent with TMS Apply's Phase 1 pattern).
 	if err := s.DB.Transaction(func(tx *gorm.DB) error {
 		var t db.CpiTenant
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -85,16 +86,16 @@ func (s *Service) ApplyBootstrap(ctx context.Context, tenantID uint, cfToken str
 		if t.TmsExtensionState == lifecycle.TmsBootstrapping {
 			return fmt.Errorf("TMS extension bootstrap is running; only one bootstrap job at a time")
 		}
+		// Reset only base bootstrap prerequisite status; TMS extension statuses are untouched.
+		if err := tx.Model(&db.CpiTenant{}).Where("id = ?", tenantID).Updates(map[string]any{
+			"blocking_reason": "",
+			"pir_api_status":  lifecycle.PrereqMissing,
+		}).Error; err != nil {
+			return err
+		}
 		return s.transitionLifecycleWithTx(tx, tenantID, EventBootstrapStarted)
 	}); err != nil {
 		return 0, fmt.Errorf("apply: %w", err)
-	}
-	// Reset only base bootstrap prerequisite status; TMS extension statuses are untouched.
-	if err := s.DB.Model(&db.CpiTenant{}).Where("id = ?", tenantID).Updates(map[string]any{
-		"blocking_reason": "",
-		"pir_api_status":  lifecycle.PrereqMissing,
-	}).Error; err != nil {
-		s.L(ctx).Warnw("failed to reset prereq statuses", "component", "bootstrap", "tenant_id", tenantID, "error", err)
 	}
 
 	// ── Phase 2: Synchronous inspect ─────────────────────────────────────────
