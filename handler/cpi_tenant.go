@@ -166,11 +166,26 @@ func (h *Handler) GetCpiTenant(ctx *gin.Context) {
 }
 
 // DeleteCpiTenant soft-deletes a tenant by ID.
+// Rejects deletion if a bootstrap job is currently running.
 func (h *Handler) DeleteCpiTenant(ctx *gin.Context) {
 	idStr := ctx.Param("id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
 		Fail(ctx, 400, "invalid id")
+		return
+	}
+
+	var tenant db.CpiTenant
+	if err := h.db.Select("id", "lifecycle_state", "tms_extension_state").First(&tenant, id).Error; err != nil {
+		Fail(ctx, 404, "tenant not found")
+		return
+	}
+	if tenant.LifecycleState == lifecycle.TenantReadying {
+		Fail(ctx, 409, "cannot delete tenant while bootstrap is running")
+		return
+	}
+	if tenant.TmsExtensionState == lifecycle.TmsBootstrapping {
+		Fail(ctx, 409, "cannot delete tenant while TMS extension bootstrap is running")
 		return
 	}
 

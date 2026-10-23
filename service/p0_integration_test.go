@@ -203,30 +203,37 @@ func TestApplyTmsExtension_RejectsWhenNotOnboarded(t *testing.T) {
 	}
 }
 
-func TestApplyTmsExtension_RejectsWhenNoCentralTms(t *testing.T) {
+// TestApplyTmsExtension_NoCentralTms_StartsButFailsAsync verifies that when
+// Central TMS is not configured, ApplyTmsExtension still transitions to
+// bootstrapping (the goroutine will fail asynchronously at buildSubscriberDestinations).
+// The ensure check in buildSubscriberDestinations is the safety net.
+func TestApplyTmsExtension_NoCentralTms_StartsButFailsAsync(t *testing.T) {
 	svc, database := newTestSvc(t)
-	// Migrate CentralTmsContext so the query runs (but leave it empty).
-	database.AutoMigrate(&db.CentralTmsContext{})
 
 	tenant := db.CpiTenant{
 		Name:              "tms-no-central",
 		CfApiEndpoint:     "https://api.cf.test3.example.com",
 		CfOrg:             "org-nocentral",
 		CfSpace:           "space-nocentral",
-		LifecycleState:    lifecycle.TenantReady, // onboarded
+		LifecycleState:    lifecycle.TenantReady,
 		TmsExtensionState: lifecycle.TmsNodeConfirmed,
 	}
 	if err := database.Create(&tenant).Error; err != nil {
 		t.Fatalf("create tenant: %v", err)
 	}
 
-	// No CentralTmsContext seeded — should be rejected.
+	// No CentralTmsContext seeded. ApplyTmsExtension should NOT reject synchronously —
+	// it transitions to bootstrapping and the goroutine handles the failure.
 	_, err := svc.ApplyTmsExtension(t.Context(), tenant.ID, "fake-cf-token")
-	if err == nil {
-		t.Fatal("expected error when Central TMS not configured, got nil")
-	}
-	if !errorContains(err, "central TMS") {
-		t.Errorf("error = %q, want it to mention Central TMS", err)
+	// The call may fail (goroutine tries to build inspector with bad token)
+	// or succeed (goroutine launched). Either way, verify the tenant entered bootstrapping.
+	_ = err
+
+	var got db.CpiTenant
+	database.First(&got, tenant.ID)
+	// State should be bootstrapping (goroutine launched) or bootstrap_failed (goroutine already failed).
+	if got.TmsExtensionState != lifecycle.TmsBootstrapping && got.TmsExtensionState != lifecycle.TmsBootstrapFailed {
+		t.Errorf("TmsExtensionState = %q, want bootstrapping or bootstrap_failed", got.TmsExtensionState)
 	}
 }
 
@@ -525,5 +532,95 @@ func TestResetBootstrap_FromNotReady(t *testing.T) {
 	}
 	if got.TmsSourceNodeName != "keep-this" {
 		t.Errorf("TmsSourceNodeName = %q, want %q (BASE reset must not touch TMS)", got.TmsSourceNodeName, "keep-this")
+	}
+}
+
+// ── T3: ResetBootstrap from ready state ─────────────────────────────────────
+
+func TestResetBootstrap_FromReady(t *testing.T) {
+	svc, database := newTestSvc(t)
+
+	tenant := db.CpiTenant{
+		Name:                  "base-reset-ready",
+		CfApiEndpoint:         "https://api.cf.reset6.example.com",
+		CfOrg:                 "org-reset6",
+		CfSpace:               "space-reset6",
+		LifecycleState:        lifecycle.TenantReady,
+		PirApiStatus:          lifecycle.PrereqReady,
+		PirApiUrl:             "https://pir.example.com",
+		PirApiDestinationName: "PIR_DEST",
+	}
+	database.Create(&tenant)
+
+	if err := svc.ResetBootstrap(tenant.ID); err != nil {
+		t.Fatalf("ResetBootstrap from ready: %v", err)
+	}
+
+	var got db.CpiTenant
+	database.First(&got, tenant.ID)
+
+	if got.LifecycleState != lifecycle.TenantConfigured {
+		t.Errorf("LifecycleState = %q, want %q", got.LifecycleState, lifecycle.TenantConfigured)
+	}
+	if got.PirApiStatus != lifecycle.PrereqMissing {
+		t.Errorf("PirApiStatus = %q, want %q", got.PirApiStatus, lifecycle.PrereqMissing)
+	}
+}
+
+// ── T4: ResetTmsExtension from bootstrapped state ───────────────────────────
+
+func TestResetTmsExtension_FromBootstrapped(t *testing.T) {
+	svc, database := newTestSvc(t)
+
+	tenant := db.CpiTenant{
+		Name:                          "tms-reset-bootstrapped",
+		CfApiEndpoint:                 "https://api.cf.reset7.example.com",
+		CfOrg:                         "org-reset7",
+		LifecycleState:                lifecycle.TenantReady,
+		TmsExtensionState:             lifecycle.TmsBootstrapped,
+		TmsSourceNodeName:             "some-node",
+		TmsSourceNodeID:               99,
+		CasApplicationStatus:          lifecycle.PrereqReady,
+		TransportManagementDestStatus: lifecycle.PrereqReady,
+	}
+	database.Create(&tenant)
+
+	if err := svc.ResetTmsExtension(tenant.ID); err != nil {
+		t.Fatalf("ResetTmsExtension from bootstrapped: %v", err)
+	}
+
+	var got db.CpiTenant
+	database.First(&got, tenant.ID)
+
+	if got.TmsExtensionState != lifecycle.TmsNotStarted {
+		t.Errorf("TmsExtensionState = %q, want %q", got.TmsExtensionState, lifecycle.TmsNotStarted)
+	}
+	if got.TmsSourceNodeID != 0 {
+		t.Errorf("TmsSourceNodeID = %d, want 0", got.TmsSourceNodeID)
+	}
+}
+
+// ── T5: TMS Apply rejected when BASE is readying ────────────────────────────
+
+func TestApplyTmsExtension_RejectsWhenBaseReadying(t *testing.T) {
+	svc, database := newTestSvc(t)
+
+	tenant := db.CpiTenant{
+		Name:              "tms-base-readying",
+		CfApiEndpoint:     "https://api.cf.t5.example.com",
+		CfOrg:             "org-t5",
+		CfSpace:           "space-t5",
+		LifecycleState:    lifecycle.TenantReadying,
+		TmsExtensionState: lifecycle.TmsNodeConfirmed,
+	}
+	database.Create(&tenant)
+	database.Create(&db.CentralTmsContext{TmsApiDestinationName: "tms-dest"})
+
+	_, err := svc.ApplyTmsExtension(t.Context(), tenant.ID, "fake-cf-token")
+	if err == nil {
+		t.Fatal("expected error when BASE is readying, got nil")
+	}
+	if !errorContains(err, "not onboarded") && !errorContains(err, "bootstrap is running") {
+		t.Errorf("error = %q, want it to mention not onboarded or bootstrap running", err)
 	}
 }

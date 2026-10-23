@@ -166,22 +166,7 @@ func (h *Handler) ConfirmTmsExtensionRoutes(ctx *gin.Context) {
 		return
 	}
 
-	var tenant db.CpiTenant
-	if err := h.db.First(&tenant, tenantID).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			Fail(ctx, 404, "tenant not found")
-		} else {
-			Fail(ctx, 500, err.Error())
-		}
-		return
-	}
-
-	if tenant.TmsExtensionState != lifecycle.TmsNodePending {
-		Fail(ctx, 409, "confirm requires TmsExtensionState=node_pending")
-		return
-	}
-
-	result, err := h.svc.ConfirmTmsRoutesAndTransition(ctx.Request.Context(), tenantID, tenant.TmsSourceNodeID)
+	result, err := h.svc.ConfirmTmsRoutesAndTransition(ctx.Request.Context(), tenantID)
 	if err != nil {
 		if errors.Is(err, service.ErrRoutesNotConfigured) {
 			ctx.JSON(400, gin.H{

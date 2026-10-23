@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cf"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/lifecycle"
 
 	"gorm.io/gorm"
@@ -48,21 +49,15 @@ func (s *Service) ApplyTmsExtension(ctx context.Context, tenantID uint, cfToken 
 		return 0, err
 	}
 
-	// Preconditions: tenant must be onboarded and Central TMS must be configured.
-	if !tenant.IsOnboarded() {
-		return 0, fmt.Errorf("tms apply: tenant %d is not onboarded (LifecycleState=%s)", tenantID, tenant.LifecycleState)
-	}
-	tmsCtx, err := loadTmsContext(s.DB)
-	if err != nil {
-		return 0, fmt.Errorf("tms apply: %w", err)
-	}
-
 	jobType := lifecycle.JobTypeApply
 	if tenant.TmsExtensionState == lifecycle.TmsBootstrapFailed {
 		jobType = lifecycle.JobTypeRetry
 	}
 
-	// Atomically claim bootstrapping state + guard against concurrent BASE job.
+	// Atomically claim bootstrapping state.
+	// The SELECT FOR UPDATE ensures that IsOnboarded and the TMS state transition
+	// are checked against a consistent snapshot — no concurrent ResetBootstrap or
+	// ApplyBootstrap can modify the tenant between the check and the transition.
 	if err := s.DB.Transaction(func(tx *gorm.DB) error {
 		var t db.CpiTenant
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -70,8 +65,11 @@ func (s *Service) ApplyTmsExtension(ctx context.Context, tenantID uint, cfToken 
 			First(&t, tenantID).Error; err != nil {
 			return err
 		}
-		if t.LifecycleState == lifecycle.TenantReadying {
-			return fmt.Errorf("tenant bootstrap is running; only one bootstrap job at a time")
+		// Precondition: tenant must be onboarded.
+		// Covers: draft, configured, not_ready (not yet onboarded),
+		// and readying (BASE bootstrap running — mutual exclusion).
+		if !t.IsOnboarded() {
+			return fmt.Errorf("tenant %d is not onboarded (LifecycleState=%s)", tenantID, t.LifecycleState)
 		}
 		// Reset TMS extension detail statuses.
 		if err := tx.Model(&db.CpiTenant{}).Where("id = ?", tenantID).Updates(map[string]any{
@@ -124,7 +122,7 @@ func (s *Service) ApplyTmsExtension(ctx context.Context, tenantID uint, cfToken 
 		return 0, fmt.Errorf("tms apply: create job: %w", err)
 	}
 
-	go s.runTmsExtensionBootstrap(tenant, job.ID, cfToken, result, tmsCtx)
+	go s.runTmsExtensionBootstrap(tenant, job.ID, cfToken, result)
 	return job.ID, nil
 }
 
@@ -233,7 +231,7 @@ func (s *Service) inspectTmsExtension(ctx context.Context, inspector *TenantInsp
 }
 
 // runTmsExtensionBootstrap is the async goroutine for TMS extension bootstrap.
-func (s *Service) runTmsExtensionBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string, result *InspectionResult, tmsCtx *db.CentralTmsContext) {
+func (s *Service) runTmsExtensionBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string, result *InspectionResult) {
 	ctx := context.Background()
 
 	fail := func(failureType lifecycle.BootstrapFailureType, step, reason string) {
@@ -351,8 +349,17 @@ func (s *Service) runTmsExtensionBootstrap(tenant *db.CpiTenant, jobID uint, cfT
 	}
 
 	// ── CHECK_DESTINATIONS (subscriber-side) ─────────────────────────────────
-
+	// Load Central TMS context NOW — state is bootstrapping, so UpsertCentralTmsContext
+	// is blocked (409).  Reading here instead of ApplyTmsExtension eliminates the
+	// race window where Central TMS could change between the read and the transition
+	// to bootstrapping.
 	setStep(StepCheckDestinations)
+	tmsCtx, err := loadTmsContext(s.DB)
+	if err != nil {
+		fail(lifecycle.FailureRemoteSystemError, StepCheckDestinations,
+			fmt.Sprintf("load Central TMS context: %s", err.Error()))
+		return
+	}
 	destActs, err := bootstrapper.ensureSubscriberDestinations(ctx, tenant, result, tmsCtx)
 	if err != nil {
 		fail(lifecycle.FailureRemoteSystemError, StepCheckDestinations, err.Error())
@@ -429,4 +436,146 @@ func (b *bootstrapApplier) ensureCasProviderDestination(ctx context.Context, ten
 	}
 
 	return []credentialAction{{DestinationName: casDest.Name, ActionType: "upserted"}}, nil
+}
+// ensureSubscriberDestinations writes all subscriber-side destinations for one
+// bootstrap run into the subscriber's own Destination Service instance
+// (result.DestinationServiceInstanceGUID).
+//
+// A temporary service key is created on that instance to authenticate against
+// the Destination Service REST API, then deleted via defer.
+//
+// Destinations written into the subscriber's Destination Service:
+//
+//   - CloudIntegration       (PIR api credentials)
+//   - ContentAssemblyService (CAS standard credentials)
+//   - TransportManagementService (TMS credentials copied from provider-side TmsApiDestinationName)
+//
+// Provider-side destinations (CPIDELIVERY_PIR_{id}, CPIDELIVERY_CAS_{id}) are
+// NOT written here — see ensureProviderDestinations.
+func (b *bootstrapApplier) ensureSubscriberDestinations(ctx context.Context, tenant *db.CpiTenant, result *InspectionResult, tmsCtx *db.CentralTmsContext) ([]credentialAction, error) {
+	if result.DestinationServiceInstanceGUID == "" {
+		return nil, fmt.Errorf("destination service instance GUID is empty")
+	}
+
+	// ── Subscriber-side: create a temporary key on the subscriber's Destination
+	// Service instance to authenticate against the Destination Service REST API.
+	// The key is deleted immediately after this function returns.
+	tempKeyName := fmt.Sprintf("cpidelivery-bootstrap-%d", time.Now().Unix())
+	keyGUID, err := b.cfClient.CreateServiceKey(ctx, result.DestinationServiceInstanceGUID, tempKeyName)
+	if err != nil {
+		return nil, fmt.Errorf("create temp service key for destination bootstrap: %w", err)
+	}
+	defer func() { _ = b.cfClient.DeleteServiceKey(ctx, keyGUID) }()
+
+	creds, err := b.cfClient.GetServiceKeyCredentials(ctx, keyGUID)
+	if err != nil {
+		return nil, fmt.Errorf("get temp service key credentials: %w", err)
+	}
+
+	destClient, err := cf.NewDestinationServiceClient(ctx, creds)
+	if err != nil {
+		return nil, fmt.Errorf("build destination service client: %w", err)
+	}
+
+	var actions []credentialAction
+
+	// Build subscriber-side destination payloads from service key credentials.
+	destinations, err := b.buildSubscriberDestinations(ctx, result, tenant, tmsCtx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Upsert each subscriber-side destination into the subscriber's Destination Service.
+	for _, dest := range destinations {
+		existing, err := destClient.GetDestination(ctx, dest.Name)
+		if err != nil {
+			return nil, fmt.Errorf("check destination %q: %w", dest.Name, err)
+		}
+		actionType := "created"
+		if existing != nil {
+			actionType = "updated"
+		}
+		if err := destClient.UpsertDestination(ctx, dest); err != nil {
+			return nil, fmt.Errorf("upsert destination %q: %w", dest.Name, err)
+		}
+		actions = append(actions, credentialAction{DestinationName: dest.Name, ActionType: actionType})
+	}
+
+	return actions, nil
+}
+
+// buildSubscriberDestinations constructs the cf.Destination payloads to be
+// written into the subscriber's own Destination Service.
+//
+// All three destinations are mandatory for TMS extension bootstrap.
+// Prerequisites are guaranteed by upstream ensure steps and precondition checks:
+//   - PirApiInstanceGUID + key: BASE bootstrap (IsOnboarded) + inspect discovery
+//   - CasStandardInstanceGUID + key: ensureInstanceAndKey(CAS standard) in goroutine
+//   - tmsCtx: loaded inside goroutine under bootstrapping mutual exclusion
+//
+// This function validates all prerequisites and returns an error if any are
+// missing, serving as a final safety net against upstream regressions.
+func (b *bootstrapApplier) buildSubscriberDestinations(ctx context.Context, result *InspectionResult, tenant *db.CpiTenant, tmsCtx *db.CentralTmsContext) ([]cf.Destination, error) {
+	var dests []cf.Destination
+
+	// CloudIntegration — PIR api service key credentials.
+	if result.PirApiInstanceGUID == "" {
+		return nil, fmt.Errorf("PIR API instance GUID is empty — BASE bootstrap may be incomplete")
+	}
+	pirKeyGUID, ok := result.ServiceKeyGUIDs[result.PirApiInstanceGUID]
+	if !ok {
+		return nil, fmt.Errorf("no service key GUID for PIR api instance %q", result.PirApiInstanceGUID)
+	}
+	pirCreds, err := b.cfClient.GetServiceKeyCredentials(ctx, pirKeyGUID)
+	if err != nil {
+		return nil, fmt.Errorf("get PIR api key credentials: %w", err)
+	}
+	ciDest, err := buildOAuthDestination("CloudIntegration", transportModuleURL, tenant.ID, pirCreds)
+	if err != nil {
+		return nil, err
+	}
+	dests = append(dests, ciDest)
+
+	// ContentAssemblyService — CAS standard service key credentials.
+	if result.CasStandardInstanceGUID == "" {
+		return nil, fmt.Errorf("CAS standard instance GUID is empty — ensureInstanceAndKey should have created it")
+	}
+	casKeyGUID, ok := result.ServiceKeyGUIDs[result.CasStandardInstanceGUID]
+	if !ok {
+		return nil, fmt.Errorf("no service key GUID for CAS standard instance %q", result.CasStandardInstanceGUID)
+	}
+	casCreds, err := b.cfClient.GetServiceKeyCredentials(ctx, casKeyGUID)
+	if err != nil {
+		return nil, fmt.Errorf("get CAS standard key credentials: %w", err)
+	}
+	casDest, err := buildOAuthDestination("ContentAssemblyService", nil, tenant.ID, casCreds)
+	if err != nil {
+		return nil, err
+	}
+	dests = append(dests, casDest)
+
+	// TransportManagementService — TMS OAuth credentials copied from provider-side.
+	if tmsCtx == nil || tmsCtx.TmsApiDestinationName == "" {
+		return nil, fmt.Errorf("Central TMS context not configured — cannot create TransportManagementService destination")
+	}
+	if b.providerDest == nil {
+		return nil, fmt.Errorf("provider Destination Service client is nil — cannot resolve TMS credentials")
+	}
+	if tenant.TmsSourceNodeName == "" {
+		return nil, fmt.Errorf("TmsSourceNodeName is empty — node selection is incomplete")
+	}
+	tmsDest, err := b.providerDest.GetDestination(ctx, tmsCtx.TmsApiDestinationName)
+	if err != nil {
+		return nil, fmt.Errorf("get TMS API destination %q from provider: %w", tmsCtx.TmsApiDestinationName, err)
+	}
+	if tmsDest == nil {
+		return nil, fmt.Errorf("TMS API destination %q not found in provider Destination Service", tmsCtx.TmsApiDestinationName)
+	}
+	tmsSubDest := *tmsDest
+	tmsSubDest.Name = "TransportManagementService"
+	tmsSubDest.Description = fmt.Sprintf("DO NOT MODIFY. TransportManagementService for tenant %d, sourceSystemId=%s. Created by cpi-delivery bootstrap.", tenant.ID, tenant.TmsSourceNodeName)
+	tmsSubDest.SourceSystemId = tenant.TmsSourceNodeName
+	dests = append(dests, tmsSubDest)
+
+	return dests, nil
 }

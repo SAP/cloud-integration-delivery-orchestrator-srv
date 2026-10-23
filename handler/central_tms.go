@@ -3,6 +3,7 @@ package handler
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -81,37 +82,46 @@ func (h *Handler) UpsertCentralTmsContext(ctx *gin.Context) {
 
 	var affectedCount int64
 	if destNameChanged {
-		// Reject if any tenant is currently bootstrapping TMS extension.
-		var bootstrappingCount int64
-		h.db.Model(&db.CpiTenant{}).
-			Where("tms_extension_state = ?", lifecycle.TmsBootstrapping).
-			Count(&bootstrappingCount)
-		if bootstrappingCount > 0 {
-			FailCode(ctx, 409, "TMS_BOOTSTRAP_IN_PROGRESS",
-				fmt.Sprintf("%d tenant(s) have TMS extension bootstrap running; wait for completion before changing Central TMS destination", bootstrappingCount))
+		// Rule 4 requires atomicity: reject if bootstrapping, invalidate bootstrapped, save context.
+		if err := h.db.Transaction(func(tx *gorm.DB) error {
+			// Reject if any tenant is currently bootstrapping TMS extension.
+			var bootstrappingCount int64
+			tx.Model(&db.CpiTenant{}).
+				Where("tms_extension_state = ?", lifecycle.TmsBootstrapping).
+				Count(&bootstrappingCount)
+			if bootstrappingCount > 0 {
+				return fmt.Errorf("TMS_BOOTSTRAP_IN_PROGRESS: %d tenant(s) have TMS extension bootstrap running; wait for completion before changing Central TMS destination", bootstrappingCount)
+			}
+
+			// Invalidate all bootstrapped tenants.
+			// Also reset TransportManagementDestStatus because the subscriber destination
+			// holds credentials derived from the old Central TMS destination.
+			result := tx.Model(&db.CpiTenant{}).
+				Where("tms_extension_state = ?", lifecycle.TmsBootstrapped).
+				Updates(map[string]any{
+					"tms_extension_state":              lifecycle.TmsBootstrapFailed,
+					"tms_blocking_reason":              lifecycle.TmsReasonCentralTmsChanged,
+					"transport_management_dest_status": lifecycle.PrereqMissing,
+				})
+			if result.Error != nil {
+				return fmt.Errorf("rule 4: invalidate tenants: %w", result.Error)
+			}
+			affectedCount = result.RowsAffected
+
+			return tx.Save(&input).Error
+		}); err != nil {
+			if strings.Contains(err.Error(), "TMS_BOOTSTRAP_IN_PROGRESS") {
+				FailCode(ctx, 409, "TMS_BOOTSTRAP_IN_PROGRESS", err.Error())
+			} else {
+				Fail(ctx, 500, err.Error())
+			}
 			return
 		}
-
-		// Invalidate all bootstrapped tenants.
-		// Also reset TransportManagementDestStatus because the subscriber destination
-		// holds credentials derived from the old Central TMS destination.
-		result := h.db.Model(&db.CpiTenant{}).
-			Where("tms_extension_state = ?", lifecycle.TmsBootstrapped).
-			Updates(map[string]any{
-				"tms_extension_state":              lifecycle.TmsBootstrapFailed,
-				"tms_blocking_reason":              lifecycle.TmsReasonCentralTmsChanged,
-				"transport_management_dest_status": lifecycle.PrereqMissing,
-			})
-		if result.Error != nil {
-			Fail(ctx, 500, fmt.Sprintf("rule 4: invalidate tenants: %v", result.Error))
+	} else {
+		if err := h.db.Save(&input).Error; err != nil {
+			Fail(ctx, 500, err.Error())
 			return
 		}
-		affectedCount = result.RowsAffected
-	}
-
-	if err := h.db.Save(&input).Error; err != nil {
-		Fail(ctx, 500, err.Error())
-		return
 	}
 	OK(ctx, upsertCentralTmsResponse{
 		CentralTmsContext: input,

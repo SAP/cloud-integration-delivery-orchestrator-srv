@@ -100,11 +100,7 @@ var allowedTmsTransitions = map[lifecycle.TmsExtensionState]map[TmsEvent]lifecyc
 // TransportManagement destination as stale and sets TMS_NODE_CHANGED reason.
 func (s *Service) SelectTmsNode(ctx context.Context, tenantID uint, nodeID uint, nodeName string) error {
 	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var tenant db.CpiTenant
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			First(&tenant, tenantID).Error; err != nil {
-			return err
-		}
+		// transitionTmsWithTx acquires SELECT FOR UPDATE and validates the state.
 		if err := s.transitionTmsWithTx(tx, tenantID, TmsEventNodeSelected); err != nil {
 			return err
 		}
@@ -118,13 +114,23 @@ func (s *Service) SelectTmsNode(ctx context.Context, tenantID uint, nodeID uint,
 
 // ConfirmTmsRoutesAndTransition fetches routes from TMS, then atomically writes
 // CentralTmsContextID and transitions to node_confirmed in a single transaction.
-func (s *Service) ConfirmTmsRoutesAndTransition(ctx context.Context, tenantID uint, nodeID uint) (*ConfirmTmsRoutesResult, error) {
+// The tenant's TmsSourceNodeID is read inside the function to avoid stale snapshots.
+func (s *Service) ConfirmTmsRoutesAndTransition(ctx context.Context, tenantID uint) (*ConfirmTmsRoutesResult, error) {
+	// Read tenant's node ID.
+	var tenant db.CpiTenant
+	if err := s.DB.Select("id", "tms_source_node_id").First(&tenant, tenantID).Error; err != nil {
+		return nil, fmt.Errorf("ConfirmTmsRoutesAndTransition: load tenant: %w", err)
+	}
+	if tenant.TmsSourceNodeID == 0 {
+		return nil, ErrNodeNotRegistered
+	}
+
 	// External TMS API call — outside the DB transaction.
 	tmsCtx, err := loadTmsContext(s.DB)
 	if err != nil {
 		return nil, fmt.Errorf("ConfirmTmsRoutesAndTransition: %w", err)
 	}
-	routes, err := s.fetchRoutesForNodeID(ctx, tmsCtx, nodeID)
+	routes, err := s.fetchRoutesForNodeID(ctx, tmsCtx, tenant.TmsSourceNodeID)
 	if err != nil {
 		return nil, fmt.Errorf("ConfirmTmsRoutesAndTransition: fetch routes: %w", err)
 	}

@@ -34,6 +34,11 @@ func TestTransitionLifecycle_ValidTransitions(t *testing.T) {
 		// READY edges
 		{"ready→readying via bootstrap_started", lifecycle.TenantReady, EventBootstrapStarted, lifecycle.TenantReadying},
 		{"ready→configured via cf_identity_configured", lifecycle.TenantReady, EventCfIdentityConfigured, lifecycle.TenantConfigured},
+		{"ready→configured via reset", lifecycle.TenantReady, EventReset, lifecycle.TenantConfigured},
+
+		// RESET edges (configured is idempotent, not_ready resets to configured)
+		{"configured→configured via reset", lifecycle.TenantConfigured, EventReset, lifecycle.TenantConfigured},
+		{"not_ready→configured via reset", lifecycle.TenantNotReady, EventReset, lifecycle.TenantConfigured},
 	}
 
 	svc := newTestService(nil)
@@ -96,6 +101,10 @@ func TestTransitionLifecycle_InvalidTransitions(t *testing.T) {
 		// READY cannot receive bootstrap outcomes (but CAN receive cf_identity_configured to re-configure)
 		{"ready rejects bootstrap_finished", lifecycle.TenantReady, EventBootstrapFinished},
 		{"ready rejects bootstrap_failed", lifecycle.TenantReady, EventBootstrapFailed},
+
+		// DRAFT and READYING cannot be reset
+		{"draft rejects reset", lifecycle.TenantDraft, EventReset},
+		{"readying rejects reset", lifecycle.TenantReadying, EventReset},
 	}
 
 	svc := newTestService(nil)
