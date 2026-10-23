@@ -254,7 +254,10 @@ func (s *Service) runTmsExtensionBootstrap(tenant *db.CpiTenant, jobID uint, cfT
 		}); err != nil {
 			s.L(ctx).Errorw("tms bootstrap: failed to record failure",
 				"component", "tms-bootstrap", "tenant_id", tenant.ID, "jobID", jobID, "error", err)
+			return // tx failed — don't write blocking_reason on a tenant still stuck in bootstrapping
 		}
+		// blocking_reason is display-only; persist best-effort outside the transaction
+		// so its failure cannot roll back the critical state writes above.
 		_ = s.DB.Model(&db.CpiTenant{}).Where("id = ?", tenant.ID).
 			Update("tms_blocking_reason", reason)
 	}

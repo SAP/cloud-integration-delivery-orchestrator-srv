@@ -4,9 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/lifecycle"
@@ -167,6 +169,7 @@ func (h *Handler) GetCpiTenant(ctx *gin.Context) {
 
 // DeleteCpiTenant soft-deletes a tenant by ID.
 // Rejects deletion if a bootstrap job is currently running.
+// The check and delete are atomic (single transaction with SELECT FOR UPDATE).
 func (h *Handler) DeleteCpiTenant(ctx *gin.Context) {
 	idStr := ctx.Param("id")
 	id, err := strconv.Atoi(idStr)
@@ -175,22 +178,29 @@ func (h *Handler) DeleteCpiTenant(ctx *gin.Context) {
 		return
 	}
 
-	var tenant db.CpiTenant
-	if err := h.db.Select("id", "lifecycle_state", "tms_extension_state").First(&tenant, id).Error; err != nil {
-		Fail(ctx, 404, "tenant not found")
-		return
-	}
-	if tenant.LifecycleState == lifecycle.TenantReadying {
-		Fail(ctx, 409, "cannot delete tenant while bootstrap is running")
-		return
-	}
-	if tenant.TmsExtensionState == lifecycle.TmsBootstrapping {
-		Fail(ctx, 409, "cannot delete tenant while TMS extension bootstrap is running")
-		return
-	}
-
-	if err := h.db.Delete(&db.CpiTenant{}, id).Error; err != nil {
-		Fail(ctx, 500, err.Error())
+	if err := h.db.Transaction(func(tx *gorm.DB) error {
+		var tenant db.CpiTenant
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Select("id", "lifecycle_state", "tms_extension_state").
+			First(&tenant, id).Error; err != nil {
+			return err
+		}
+		if tenant.LifecycleState == lifecycle.TenantReadying {
+			return fmt.Errorf("CONFLICT:cannot delete tenant while bootstrap is running")
+		}
+		if tenant.TmsExtensionState == lifecycle.TmsBootstrapping {
+			return fmt.Errorf("CONFLICT:cannot delete tenant while TMS extension bootstrap is running")
+		}
+		return tx.Delete(&db.CpiTenant{}, id).Error
+	}); err != nil {
+		msg := err.Error()
+		if strings.HasPrefix(msg, "CONFLICT:") {
+			Fail(ctx, 409, strings.TrimPrefix(msg, "CONFLICT:"))
+		} else if errors.Is(err, gorm.ErrRecordNotFound) {
+			Fail(ctx, 404, "tenant not found")
+		} else {
+			Fail(ctx, 500, msg)
+		}
 		return
 	}
 
