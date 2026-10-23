@@ -51,9 +51,11 @@ const (
 	// Valid from: readying.
 	TmsEventApplyFailed TmsEvent = "tms_apply_failed"
 
-	// TmsEventInvalidated — TMS extension was invalidated (rule 3: PIR key
-	// changed; rule 4: Central TMS changed).
-	// Valid from: ready.
+	// TmsEventInvalidated — TMS extension was invalidated by rule 3 (PIR key
+	// changed during BASE bootstrap re-apply).
+	// Valid from: bootstrapped.
+	// Note: rule 4 (Central TMS changed) performs a bulk UPDATE directly and does
+	// not use this event — see handler/central_tms.go UpsertCentralTmsContext.
 	TmsEventInvalidated TmsEvent = "tms_invalidated"
 
 	// TmsEventReset — TMS extension reset to not_enabled (rule 1: CF identity
@@ -117,11 +119,12 @@ func (s *Service) SelectTmsNode(ctx context.Context, tenantID uint, nodeID uint,
 // The tenant's TmsSourceNodeID is read inside the function to avoid stale snapshots.
 func (s *Service) ConfirmTmsRoutesAndTransition(ctx context.Context, tenantID uint) (*ConfirmTmsRoutesResult, error) {
 	// Read tenant's node ID.
-	var tenant db.CpiTenant
-	if err := s.DB.Select("id", "tms_source_node_id").First(&tenant, tenantID).Error; err != nil {
-		return nil, fmt.Errorf("ConfirmTmsRoutesAndTransition: load tenant: %w", err)
+	var nodeID uint
+	if err := s.DB.Model(&db.CpiTenant{}).Select("tms_source_node_id").
+		Where("id = ?", tenantID).Scan(&nodeID).Error; err != nil {
+		return nil, fmt.Errorf("ConfirmTmsRoutesAndTransition: load node ID: %w", err)
 	}
-	if tenant.TmsSourceNodeID == 0 {
+	if nodeID == 0 {
 		return nil, ErrNodeNotRegistered
 	}
 
@@ -130,7 +133,7 @@ func (s *Service) ConfirmTmsRoutesAndTransition(ctx context.Context, tenantID ui
 	if err != nil {
 		return nil, fmt.Errorf("ConfirmTmsRoutesAndTransition: %w", err)
 	}
-	routes, err := s.fetchRoutesForNodeID(ctx, tmsCtx, tenant.TmsSourceNodeID)
+	routes, err := s.fetchRoutesForNodeID(ctx, tmsCtx, nodeID)
 	if err != nil {
 		return nil, fmt.Errorf("ConfirmTmsRoutesAndTransition: fetch routes: %w", err)
 	}
@@ -138,13 +141,25 @@ func (s *Service) ConfirmTmsRoutesAndTransition(ctx context.Context, tenantID ui
 		return nil, ErrRoutesNotConfigured
 	}
 
-	// Atomic DB write: CentralTmsContextID + state transition.
+	// Atomic DB write: verify nodeID unchanged (TOCTOU guard), then transition
+	// and write CentralTmsContextID.
 	if err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&db.CpiTenant{}).Where("id = ?", tenantID).
-			Update("central_tms_context_id", tmsCtx.ID).Error; err != nil {
+		// Acquire row lock and verify nodeID has not been changed by a concurrent SelectTmsNode.
+		var currentNodeID uint
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Model(&db.CpiTenant{}).Select("tms_source_node_id").
+			Where("id = ?", tenantID).Scan(&currentNodeID).Error; err != nil {
+			return fmt.Errorf("lock and read node ID: %w", err)
+		}
+		if currentNodeID != nodeID {
+			return fmt.Errorf("TmsSourceNodeID changed from %d to %d during route confirmation — retry", nodeID, currentNodeID)
+		}
+		// Precondition verified — now transition and write.
+		if err := s.transitionTmsWithTx(tx, tenantID, TmsEventRouteConfirmed); err != nil {
 			return err
 		}
-		return s.transitionTmsWithTx(tx, tenantID, TmsEventRouteConfirmed)
+		return tx.Model(&db.CpiTenant{}).Where("id = ?", tenantID).
+			Update("central_tms_context_id", tmsCtx.ID).Error
 	}); err != nil {
 		return nil, fmt.Errorf("ConfirmTmsRoutesAndTransition: %w", err)
 	}
@@ -159,14 +174,21 @@ func (s *Service) TransitionTms(tenantID uint, event TmsEvent) error {
 	})
 }
 
-// transitionTmsWithTx validates and writes a TmsState transition.
+// transitionTmsWithTx validates and writes a TmsExtensionState transition.
 //
 // It locks the tenant row (SELECT FOR UPDATE), reads both lifecycle_state
-// and tms_state, verifies the event is valid from the current tms_state,
-// and writes the new tms_state.
+// and tms_extension_state, verifies the event is valid from the current state,
+// and writes the new tms_extension_state.
 //
 // Side effects (field resets, node writes, job creation) are the caller's
 // responsibility — this function only guards and writes the state.
+//
+// Bypass exceptions: Rule 1 (SaveCfIdentity) and Rule 4 (UpsertCentralTmsContext)
+// write tms_extension_state directly without calling this function.
+// Rule 1 needs to atomically reset all TMS fields in one UPDATE within its own tx.
+// Rule 4 performs a bulk UPDATE across all bootstrapped tenants.
+// Both paths validate state constraints (Rule 1: != bootstrapping; Rule 4: WHERE bootstrapped)
+// before writing.
 func (s *Service) transitionTmsWithTx(tx *gorm.DB, tenantID uint, event TmsEvent) error {
 	var tenant db.CpiTenant
 	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).

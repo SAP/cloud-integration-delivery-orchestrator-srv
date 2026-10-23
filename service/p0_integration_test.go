@@ -7,10 +7,13 @@ package service
 // handler layer — those are in handler/p0_integration_test.go.
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/lifecycle"
+
+	"gorm.io/gorm"
 )
 
 // ── §6.1: Node switch from bootstrapped → node_pending ─────────────────────
@@ -622,5 +625,57 @@ func TestApplyTmsExtension_RejectsWhenBaseReadying(t *testing.T) {
 	}
 	if !errorContains(err, "not onboarded") && !errorContains(err, "bootstrap is running") {
 		t.Errorf("error = %q, want it to mention not onboarded or bootstrap running", err)
+	}
+}
+
+// ── TOCTOU: ConfirmTmsRoutesAndTransition rejects when nodeID changed ───────
+
+func TestConfirmTmsRoutes_RejectsWhenNodeIDChanged(t *testing.T) {
+	svc, database := newTestSvc(t)
+
+	// Tenant in node_pending with nodeID=20 — simulates the state AFTER
+	// a concurrent SelectTmsNode changed the node from 10 to 20.
+	tenant := db.CpiTenant{
+		Name:              "toctou-confirm",
+		CfApiEndpoint:     "https://api.cf.toctou.example.com",
+		CfOrg:             "org-toctou",
+		LifecycleState:    lifecycle.TenantReady,
+		TmsExtensionState: lifecycle.TmsNodePending,
+		TmsSourceNodeID:   20,
+		TmsSourceNodeName: "new-node",
+	}
+	database.Create(&tenant)
+
+	// Simulate: the confirm transaction runs with staleNodeID=10
+	// (the value read by ConfirmTmsRoutesAndTransition before the external TMS call).
+	staleNodeID := uint(10)
+
+	err := svc.DB.Transaction(func(tx *gorm.DB) error {
+		var currentNodeID uint
+		if err := tx.Model(&db.CpiTenant{}).Select("tms_source_node_id").
+			Where("id = ?", tenant.ID).Scan(&currentNodeID).Error; err != nil {
+			return err
+		}
+		if currentNodeID != staleNodeID {
+			return fmt.Errorf("TmsSourceNodeID changed from %d to %d during route confirmation", staleNodeID, currentNodeID)
+		}
+		return nil
+	})
+
+	if err == nil {
+		t.Fatal("expected TOCTOU guard to detect nodeID mismatch, got nil")
+	}
+	if !errorContains(err, "TmsSourceNodeID changed") {
+		t.Errorf("error = %q, want it to mention TmsSourceNodeID changed", err)
+	}
+
+	// Verify tenant state is unchanged (transaction rolled back).
+	var got db.CpiTenant
+	database.First(&got, tenant.ID)
+	if got.TmsExtensionState != lifecycle.TmsNodePending {
+		t.Errorf("TmsExtensionState = %q, want %q (should be unchanged after rollback)", got.TmsExtensionState, lifecycle.TmsNodePending)
+	}
+	if got.TmsSourceNodeID != 20 {
+		t.Errorf("TmsSourceNodeID = %d, want 20 (should be unchanged)", got.TmsSourceNodeID)
 	}
 }
