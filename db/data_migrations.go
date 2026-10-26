@@ -53,14 +53,16 @@ func RunDataMigrations(db *gorm.DB) error {
 	return nil
 }
 
-// p0TmsStateBackfill populates TmsExtensionState from the legacy TmsNodeRegistrationStatus.
+// p0TmsStateBackfill populates TmsExtensionState from the legacy TmsNodeRegistrationStatus
+// and merges not_ready → configured.
 //
 // Mapping (from RFC 032 06-p0 section 5.8):
 //
 //	LifecycleState=ready AND TmsNodeRegistrationStatus=ready  → TmsBootstrapped
 //	TmsNodeRegistrationStatus=ready (lifecycle != ready)       → TmsNodeConfirmed
-//	TmsNodeRegistrationStatus=registering                      → TmsNodePending
+//	TmsNodeRegistrationStatus=registering                      → TmsNodeConfirmed
 //	everything else                                            → TmsNotStarted (column default)
+//	LifecycleState=not_ready                                   → configured
 func p0TmsStateBackfill(tx *gorm.DB) error {
 	// 1. ready lifecycle + ready node → bootstrapped
 	if err := tx.Model(&CpiTenant{}).
@@ -78,14 +80,36 @@ func p0TmsStateBackfill(tx *gorm.DB) error {
 		return fmt.Errorf("backfill TmsNodeConfirmed: %w", err)
 	}
 
-	// 3. node registering → node_pending
+	// 3. node registering → node_confirmed (node_pending removed)
 	if err := tx.Model(&CpiTenant{}).
 		Where("tms_node_registration_status = ?", lifecycle.PrereqRegistering).
-		Update("tms_extension_state", lifecycle.TmsNodePending).Error; err != nil {
-		return fmt.Errorf("backfill TmsNodePending: %w", err)
+		Update("tms_extension_state", lifecycle.TmsNodeConfirmed).Error; err != nil {
+		return fmt.Errorf("backfill TmsNodeConfirmed (registering): %w", err)
 	}
 
 	// 4. everything else: column default is 'not_started', no action needed.
+
+	// 5. Merge not_ready → configured (§2.1.1: state does not encode outcome).
+	if err := tx.Model(&CpiTenant{}).
+		Where("lifecycle_state = ?", "not_ready").
+		Update("lifecycle_state", lifecycle.TenantConfigured).Error; err != nil {
+		return fmt.Errorf("backfill merge not_ready: %w", err)
+	}
+
+	// 6. Merge bootstrap_failed → node_confirmed.
+	if err := tx.Model(&CpiTenant{}).
+		Where("tms_extension_state = ?", "bootstrap_failed").
+		Update("tms_extension_state", lifecycle.TmsNodeConfirmed).Error; err != nil {
+		return fmt.Errorf("backfill merge bootstrap_failed: %w", err)
+	}
+
+	// 7. Merge node_pending → node_confirmed.
+	if err := tx.Model(&CpiTenant{}).
+		Where("tms_extension_state = ?", "node_pending").
+		Update("tms_extension_state", lifecycle.TmsNodeConfirmed).Error; err != nil {
+		return fmt.Errorf("backfill merge node_pending: %w", err)
+	}
+
 	return nil
 }
 

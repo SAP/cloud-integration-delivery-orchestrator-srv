@@ -95,27 +95,28 @@ func TestRule4_UpsertCentralTms_InvalidatesBootstrappedTenants(t *testing.T) {
 		t.Errorf("TmsApiDestinationName = %q, want %q", resp.Data.TmsApiDestinationName, "new-tms-dest")
 	}
 
-	// Verify bootstrapped tenants are now bootstrap_failed.
+	// Verify bootstrapped tenants are now not_started (Rule 4: Central TMS change
+	// may point to different TMS system, old node IDs unsafe to keep).
 	var t1, t2, t3 db.CpiTenant
 	database.First(&t1, bootstrapped1.ID)
 	database.First(&t2, bootstrapped2.ID)
 	database.First(&t3, notStarted.ID)
 
-	if t1.TmsExtensionState != lifecycle.TmsBootstrapFailed {
-		t.Errorf("tenant1 TmsExtensionState = %q, want %q", t1.TmsExtensionState, lifecycle.TmsBootstrapFailed)
+	if t1.TmsExtensionState != lifecycle.TmsNotStarted {
+		t.Errorf("tenant1 TmsExtensionState = %q, want %q", t1.TmsExtensionState, lifecycle.TmsNotStarted)
 	}
 	if t1.TmsBlockingReason != lifecycle.TmsReasonCentralTmsChanged {
 		t.Errorf("tenant1 TmsBlockingReason = %q, want %q", t1.TmsBlockingReason, lifecycle.TmsReasonCentralTmsChanged)
 	}
-	if t2.TmsExtensionState != lifecycle.TmsBootstrapFailed {
-		t.Errorf("tenant2 TmsExtensionState = %q, want %q", t2.TmsExtensionState, lifecycle.TmsBootstrapFailed)
+	if t2.TmsExtensionState != lifecycle.TmsNotStarted {
+		t.Errorf("tenant2 TmsExtensionState = %q, want %q", t2.TmsExtensionState, lifecycle.TmsNotStarted)
 	}
-	// Rule 4 must also reset TransportManagementDestStatus to missing.
-	if t1.TransportManagementDestStatus != lifecycle.PrereqMissing {
-		t.Errorf("tenant1 TransportManagementDestStatus = %q, want %q", t1.TransportManagementDestStatus, lifecycle.PrereqMissing)
+	// Rule 4 must also clear node fields.
+	if t1.TmsSourceNodeName != "" {
+		t.Errorf("tenant1 TmsSourceNodeName = %q, want empty", t1.TmsSourceNodeName)
 	}
-	if t2.TransportManagementDestStatus != lifecycle.PrereqMissing {
-		t.Errorf("tenant2 TransportManagementDestStatus = %q, want %q", t2.TransportManagementDestStatus, lifecycle.PrereqMissing)
+	if t1.TmsSourceNodeID != 0 {
+		t.Errorf("tenant1 TmsSourceNodeID = %d, want 0", t1.TmsSourceNodeID)
 	}
 	// not_started tenant should be unaffected.
 	if t3.TmsExtensionState != lifecycle.TmsNotStarted {

@@ -101,11 +101,7 @@ const (
 	// changed via UpsertCpiTenant.
 	TenantConfigured TenantLifecycleState = "configured"
 
-	// TenantNotReady means the most recent inspection found at least one
-	// blocking prerequisite.  The BlockingReason field explains what.
-	TenantNotReady TenantLifecycleState = "not_ready"
-
-	// TenantReadying means a bootstrap apply or retry job is actively running.
+	// TenantReadying means a bootstrap apply job is actively running (mutual exclusion lock).
 	TenantReadying TenantLifecycleState = "readying"
 
 	// TenantReady means all base bootstrap prerequisites are satisfied: the PIR
@@ -121,10 +117,7 @@ const (
 type BootstrapJobType string
 
 const (
-	JobTypePreview  BootstrapJobType = "preview"  // read-only inspection; no side effects
-	JobTypeApply    BootstrapJobType = "apply"    // creates all missing prerequisites
-	JobTypeRetry    BootstrapJobType = "retry"    // resumes apply from the last failed step
-	JobTypeValidate BootstrapJobType = "validate" // re-checks readiness after manual operator action
+	JobTypeApply BootstrapJobType = "apply" // creates all missing prerequisites
 )
 
 // BootstrapJobState is the execution state of a TenantBootstrapJob.
@@ -139,17 +132,10 @@ const (
 	// before the job can continue via a validate or retry call.
 	JobWaitingUserAction BootstrapJobState = "waiting_user_action"
 
-	// JobPartiallyApplied means some steps succeeded before a failure occurred.
-	// Partial state may exist in the target subaccount; retry is safe because all
-	// steps are idempotent (create-or-reuse semantics).
-	JobPartiallyApplied BootstrapJobState = "partially_applied"
-
-	// JobFailed is a terminal failure state.  See FailureType and CurrentStep for
-	// diagnosis.
+	// JobFailed is a terminal failure state.
 	JobFailed BootstrapJobState = "failed"
 
 	// JobFinished means all required steps completed successfully.
-	// The owning CpiTenant.LifecycleState transitions to TenantReady.
 	JobFinished BootstrapJobState = "finished"
 )
 
@@ -198,22 +184,24 @@ const (
 type TmsExtensionState string
 
 const (
-	TmsNotStarted      TmsExtensionState = "not_started"      // TMS extension has not been started for this tenant
-	TmsNodePending     TmsExtensionState = "node_pending"     // operator selected a node, awaiting Route confirmation
-	TmsNodeConfirmed   TmsExtensionState = "node_confirmed"   // node + route confirmed, ready for Apply
-	TmsBootstrapping   TmsExtensionState = "bootstrapping"    // TMS extension bootstrap job is running
-	TmsBootstrapped    TmsExtensionState = "bootstrapped"     // all TMS prerequisites satisfied
-	TmsBootstrapFailed TmsExtensionState = "bootstrap_failed" // TMS extension bootstrap failed or invalidated
+	TmsNotStarted    TmsExtensionState = "not_started"    // TMS extension has not been started for this tenant
+	TmsNodeConfirmed TmsExtensionState = "node_confirmed" // node selected, ready for Apply
+	TmsBootstrapping TmsExtensionState = "bootstrapping"  // TMS extension bootstrap job is running (mutual exclusion lock)
+	TmsBootstrapped  TmsExtensionState = "bootstrapped"   // all TMS prerequisites satisfied
 )
 
 // TMS extension blocking/invalidation reason codes.
 const (
 	TmsReasonBaseNotReady            = "BASE_NOT_READY"
 	TmsReasonCentralTmsNotConfigured = "CENTRAL_TMS_NOT_CONFIGURED"
-	TmsReasonNodeNotRegistered       = "TMS_NODE_NOT_REGISTERED"
 	TmsReasonNodeChanged             = "TMS_NODE_CHANGED"
 	TmsReasonPirKeyChanged           = "PIR_KEY_CHANGED"
 	TmsReasonCentralTmsChanged       = "CENTRAL_TMS_CHANGED"
+)
+
+// Shared blocking/invalidation reason codes (used by both BASE and TMS layers).
+const (
+	ReasonBootstrapInterrupted = "BOOTSTRAP_INTERRUPTED"
 )
 
 // BootstrapLayer distinguishes tenant bootstrap (BASE) from TMS extension

@@ -196,7 +196,6 @@ func (h *Handler) SetupRoutes(v1 *gin.RouterGroup, v2 *gin.RouterGroup, requireS
 		tenantManage.GET("/cpiTenant/:id/tms-extension", h.GetTmsExtension)
 		tenantManage.POST("/cpiTenant/:id/tms-extension/node", h.SelectTmsNode)
 		tenantManage.GET("/cpiTenant/:id/tms-extension/routes", h.GetTmsExtensionRoutes)
-		tenantManage.POST("/cpiTenant/:id/tms-extension/confirm", h.ConfirmTmsExtensionRoutes)
 		tenantManage.POST("/cpiTenant/:id/tms-extension/preview", h.PreviewTmsExtension)
 		tenantManage.POST("/cpiTenant/:id/tms-extension/apply", h.ApplyTmsExtension)
 		tenantManage.POST("/cpiTenant/:id/tms-extension/reset", h.ResetTmsExtension)

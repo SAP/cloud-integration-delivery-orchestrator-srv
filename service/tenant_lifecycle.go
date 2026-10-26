@@ -39,8 +39,8 @@ const (
 
 	// EventReset is fired by ResetBootstrap to roll back to configured state,
 	// clearing all bootstrap product fields (PIR status/url/destination).
-	// Valid from: configured (idempotent), not_ready, ready.
-	// NOT valid from: draft (nothing to reset) or readying (job running).
+	// Valid from: configured (idempotent), ready.
+	// NOT valid from: draft (nothing to reset) or readying (job running — §2.1.1).
 	EventReset LifecycleEvent = "reset"
 )
 
@@ -64,18 +64,9 @@ var allowedTransitions = map[lifecycle.TenantLifecycleState]map[LifecycleEvent]l
 		// Reset: idempotent (already configured).
 		EventReset: lifecycle.TenantConfigured,
 	},
-	lifecycle.TenantNotReady: {
-		EventBootstrapStarted: lifecycle.TenantReadying,
-		// Operator saves CF identity on a tenant that previously failed bootstrap
-		// (e.g. correcting the CfSpace GUID after a CF_SPACE_NOT_FOUND failure).
-		// Transitions to configured so the wizard can re-run apply.
-		EventCfIdentityConfigured: lifecycle.TenantConfigured,
-		// Reset: roll back to configured so the operator can re-apply.
-		EventReset: lifecycle.TenantConfigured,
-	},
 	lifecycle.TenantReadying: {
 		EventBootstrapFinished: lifecycle.TenantReady,
-		EventBootstrapFailed:   lifecycle.TenantNotReady,
+		EventBootstrapFailed:   lifecycle.TenantConfigured,
 	},
 	lifecycle.TenantReady: {
 		// Operator intentionally re-applies bootstrap — e.g. to refresh service

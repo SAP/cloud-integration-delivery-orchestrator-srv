@@ -51,7 +51,7 @@ func TestP0TmsStateBackfill(t *testing.T) {
 	expect := map[string]lifecycle.TmsExtensionState{
 		"ready-tms":      lifecycle.TmsBootstrapped,
 		"configured-tms": lifecycle.TmsNodeConfirmed,
-		"registering":    lifecycle.TmsNodePending,
+		"registering":    lifecycle.TmsNodeConfirmed,
 		"no-tms":         lifecycle.TmsNotStarted,
 		"draft-no-tms":   lifecycle.TmsNotStarted,
 	}
@@ -148,7 +148,6 @@ func TestCpiTenant_IsTmsReady(t *testing.T) {
 	}{
 		{"ready", CpiTenant{TmsExtensionState: lifecycle.TmsBootstrapped}, true},
 		{"not started", CpiTenant{TmsExtensionState: lifecycle.TmsNotStarted}, false},
-		{"failed", CpiTenant{TmsExtensionState: lifecycle.TmsBootstrapFailed}, false},
 		{"confirmed", CpiTenant{TmsExtensionState: lifecycle.TmsNodeConfirmed}, false},
 	}
 	for _, tt := range tests {

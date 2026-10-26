@@ -32,23 +32,19 @@ type TmsEvent string
 
 const (
 	// TmsEventNodeSelected — operator picks a TMS source node.
-	// Valid from: not_enabled, node_pending, configured, ready, not_ready.
+	// Valid from: not_started, node_confirmed, bootstrapped.
 	TmsEventNodeSelected TmsEvent = "node_selected"
 
-	// TmsEventRouteConfirmed — operator confirms that TMS routes exist.
-	// Valid from: node_pending.
-	TmsEventRouteConfirmed TmsEvent = "route_confirmed"
-
 	// TmsEventApplyStarted — TMS extension bootstrap job begins.
-	// Valid from: configured, not_ready, ready.
+	// Valid from: node_confirmed, bootstrapped.
 	TmsEventApplyStarted TmsEvent = "tms_apply_started"
 
 	// TmsEventApplyFinished — TMS extension bootstrap job completed successfully.
-	// Valid from: readying.
+	// Valid from: bootstrapping.
 	TmsEventApplyFinished TmsEvent = "tms_apply_finished"
 
-	// TmsEventApplyFailed — TMS extension bootstrap job failed or was reset.
-	// Valid from: readying.
+	// TmsEventApplyFailed — TMS extension bootstrap job failed.
+	// Valid from: bootstrapping.
 	TmsEventApplyFailed TmsEvent = "tms_apply_failed"
 
 	// TmsEventInvalidated — TMS extension was invalidated by rule 3 (PIR key
@@ -58,116 +54,74 @@ const (
 	// not use this event — see handler/central_tms.go UpsertCentralTmsContext.
 	TmsEventInvalidated TmsEvent = "tms_invalidated"
 
-	// TmsEventReset — TMS extension reset to not_enabled (rule 1: CF identity
+	// TmsEventReset — TMS extension reset to not_started (rule 1: CF identity
 	// re-saved). Clears all TMS extension fields.
-	// Valid from: all states except readying.
+	// Valid from: all states except bootstrapping.
 	TmsEventReset TmsEvent = "tms_reset"
 )
 
 // allowedTmsTransitions defines the valid (currentState, event) → nextState edges.
 var allowedTmsTransitions = map[lifecycle.TmsExtensionState]map[TmsEvent]lifecycle.TmsExtensionState{
 	lifecycle.TmsNotStarted: {
-		TmsEventNodeSelected: lifecycle.TmsNodePending,
+		TmsEventNodeSelected: lifecycle.TmsNodeConfirmed,
 		TmsEventReset:        lifecycle.TmsNotStarted, // idempotent
 	},
-	lifecycle.TmsNodePending: {
-		TmsEventNodeSelected:   lifecycle.TmsNodePending, // re-select node
-		TmsEventRouteConfirmed: lifecycle.TmsNodeConfirmed,
-		TmsEventReset:          lifecycle.TmsNotStarted,
-	},
 	lifecycle.TmsNodeConfirmed: {
-		TmsEventNodeSelected: lifecycle.TmsNodePending,
+		TmsEventNodeSelected: lifecycle.TmsNodeConfirmed, // re-select node
 		TmsEventApplyStarted: lifecycle.TmsBootstrapping,
 		TmsEventReset:        lifecycle.TmsNotStarted,
 	},
 	lifecycle.TmsBootstrapping: {
 		TmsEventApplyFinished: lifecycle.TmsBootstrapped,
-		TmsEventApplyFailed:   lifecycle.TmsBootstrapFailed,
+		TmsEventApplyFailed:   lifecycle.TmsNodeConfirmed,
 	},
 	lifecycle.TmsBootstrapped: {
-		TmsEventNodeSelected: lifecycle.TmsNodePending,
+		TmsEventNodeSelected: lifecycle.TmsNodeConfirmed, // re-select node
 		TmsEventApplyStarted: lifecycle.TmsBootstrapping, // re-apply
-		TmsEventInvalidated:  lifecycle.TmsBootstrapFailed,
-		TmsEventReset:        lifecycle.TmsNotStarted,
-	},
-	lifecycle.TmsBootstrapFailed: {
-		TmsEventNodeSelected: lifecycle.TmsNodePending,
-		TmsEventApplyStarted: lifecycle.TmsBootstrapping, // retry
+		TmsEventInvalidated:  lifecycle.TmsNodeConfirmed,
 		TmsEventReset:        lifecycle.TmsNotStarted,
 	},
 }
 
-// SelectTmsNode atomically transitions to node_pending and writes node fields.
-// If changing from node_confirmed/bootstrapped/bootstrap_failed, also marks
-// TransportManagement destination as stale and sets TMS_NODE_CHANGED reason.
+// SelectTmsNode atomically transitions to node_confirmed and writes node fields.
+// Also unconditionally marks TransportManagement destination as stale (R2 fix).
+// Rejects draft tenants (CF identity not yet configured).
 func (s *Service) SelectTmsNode(ctx context.Context, tenantID uint, nodeID uint, nodeName string) error {
 	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// transitionTmsWithTx acquires SELECT FOR UPDATE and validates the state.
+		// Draft check under lock — transitionTmsWithTx reads lifecycle_state
+		// but does not enforce the LifecycleState ≠ draft precondition.
+		var tenant db.CpiTenant
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Select("id", "lifecycle_state").
+			First(&tenant, tenantID).Error; err != nil {
+			return fmt.Errorf("SelectTmsNode: fetch tenant %d: %w", tenantID, err)
+		}
+		// Reject draft: CF identity not yet configured. We intentionally check
+		// != draft rather than IsOnboarded() — node selection only needs CF identity
+		// to exist, not completed BASE bootstrap. This allows operators to pre-configure
+		// TMS node while BASE bootstrap is pending. The IsOnboarded() gate is at
+		// ApplyTmsExtension, not here.
+		if tenant.LifecycleState == lifecycle.TenantDraft {
+			return fmt.Errorf("SelectTmsNode: tenant %d is in draft state — complete CF Connection first", tenantID)
+		}
+		// transitionTmsWithTx re-locks the same row (no-op, already held).
 		if err := s.transitionTmsWithTx(tx, tenantID, TmsEventNodeSelected); err != nil {
 			return err
 		}
 		updates := map[string]any{
-			"tms_source_node_name": nodeName,
-			"tms_source_node_id":   nodeID,
+			"tms_source_node_name":             nodeName,
+			"tms_source_node_id":               nodeID,
+			"transport_management_dest_status": lifecycle.PrereqMissing,
+			"tms_blocking_reason":              lifecycle.TmsReasonNodeChanged,
 		}
 		return tx.Model(&db.CpiTenant{}).Where("id = ?", tenantID).Updates(updates).Error
 	})
 }
 
-// ConfirmTmsRoutesAndTransition fetches routes from TMS, then atomically writes
-// CentralTmsContextID and transitions to node_confirmed in a single transaction.
-// The tenant's TmsSourceNodeID is read inside the function to avoid stale snapshots.
-func (s *Service) ConfirmTmsRoutesAndTransition(ctx context.Context, tenantID uint) (*ConfirmTmsRoutesResult, error) {
-	// Read tenant's node ID.
-	var nodeID uint
-	if err := s.DB.Model(&db.CpiTenant{}).Select("tms_source_node_id").
-		Where("id = ?", tenantID).Scan(&nodeID).Error; err != nil {
-		return nil, fmt.Errorf("ConfirmTmsRoutesAndTransition: load node ID: %w", err)
-	}
-	if nodeID == 0 {
-		return nil, ErrNodeNotRegistered
-	}
+// ── Route queries ───────────────────────────────────────────────────────────
 
-	// External TMS API call — outside the DB transaction.
-	tmsCtx, err := loadTmsContext(s.DB)
-	if err != nil {
-		return nil, fmt.Errorf("ConfirmTmsRoutesAndTransition: %w", err)
-	}
-	routes, err := s.fetchRoutesForNodeID(ctx, tmsCtx, nodeID)
-	if err != nil {
-		return nil, fmt.Errorf("ConfirmTmsRoutesAndTransition: fetch routes: %w", err)
-	}
-	if len(routes) == 0 {
-		return nil, ErrRoutesNotConfigured
-	}
-
-	// Atomic DB write: verify nodeID unchanged (TOCTOU guard), then transition
-	// and write CentralTmsContextID.
-	if err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Acquire row lock and verify nodeID has not been changed by a concurrent SelectTmsNode.
-		var currentNodeID uint
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Model(&db.CpiTenant{}).Select("tms_source_node_id").
-			Where("id = ?", tenantID).Scan(&currentNodeID).Error; err != nil {
-			return fmt.Errorf("lock and read node ID: %w", err)
-		}
-		if currentNodeID != nodeID {
-			return fmt.Errorf("TmsSourceNodeID changed from %d to %d during route confirmation — retry", nodeID, currentNodeID)
-		}
-		// Precondition verified — now transition and write.
-		if err := s.transitionTmsWithTx(tx, tenantID, TmsEventRouteConfirmed); err != nil {
-			return err
-		}
-		return tx.Model(&db.CpiTenant{}).Where("id = ?", tenantID).
-			Update("central_tms_context_id", tmsCtx.ID).Error
-	}); err != nil {
-		return nil, fmt.Errorf("ConfirmTmsRoutesAndTransition: %w", err)
-	}
-
-	return &ConfirmTmsRoutesResult{Routes: routes}, nil
-}
-
-// transaction.  Convenience wrapper around transitionTmsWithTx.
+// TransitionTms applies a TMS event within its own transaction.
+// Convenience wrapper around transitionTmsWithTx.
 func (s *Service) TransitionTms(tenantID uint, event TmsEvent) error {
 	return s.DB.Transaction(func(tx *gorm.DB) error {
 		return s.transitionTmsWithTx(tx, tenantID, event)
@@ -225,11 +179,6 @@ var ErrNodeNotRegistered = fmt.Errorf("routes can only be queried after a TMS no
 
 // ErrRoutesNotConfigured is returned when the Route list fetched from TMS is empty.
 var ErrRoutesNotConfigured = fmt.Errorf("routes not configured: no routes found for this source node")
-
-// ConfirmTmsRoutesResult holds the routes returned by a successful confirm call.
-type ConfirmTmsRoutesResult struct {
-	Routes []db.TransportRoute
-}
 
 // GetCurrentNodeRoutesResult holds the result of a successful GetCurrentNodeRoutes call.
 type GetCurrentNodeRoutesResult struct {

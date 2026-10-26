@@ -98,6 +98,9 @@ func main() {
 	// Recover sync goroutines for DRs that were active before restart
 	svc.RecoverActiveSyncs()
 
+	// Recover tenants stuck in readying/bootstrapping from previous process exit
+	svc.RecoverStuckBootstraps()
+
 	// Register SyncTracker goroutine gauge for OTel metrics
 	cpiotel.RegisterSyncTrackerGauge(func() int64 {
 		return int64(svc.SyncTracker.ActiveCount())

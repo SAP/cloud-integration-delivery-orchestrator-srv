@@ -55,7 +55,7 @@ type upsertCentralTmsResponse struct {
 // v1 supports a single record; subsequent PUT calls overwrite it in place.
 //
 // Rule 4 (RFC 032 §5.4): if TmsApiDestinationName is changed and tenants exist
-// with TmsExtensionState=bootstrapped, they are invalidated to bootstrap_failed
+// with TmsExtensionState=bootstrapped, they are invalidated to node_confirmed
 // (their subscriber TransportManagementService destination holds stale credentials).
 // If any tenant is in TmsExtensionState=bootstrapping, the modification is rejected (409).
 func (h *Handler) UpsertCentralTmsContext(ctx *gin.Context) {
@@ -94,13 +94,18 @@ func (h *Handler) UpsertCentralTmsContext(ctx *gin.Context) {
 			}
 
 			// Invalidate all bootstrapped tenants.
-			// Also reset TransportManagementDestStatus because the subscriber destination
-			// holds credentials derived from the old Central TMS destination.
+			// Reset to not_started and clear node fields — Central TMS destination change
+			// may point to a different TMS system where old node IDs/names map to
+			// different tenants. Only reset fields affected by Central TMS change;
+			// CAS/CloudIntegration fields are unrelated (use CF service key credentials,
+			// not TMS credentials) and will be re-verified during re-apply Phase 3.
 			result := tx.Model(&db.CpiTenant{}).
 				Where("tms_extension_state = ?", lifecycle.TmsBootstrapped).
 				Updates(map[string]any{
-					"tms_extension_state":              lifecycle.TmsBootstrapFailed,
+					"tms_extension_state":              lifecycle.TmsNotStarted,
 					"tms_blocking_reason":              lifecycle.TmsReasonCentralTmsChanged,
+					"tms_source_node_name":             "",
+					"tms_source_node_id":               0,
 					"transport_management_dest_status": lifecycle.PrereqMissing,
 				})
 			if result.Error != nil {

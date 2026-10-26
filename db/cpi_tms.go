@@ -125,7 +125,7 @@ type CpiTenant struct {
 	// Only the TMS extension lifecycle (transitionTmsWithTx) may write this field.
 	TmsExtensionState lifecycle.TmsExtensionState `gorm:"column:tms_extension_state;default:'not_started'"`
 
-	// TmsBlockingReason stores the reason when TmsExtensionState is bootstrap_failed.
+	// TmsBlockingReason stores the reason for the current TMS impediment (e.g. PIR_KEY_CHANGED, OPERATOR_RESET).
 	TmsBlockingReason string
 
 	// TMS extension prerequisite statuses (detail states for status-page rendering).

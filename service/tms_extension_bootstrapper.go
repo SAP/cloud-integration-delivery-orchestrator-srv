@@ -49,15 +49,7 @@ func (s *Service) ApplyTmsExtension(ctx context.Context, tenantID uint, cfToken 
 		return 0, err
 	}
 
-	jobType := lifecycle.JobTypeApply
-	if tenant.TmsExtensionState == lifecycle.TmsBootstrapFailed {
-		jobType = lifecycle.JobTypeRetry
-	}
-
-	// Atomically claim bootstrapping state.
-	// The SELECT FOR UPDATE ensures that IsOnboarded and the TMS state transition
-	// are checked against a consistent snapshot — no concurrent ResetBootstrap or
-	// ApplyBootstrap can modify the tenant between the check and the transition.
+	// Phase 1 only claims mutual exclusion — prereq reset is deferred to Phase 3 (§2.1.1).
 	if err := s.DB.Transaction(func(tx *gorm.DB) error {
 		var t db.CpiTenant
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -66,21 +58,10 @@ func (s *Service) ApplyTmsExtension(ctx context.Context, tenantID uint, cfToken 
 			return err
 		}
 		// Precondition: tenant must be onboarded.
-		// Covers: draft, configured, not_ready (not yet onboarded),
+		// Covers: draft, configured (not yet onboarded),
 		// and readying (BASE bootstrap running — mutual exclusion).
 		if !t.IsOnboarded() {
 			return fmt.Errorf("tenant %d is not onboarded (LifecycleState=%s)", tenantID, t.LifecycleState)
-		}
-		// Reset TMS extension detail statuses.
-		if err := tx.Model(&db.CpiTenant{}).Where("id = ?", tenantID).Updates(map[string]any{
-			"tms_blocking_reason":              "",
-			"cas_application_status":           lifecycle.PrereqMissing,
-			"cas_standard_status":              lifecycle.PrereqMissing,
-			"cloud_integration_dest_status":    lifecycle.PrereqMissing,
-			"content_assembly_dest_status":     lifecycle.PrereqMissing,
-			"transport_management_dest_status": lifecycle.PrereqMissing,
-		}).Error; err != nil {
-			return err
 		}
 		return s.transitionTmsWithTx(tx, tenantID, TmsEventApplyStarted)
 	}); err != nil {
@@ -90,34 +71,39 @@ func (s *Service) ApplyTmsExtension(ctx context.Context, tenantID uint, cfToken 
 	// Synchronous inspect (TMS extension resources).
 	inspector, err := newInspector(tenant, cfToken)
 	if err != nil {
-		_ = s.TransitionTms(tenantID, TmsEventApplyFailed)
+		s.failTmsPhase2(tenantID, "INSPECT_FAILED")
 		return 0, fmt.Errorf("tms apply: build inspector: %w", err)
 	}
 	result, err := s.inspectTmsExtension(ctx, inspector, tenant)
 	if err != nil {
-		_ = s.TransitionTms(tenantID, TmsEventApplyFailed)
+		s.failTmsPhase2(tenantID, "INSPECT_FAILED")
 		return 0, fmt.Errorf("tms apply: inspect: %w", err)
 	}
 	if len(result.PermissionIssues) > 0 {
-		_ = s.TransitionTms(tenantID, TmsEventApplyFailed)
+		s.failTmsPhase2(tenantID, "PERMISSION_BLOCKED")
 		return 0, fmt.Errorf("tms apply: permission issues: %v", result.PermissionIssues)
 	}
 	if len(result.WaitingUserAction) > 0 {
-		_ = s.TransitionTms(tenantID, TmsEventApplyFailed)
+		s.failTmsPhase2(tenantID, "WAITING_USER_ACTION")
 		return 0, fmt.Errorf("tms apply: waiting user action: %v", result.WaitingUserAction)
 	}
 
-	// Create TMS job and launch goroutine.
+	// Phase 3: Reset prereqs, create job, launch goroutine (§2.1.1 推论 4).
 	missingJSON, _ := json.Marshal(result.MissingItems)
 	job := &db.TenantBootstrapJob{
 		CpiTenantID:          tenantID,
 		Layer:                lifecycle.LayerTMS,
-		JobType:              jobType,
+		JobType:              lifecycle.JobTypeApply,
 		State:                lifecycle.JobRunning,
 		MissingPrerequisites: missingJSON,
 		StartedAt:            time.Now(),
 	}
-	if err := s.DB.Create(job).Error; err != nil {
+	if err := s.DB.Transaction(func(tx *gorm.DB) error {
+		if err := resetTmsPrereqs(tx, tenantID, ""); err != nil {
+			return err
+		}
+		return tx.Create(job).Error
+	}); err != nil {
 		_ = s.TransitionTms(tenantID, TmsEventApplyFailed)
 		return 0, fmt.Errorf("tms apply: create job: %w", err)
 	}
@@ -143,20 +129,17 @@ func (s *Service) ResetTmsExtension(tenantID uint) error {
 			return fmt.Errorf("tms reset: %w", err)
 		}
 
-		// Clear all TMS product fields (same set as SaveCfIdentity Rule 1).
+		// Clear all TMS prerequisite and product fields.
+		if err := resetTmsPrereqs(tx, tenantID, "OPERATOR_RESET"); err != nil {
+			return fmt.Errorf("tms reset: %w", err)
+		}
 		if err := tx.Model(&db.CpiTenant{}).Where("id = ?", tenantID).Updates(map[string]any{
-			"tms_blocking_reason":              "OPERATOR_RESET",
-			"tms_source_node_name":             "",
-			"tms_source_node_id":               0,
-			"central_tms_context_id":           nil,
-			"cas_engine_destination_name":      "",
-			"cas_application_status":           lifecycle.PrereqMissing,
-			"cas_standard_status":              lifecycle.PrereqMissing,
-			"cloud_integration_dest_status":    lifecycle.PrereqMissing,
-			"content_assembly_dest_status":     lifecycle.PrereqMissing,
-			"transport_management_dest_status": lifecycle.PrereqMissing,
+			"tms_source_node_name":        "",
+			"tms_source_node_id":          0,
+			"central_tms_context_id":      nil,
+			"cas_engine_destination_name": "",
 		}).Error; err != nil {
-			return fmt.Errorf("tms reset: clear TMS fields: %w", err)
+			return fmt.Errorf("tms reset: clear TMS product fields: %w", err)
 		}
 
 		// Defensive: mark any stale running TMS jobs as failed.
@@ -167,11 +150,37 @@ func (s *Service) ResetTmsExtension(tenantID uint) error {
 				"state":        lifecycle.JobFailed,
 				"failure_type": lifecycle.FailureRemoteSystemError,
 				"ended_at":     &now,
+				"error_detail": "reset by operator",
 			}).Error; err != nil {
 			return fmt.Errorf("tms reset: mark stale jobs failed: %w", err)
 		}
 
 		return nil
+	})
+}
+
+// resetTmsPrereqs clears TMS layer detail statuses to missing and sets tms_blocking_reason.
+// Called by ApplyTmsExtension (Phase 3, reason="") and ResetTmsExtension (reason="OPERATOR_RESET").
+func resetTmsPrereqs(tx *gorm.DB, tenantID uint, blockingReason string) error {
+	return tx.Model(&db.CpiTenant{}).Where("id = ?", tenantID).Updates(map[string]any{
+		"tms_blocking_reason":              blockingReason,
+		"cas_application_status":           lifecycle.PrereqMissing,
+		"cas_standard_status":              lifecycle.PrereqMissing,
+		"cloud_integration_dest_status":    lifecycle.PrereqMissing,
+		"content_assembly_dest_status":     lifecycle.PrereqMissing,
+		"transport_management_dest_status": lifecycle.PrereqMissing,
+	}).Error
+}
+
+// failTmsPhase2 atomically rolls back TmsExtensionState and writes tms_blocking_reason
+// when Phase 2 (synchronous inspect) fails.
+func (s *Service) failTmsPhase2(tenantID uint, reason string) {
+	_ = s.DB.Transaction(func(tx *gorm.DB) error {
+		if err := s.transitionTmsWithTx(tx, tenantID, TmsEventApplyFailed); err != nil {
+			return err
+		}
+		return tx.Model(&db.CpiTenant{}).Where("id = ?", tenantID).
+			Update("tms_blocking_reason", reason).Error
 	})
 }
 

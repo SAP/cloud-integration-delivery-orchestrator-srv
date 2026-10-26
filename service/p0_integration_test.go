@@ -7,18 +7,15 @@ package service
 // handler layer — those are in handler/p0_integration_test.go.
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/lifecycle"
-
-	"gorm.io/gorm"
 )
 
-// ── §6.1: Node switch from bootstrapped → node_pending ─────────────────────
+// ── §6.1: Node switch from bootstrapped → node_confirmed ────────────────────
 
-func TestSelectTmsNode_FromBootstrapped_ResetsToNodePending(t *testing.T) {
+func TestSelectTmsNode_FromBootstrapped_ResetsToNodeConfirmed(t *testing.T) {
 	svc, database := newTestSvc(t)
 
 	tenant := db.CpiTenant{
@@ -44,8 +41,8 @@ func TestSelectTmsNode_FromBootstrapped_ResetsToNodePending(t *testing.T) {
 	var got db.CpiTenant
 	database.First(&got, tenant.ID)
 
-	if got.TmsExtensionState != lifecycle.TmsNodePending {
-		t.Errorf("TmsExtensionState = %q, want %q", got.TmsExtensionState, lifecycle.TmsNodePending)
+	if got.TmsExtensionState != lifecycle.TmsNodeConfirmed {
+		t.Errorf("TmsExtensionState = %q, want %q", got.TmsExtensionState, lifecycle.TmsNodeConfirmed)
 	}
 	if got.TmsSourceNodeName != "new-node" {
 		t.Errorf("TmsSourceNodeName = %q, want %q", got.TmsSourceNodeName, "new-node")
@@ -55,13 +52,13 @@ func TestSelectTmsNode_FromBootstrapped_ResetsToNodePending(t *testing.T) {
 	}
 }
 
-func TestSelectTmsNode_FromNodePending_Succeeds(t *testing.T) {
+func TestSelectTmsNode_FromNodeConfirmed_Succeeds(t *testing.T) {
 	svc, database := newTestSvc(t)
 
 	tenant := db.CpiTenant{
 		Name:              "re-select",
 		LifecycleState:    lifecycle.TenantReady,
-		TmsExtensionState: lifecycle.TmsNodePending,
+		TmsExtensionState: lifecycle.TmsNodeConfirmed,
 		TmsSourceNodeName: "first-pick",
 		TmsSourceNodeID:   1,
 	}
@@ -76,8 +73,8 @@ func TestSelectTmsNode_FromNodePending_Succeeds(t *testing.T) {
 	var got db.CpiTenant
 	database.First(&got, tenant.ID)
 
-	if got.TmsExtensionState != lifecycle.TmsNodePending {
-		t.Errorf("TmsExtensionState = %q, want %q", got.TmsExtensionState, lifecycle.TmsNodePending)
+	if got.TmsExtensionState != lifecycle.TmsNodeConfirmed {
+		t.Errorf("TmsExtensionState = %q, want %q", got.TmsExtensionState, lifecycle.TmsNodeConfirmed)
 	}
 	if got.TmsSourceNodeName != "second-pick" {
 		t.Errorf("TmsSourceNodeName = %q, want %q", got.TmsSourceNodeName, "second-pick")
@@ -234,9 +231,9 @@ func TestApplyTmsExtension_NoCentralTms_StartsButFailsAsync(t *testing.T) {
 
 	var got db.CpiTenant
 	database.First(&got, tenant.ID)
-	// State should be bootstrapping (goroutine launched) or bootstrap_failed (goroutine already failed).
-	if got.TmsExtensionState != lifecycle.TmsBootstrapping && got.TmsExtensionState != lifecycle.TmsBootstrapFailed {
-		t.Errorf("TmsExtensionState = %q, want bootstrapping or bootstrap_failed", got.TmsExtensionState)
+	// State should be bootstrapping (goroutine launched) or node_confirmed (goroutine already failed).
+	if got.TmsExtensionState != lifecycle.TmsBootstrapping && got.TmsExtensionState != lifecycle.TmsNodeConfirmed {
+		t.Errorf("TmsExtensionState = %q, want bootstrapping or node_confirmed", got.TmsExtensionState)
 	}
 }
 
@@ -329,15 +326,17 @@ func TestApplyBootstrap_ResetsOnlyBasePrereqs(t *testing.T) {
 		t.Fatalf("create tenant: %v", err)
 	}
 
-	// ApplyBootstrap will fail (no CF client) but Phase 1 resets run.
+	// ApplyBootstrap will fail (no CF client). Phase 1 claims readying,
+	// Phase 2 fails → prereqs should NOT be reset (§2.1.1: reset is Phase 3).
 	_, _ = svc.ApplyBootstrap(t.Context(), tenant.ID, "bad-cf-token")
 
 	var got db.CpiTenant
 	database.First(&got, tenant.ID)
 
-	// BASE prereqs should be reset.
-	if got.PirApiStatus != lifecycle.PrereqMissing {
-		t.Errorf("PirApiStatus = %q, want %q", got.PirApiStatus, lifecycle.PrereqMissing)
+	// BASE prereqs should still be at their pre-apply values (Phase 2 failed before Phase 3).
+	if got.PirApiStatus != lifecycle.PrereqReady {
+		t.Errorf("PirApiStatus = %q, want %q (Phase 2 failure should not reset prereqs)",
+			got.PirApiStatus, lifecycle.PrereqReady)
 	}
 	// TMS prereqs should be untouched.
 	if got.CasApplicationStatus != lifecycle.PrereqReady {
@@ -432,9 +431,9 @@ func TestResetBootstrap_BlockedByDraft(t *testing.T) {
 	}
 }
 
-// ── Reset: TMS bootstrap_failed allows ResetTmsExtension ────────────────────
+// ── Reset: TMS node_confirmed allows ResetTmsExtension ──────────────────────
 
-func TestResetTmsExtension_FromBootstrapFailed(t *testing.T) {
+func TestResetTmsExtension_FromNodeConfirmed(t *testing.T) {
 	svc, database := newTestSvc(t)
 
 	tenant := db.CpiTenant{
@@ -442,7 +441,7 @@ func TestResetTmsExtension_FromBootstrapFailed(t *testing.T) {
 		CfApiEndpoint:                 "https://api.cf.reset4.example.com",
 		CfOrg:                         "org-reset4",
 		LifecycleState:                lifecycle.TenantReady,
-		TmsExtensionState:             lifecycle.TmsBootstrapFailed,
+		TmsExtensionState:             lifecycle.TmsNodeConfirmed,
 		TmsBlockingReason:             lifecycle.TmsReasonCentralTmsChanged,
 		TmsSourceNodeName:             "old-node",
 		TmsSourceNodeID:               7,
@@ -485,9 +484,9 @@ func TestResetTmsExtension_FromBootstrapFailed(t *testing.T) {
 	}
 }
 
-// ── Reset: BASE not_ready allows ResetBootstrap ─────────────────────────────
+// ── Reset: BASE configured allows ResetBootstrap ────────────────────────────
 
-func TestResetBootstrap_FromNotReady(t *testing.T) {
+func TestResetBootstrap_FromConfigured(t *testing.T) {
 	svc, database := newTestSvc(t)
 
 	tenant := db.CpiTenant{
@@ -495,7 +494,7 @@ func TestResetBootstrap_FromNotReady(t *testing.T) {
 		CfApiEndpoint:         "https://api.cf.reset5.example.com",
 		CfOrg:                 "org-reset5",
 		CfSpace:               "space-reset5",
-		LifecycleState:        lifecycle.TenantNotReady,
+		LifecycleState:        lifecycle.TenantConfigured,
 		BlockingReason:        "CF_SPACE_NOT_FOUND",
 		PirApiStatus:          lifecycle.PrereqReady,
 		PirApiUrl:             "https://pir.example.com",
@@ -625,57 +624,5 @@ func TestApplyTmsExtension_RejectsWhenBaseReadying(t *testing.T) {
 	}
 	if !errorContains(err, "not onboarded") && !errorContains(err, "bootstrap is running") {
 		t.Errorf("error = %q, want it to mention not onboarded or bootstrap running", err)
-	}
-}
-
-// ── TOCTOU: ConfirmTmsRoutesAndTransition rejects when nodeID changed ───────
-
-func TestConfirmTmsRoutes_RejectsWhenNodeIDChanged(t *testing.T) {
-	svc, database := newTestSvc(t)
-
-	// Tenant in node_pending with nodeID=20 — simulates the state AFTER
-	// a concurrent SelectTmsNode changed the node from 10 to 20.
-	tenant := db.CpiTenant{
-		Name:              "toctou-confirm",
-		CfApiEndpoint:     "https://api.cf.toctou.example.com",
-		CfOrg:             "org-toctou",
-		LifecycleState:    lifecycle.TenantReady,
-		TmsExtensionState: lifecycle.TmsNodePending,
-		TmsSourceNodeID:   20,
-		TmsSourceNodeName: "new-node",
-	}
-	database.Create(&tenant)
-
-	// Simulate: the confirm transaction runs with staleNodeID=10
-	// (the value read by ConfirmTmsRoutesAndTransition before the external TMS call).
-	staleNodeID := uint(10)
-
-	err := svc.DB.Transaction(func(tx *gorm.DB) error {
-		var currentNodeID uint
-		if err := tx.Model(&db.CpiTenant{}).Select("tms_source_node_id").
-			Where("id = ?", tenant.ID).Scan(&currentNodeID).Error; err != nil {
-			return err
-		}
-		if currentNodeID != staleNodeID {
-			return fmt.Errorf("TmsSourceNodeID changed from %d to %d during route confirmation", staleNodeID, currentNodeID)
-		}
-		return nil
-	})
-
-	if err == nil {
-		t.Fatal("expected TOCTOU guard to detect nodeID mismatch, got nil")
-	}
-	if !errorContains(err, "TmsSourceNodeID changed") {
-		t.Errorf("error = %q, want it to mention TmsSourceNodeID changed", err)
-	}
-
-	// Verify tenant state is unchanged (transaction rolled back).
-	var got db.CpiTenant
-	database.First(&got, tenant.ID)
-	if got.TmsExtensionState != lifecycle.TmsNodePending {
-		t.Errorf("TmsExtensionState = %q, want %q (should be unchanged after rollback)", got.TmsExtensionState, lifecycle.TmsNodePending)
-	}
-	if got.TmsSourceNodeID != 20 {
-		t.Errorf("TmsSourceNodeID = %d, want 20 (should be unchanged)", got.TmsSourceNodeID)
 	}
 }

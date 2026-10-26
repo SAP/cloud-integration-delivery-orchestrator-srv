@@ -102,28 +102,17 @@ func (h *Handler) SelectTmsNode(ctx *gin.Context) {
 		return
 	}
 
-	var tenant db.CpiTenant
-	if err := h.db.First(&tenant, tenantID).Error; err != nil {
+	if err := h.svc.SelectTmsNode(ctx.Request.Context(), tenantID, body.NodeId, body.NodeName); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			Fail(ctx, 404, "tenant not found")
-		} else {
-			Fail(ctx, 500, err.Error())
+			return
 		}
-		return
-	}
-
-	if tenant.LifecycleState == lifecycle.TenantDraft {
-		Fail(ctx, 400, "complete CF Connection before selecting a TMS node")
-		return
-	}
-
-	if err := h.svc.SelectTmsNode(ctx.Request.Context(), tenantID, body.NodeId, body.NodeName); err != nil {
 		Fail(ctx, 409, err.Error())
 		return
 	}
 
 	OK(ctx, gin.H{
-		"tmsExtensionState": lifecycle.TmsNodePending,
+		"tmsExtensionState": lifecycle.TmsNodeConfirmed,
 		"nodeName":          body.NodeName,
 		"nodeId":            body.NodeId,
 	})
@@ -154,34 +143,6 @@ func (h *Handler) GetTmsExtensionRoutes(ctx *gin.Context) {
 	OK(ctx, gin.H{
 		"nodeName": result.NodeName,
 		"routes":   result.Routes,
-	})
-}
-
-// ConfirmTmsExtensionRoutes confirms operator has configured routes in TMS UI.
-//
-// POST /api/v1/cpiTenant/:id/tms-extension/confirm
-func (h *Handler) ConfirmTmsExtensionRoutes(ctx *gin.Context) {
-	tenantID, ok := parseTenantID(ctx)
-	if !ok {
-		return
-	}
-
-	result, err := h.svc.ConfirmTmsRoutesAndTransition(ctx.Request.Context(), tenantID)
-	if err != nil {
-		if errors.Is(err, service.ErrRoutesNotConfigured) {
-			ctx.JSON(400, gin.H{
-				"error":   "ROUTES_NOT_CONFIGURED",
-				"message": "No routes found for this source node. Configure a Route in TMS UI and call confirm again.",
-			})
-			return
-		}
-		Fail(ctx, 500, err.Error())
-		return
-	}
-
-	OK(ctx, gin.H{
-		"tmsExtensionState": lifecycle.TmsNodeConfirmed,
-		"routes":            result.Routes,
 	})
 }
 

@@ -61,21 +61,9 @@ func (s *Service) ApplyBootstrap(ctx context.Context, tenantID uint, cfToken str
 		return 0, err
 	}
 
-	// Infer job type from the current state before Phase 1 transitions it.
-	// not_ready means a previous attempt failed — this run is a retry.
-	// draft and configured are first-time applies.
-	// ready means the operator is intentionally re-applying (e.g. to refresh
-	// service key credentials or re-sync destinations) — still labeled apply,
-	// not retry, because no failure preceded it.
-	jobType := lifecycle.JobTypeApply
-	if tenant.LifecycleState == lifecycle.TenantNotReady {
-		jobType = lifecycle.JobTypeRetry
-	}
-
 	// ── Phase 1: Atomically claim readying state ──────────────────────────────
 	// Guard: reject if TMS extension bootstrap is running (only one job at a time).
-	// Reset base bootstrap prerequisite statuses and transition lifecycle to readying,
-	// all in a single transaction (consistent with TMS Apply's Phase 1 pattern).
+	// Only claims mutual exclusion — prereq reset is deferred to Phase 3 (§2.1.1).
 	if err := s.DB.Transaction(func(tx *gorm.DB) error {
 		var t db.CpiTenant
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -86,53 +74,51 @@ func (s *Service) ApplyBootstrap(ctx context.Context, tenantID uint, cfToken str
 		if t.TmsExtensionState == lifecycle.TmsBootstrapping {
 			return fmt.Errorf("TMS extension bootstrap is running; only one bootstrap job at a time")
 		}
-		// Reset only base bootstrap prerequisite status; TMS extension statuses are untouched.
-		if err := tx.Model(&db.CpiTenant{}).Where("id = ?", tenantID).Updates(map[string]any{
-			"blocking_reason": "",
-			"pir_api_status":  lifecycle.PrereqMissing,
-		}).Error; err != nil {
-			return err
-		}
 		return s.transitionLifecycleWithTx(tx, tenantID, EventBootstrapStarted)
 	}); err != nil {
 		return 0, fmt.Errorf("apply: %w", err)
 	}
 
 	// ── Phase 2: Synchronous inspect ─────────────────────────────────────────
-	// State is now readying.  Any failure from here must roll back to not_ready
+	// State is now readying.  Any failure from here must roll back to configured
 	// so the operator can issue another ApplyBootstrap.
 	inspector, err := newInspector(tenant, cfToken)
 	if err != nil {
-		_ = s.TransitionLifecycle(tenantID, EventBootstrapFailed)
+		s.failPhase2(tenantID, "INSPECT_FAILED")
 		return 0, fmt.Errorf("apply: build inspector: %w", err)
 	}
 	result, err := inspector.InspectCfSubaccount(ctx, tenant)
 	if err != nil {
-		_ = s.TransitionLifecycle(tenantID, EventBootstrapFailed)
+		s.failPhase2(tenantID, "INSPECT_FAILED")
 		return 0, fmt.Errorf("apply: inspect: %w", err)
 	}
 	if len(result.PermissionIssues) > 0 {
-		_ = s.TransitionLifecycle(tenantID, EventBootstrapFailed)
+		s.failPhase2(tenantID, "PERMISSION_BLOCKED")
 		return 0, fmt.Errorf("apply: permission issues: %v", result.PermissionIssues)
 	}
 	if len(result.WaitingUserAction) > 0 {
-		_ = s.TransitionLifecycle(tenantID, EventBootstrapFailed)
+		s.failPhase2(tenantID, "WAITING_USER_ACTION")
 		return 0, fmt.Errorf("apply: waiting user action: %v", result.WaitingUserAction)
 	}
 
-	// ── Phase 3: Create job row and launch goroutine ──────────────────────────
-	// Lifecycle is already readying; no further transition needed here.
-	// If job creation fails, roll back so the operator can retry.
+	// ── Phase 3: Reset prereqs, create job row, and launch goroutine ─────────
+	// Prereq reset and job creation in one transaction (§2.1.1 推论 4).
+	// If this fails, roll back so the operator can retry.
 	missingJSON, _ := json.Marshal(result.MissingItems)
 	job := &db.TenantBootstrapJob{
 		CpiTenantID:          tenantID,
 		Layer:                lifecycle.LayerBase,
-		JobType:              jobType,
+		JobType:              lifecycle.JobTypeApply,
 		State:                lifecycle.JobRunning,
 		MissingPrerequisites: missingJSON,
 		StartedAt:            time.Now(),
 	}
-	if err := s.DB.Create(job).Error; err != nil {
+	if err := s.DB.Transaction(func(tx *gorm.DB) error {
+		if err := resetBasePrereqs(tx, tenantID, ""); err != nil {
+			return err
+		}
+		return tx.Create(job).Error
+	}); err != nil {
 		_ = s.TransitionLifecycle(tenantID, EventBootstrapFailed)
 		return 0, fmt.Errorf("apply: create job: %w", err)
 	}
@@ -153,21 +139,11 @@ func (s *Service) GetBootstrapStatus(tenantID uint) (*db.TenantBootstrapJob, err
 	return &job, nil
 }
 
-// ResetBootstrap is an operator escape hatch for tenants stuck in the readying
-// state due to an irrecoverable goroutine failure (e.g. DB unavailable when
-// runBootstrap tried to write its final lifecycle transition).
-//
-// The operator calls this endpoint after observing that the tenant has been in
-// readying for longer than expected.  The reset marks the active running job as
-// failed and transitions the tenant back to not_ready, after which a normal
-// RetryBootstrap can be issued.
-//
-// POST /api/v1/cpiTenant/:id/bootstrap/reset
 // ResetBootstrap rolls the tenant's base bootstrap back to configured state,
 // clearing all bootstrap product fields (PIR status, URL, destination name).
 //
-// Allowed from: configured (idempotent), not_ready, ready.
-// Rejected by state machine for: draft (no EventReset edge), readying (no EventReset edge).
+// Allowed from: configured (idempotent), ready.
+// Rejected by state machine for: draft (no EventReset edge), readying (no EventReset edge — §2.1.1).
 //
 // All writes are atomic in a single transaction. The state transition runs
 // first (SELECT FOR UPDATE), so readying/draft are rejected before any
@@ -180,14 +156,15 @@ func (s *Service) ResetBootstrap(tenantID uint) error {
 			return fmt.Errorf("reset: %w", err)
 		}
 
-		// Clear bootstrap product fields.
+		// Clear bootstrap prerequisite and product fields.
+		if err := resetBasePrereqs(tx, tenantID, "OPERATOR_RESET"); err != nil {
+			return fmt.Errorf("reset: %w", err)
+		}
 		if err := tx.Model(&db.CpiTenant{}).Where("id = ?", tenantID).Updates(map[string]any{
-			"blocking_reason":          "OPERATOR_RESET",
-			"pir_api_status":           lifecycle.PrereqMissing,
 			"pir_api_url":              "",
 			"pir_api_destination_name": "",
 		}).Error; err != nil {
-			return fmt.Errorf("reset: clear bootstrap fields: %w", err)
+			return fmt.Errorf("reset: clear bootstrap product fields: %w", err)
 		}
 
 		// Defensive: mark any stale running BASE jobs as failed.
@@ -198,6 +175,7 @@ func (s *Service) ResetBootstrap(tenantID uint) error {
 				"state":        lifecycle.JobFailed,
 				"failure_type": lifecycle.FailureRemoteSystemError,
 				"ended_at":     &now,
+				"error_detail": "reset by operator",
 			}).Error; err != nil {
 			return fmt.Errorf("reset: mark stale jobs failed: %w", err)
 		}
@@ -343,7 +321,7 @@ func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string,
 	}
 	if pirKeyCreated {
 		if err := s.TransitionTms(tenant.ID, TmsEventInvalidated); err != nil {
-			// State doesn't support invalidation (e.g., not_started, node_pending) —
+			// State doesn't support invalidation (e.g., not_started) —
 			// no stale CloudIntegration destination exists. Safe to ignore.
 			s.L(ctx).Debugw("rule 3: PIR key recreated but TMS invalidation not applicable",
 				"component", "bootstrap", "tenant_id", tenant.ID, "info", err)
@@ -652,6 +630,27 @@ func buildOAuthDestination(name string, urlTransform func(string) string, tenant
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+// resetBasePrereqs clears BASE layer detail statuses to missing and sets blocking_reason.
+// Called by ApplyBootstrap (Phase 3, reason="") and ResetBootstrap (reason="OPERATOR_RESET").
+func resetBasePrereqs(tx *gorm.DB, tenantID uint, blockingReason string) error {
+	return tx.Model(&db.CpiTenant{}).Where("id = ?", tenantID).Updates(map[string]any{
+		"blocking_reason": blockingReason,
+		"pir_api_status":  lifecycle.PrereqMissing,
+	}).Error
+}
+
+// failPhase2 atomically rolls back LifecycleState and writes blocking_reason
+// when Phase 2 (synchronous inspect) fails.
+func (s *Service) failPhase2(tenantID uint, reason string) {
+	_ = s.DB.Transaction(func(tx *gorm.DB) error {
+		if err := s.transitionLifecycleWithTx(tx, tenantID, EventBootstrapFailed); err != nil {
+			return err
+		}
+		return tx.Model(&db.CpiTenant{}).Where("id = ?", tenantID).
+			Update("blocking_reason", reason).Error
+	})
+}
 
 func (s *Service) getTenantForBootstrap(tenantID uint) (*db.CpiTenant, error) {
 	var tenant db.CpiTenant

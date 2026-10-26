@@ -27,28 +27,20 @@ func TestTmsTransitions_AllValidEdges(t *testing.T) {
 		wantState lifecycle.TmsExtensionState
 	}{
 		// not_started
-		{"not_started → node_selected → node_pending", lifecycle.TmsNotStarted, TmsEventNodeSelected, lifecycle.TmsNodePending},
+		{"not_started → node_selected → node_confirmed", lifecycle.TmsNotStarted, TmsEventNodeSelected, lifecycle.TmsNodeConfirmed},
 		{"not_started → reset → not_started", lifecycle.TmsNotStarted, TmsEventReset, lifecycle.TmsNotStarted},
-		// node_pending
-		{"node_pending → node_selected → node_pending", lifecycle.TmsNodePending, TmsEventNodeSelected, lifecycle.TmsNodePending},
-		{"node_pending → route_confirmed → node_confirmed", lifecycle.TmsNodePending, TmsEventRouteConfirmed, lifecycle.TmsNodeConfirmed},
-		{"node_pending → reset → not_started", lifecycle.TmsNodePending, TmsEventReset, lifecycle.TmsNotStarted},
 		// node_confirmed
-		{"node_confirmed → node_selected → node_pending", lifecycle.TmsNodeConfirmed, TmsEventNodeSelected, lifecycle.TmsNodePending},
+		{"node_confirmed → node_selected → node_confirmed", lifecycle.TmsNodeConfirmed, TmsEventNodeSelected, lifecycle.TmsNodeConfirmed},
 		{"node_confirmed → apply_started → bootstrapping", lifecycle.TmsNodeConfirmed, TmsEventApplyStarted, lifecycle.TmsBootstrapping},
 		{"node_confirmed → reset → not_started", lifecycle.TmsNodeConfirmed, TmsEventReset, lifecycle.TmsNotStarted},
 		// bootstrapping
 		{"bootstrapping → apply_finished → bootstrapped", lifecycle.TmsBootstrapping, TmsEventApplyFinished, lifecycle.TmsBootstrapped},
-		{"bootstrapping → apply_failed → bootstrap_failed", lifecycle.TmsBootstrapping, TmsEventApplyFailed, lifecycle.TmsBootstrapFailed},
+		{"bootstrapping → apply_failed → node_confirmed", lifecycle.TmsBootstrapping, TmsEventApplyFailed, lifecycle.TmsNodeConfirmed},
 		// bootstrapped
-		{"bootstrapped → node_selected → node_pending", lifecycle.TmsBootstrapped, TmsEventNodeSelected, lifecycle.TmsNodePending},
+		{"bootstrapped → node_selected → node_confirmed", lifecycle.TmsBootstrapped, TmsEventNodeSelected, lifecycle.TmsNodeConfirmed},
 		{"bootstrapped → apply_started → bootstrapping", lifecycle.TmsBootstrapped, TmsEventApplyStarted, lifecycle.TmsBootstrapping},
-		{"bootstrapped → invalidated → bootstrap_failed", lifecycle.TmsBootstrapped, TmsEventInvalidated, lifecycle.TmsBootstrapFailed},
+		{"bootstrapped → invalidated → node_confirmed", lifecycle.TmsBootstrapped, TmsEventInvalidated, lifecycle.TmsNodeConfirmed},
 		{"bootstrapped → reset → not_started", lifecycle.TmsBootstrapped, TmsEventReset, lifecycle.TmsNotStarted},
-		// bootstrap_failed
-		{"bootstrap_failed → node_selected → node_pending", lifecycle.TmsBootstrapFailed, TmsEventNodeSelected, lifecycle.TmsNodePending},
-		{"bootstrap_failed → apply_started → bootstrapping", lifecycle.TmsBootstrapFailed, TmsEventApplyStarted, lifecycle.TmsBootstrapping},
-		{"bootstrap_failed → reset → not_started", lifecycle.TmsBootstrapFailed, TmsEventReset, lifecycle.TmsNotStarted},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -87,32 +79,23 @@ func TestTmsTransitions_InvalidEdgesRejected(t *testing.T) {
 		from  lifecycle.TmsExtensionState
 		event TmsEvent
 	}{
-		// not_started: cannot confirm, apply, finish, fail, or invalidate
-		{"not_started × route_confirmed", lifecycle.TmsNotStarted, TmsEventRouteConfirmed},
+		// not_started: cannot apply, finish, fail, or invalidate
 		{"not_started × apply_started", lifecycle.TmsNotStarted, TmsEventApplyStarted},
 		{"not_started × apply_finished", lifecycle.TmsNotStarted, TmsEventApplyFinished},
+		{"not_started × apply_failed", lifecycle.TmsNotStarted, TmsEventApplyFailed},
 		{"not_started × invalidated", lifecycle.TmsNotStarted, TmsEventInvalidated},
-		// node_pending: cannot apply, finish, fail, or invalidate
-		{"node_pending × apply_started", lifecycle.TmsNodePending, TmsEventApplyStarted},
-		{"node_pending × apply_finished", lifecycle.TmsNodePending, TmsEventApplyFinished},
-		{"node_pending × invalidated", lifecycle.TmsNodePending, TmsEventInvalidated},
-		// node_confirmed: cannot confirm, finish, fail, or invalidate
-		{"node_confirmed × route_confirmed", lifecycle.TmsNodeConfirmed, TmsEventRouteConfirmed},
+		// node_confirmed: cannot finish, fail, or invalidate
 		{"node_confirmed × apply_finished", lifecycle.TmsNodeConfirmed, TmsEventApplyFinished},
+		{"node_confirmed × apply_failed", lifecycle.TmsNodeConfirmed, TmsEventApplyFailed},
 		{"node_confirmed × invalidated", lifecycle.TmsNodeConfirmed, TmsEventInvalidated},
-		// bootstrapping: cannot select node, confirm, apply, invalidate, or reset
+		// bootstrapping: cannot select node, apply, invalidate, or reset
 		{"bootstrapping × node_selected", lifecycle.TmsBootstrapping, TmsEventNodeSelected},
-		{"bootstrapping × route_confirmed", lifecycle.TmsBootstrapping, TmsEventRouteConfirmed},
 		{"bootstrapping × apply_started", lifecycle.TmsBootstrapping, TmsEventApplyStarted},
 		{"bootstrapping × invalidated", lifecycle.TmsBootstrapping, TmsEventInvalidated},
 		{"bootstrapping × reset", lifecycle.TmsBootstrapping, TmsEventReset},
-		// bootstrapped: cannot confirm or finish
-		{"bootstrapped × route_confirmed", lifecycle.TmsBootstrapped, TmsEventRouteConfirmed},
+		// bootstrapped: cannot finish or fail
 		{"bootstrapped × apply_finished", lifecycle.TmsBootstrapped, TmsEventApplyFinished},
-		// bootstrap_failed: cannot confirm, finish, or invalidate
-		{"bootstrap_failed × route_confirmed", lifecycle.TmsBootstrapFailed, TmsEventRouteConfirmed},
-		{"bootstrap_failed × apply_finished", lifecycle.TmsBootstrapFailed, TmsEventApplyFinished},
-		{"bootstrap_failed × invalidated", lifecycle.TmsBootstrapFailed, TmsEventInvalidated},
+		{"bootstrapped × apply_failed", lifecycle.TmsBootstrapped, TmsEventApplyFailed},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
