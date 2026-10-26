@@ -143,9 +143,8 @@ func (h *Handler) RetryBootstrap(ctx *gin.Context) {
 	OK(ctx, gin.H{"jobId": jobID})
 }
 
-// ResetBootstrap is the operator escape hatch for a tenant stuck in readying
-// state.  It marks the active running job as failed and transitions the tenant
-// back to not_ready so a normal RetryBootstrap can proceed.
+// ResetBootstrap rolls the tenant back to configured state, clearing all
+// bootstrap prerequisite and product fields.
 //
 // No request body required.
 //

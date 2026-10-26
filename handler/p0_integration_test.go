@@ -16,6 +16,7 @@ import (
 
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/lifecycle"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/service"
 )
 
 // newTestHandlerWithTms creates a handler with CpiTenant + CentralTmsContext migrated.
@@ -31,7 +32,7 @@ func newTestHandlerWithTms(t *testing.T) (*Handler, *gorm.DB) {
 	if err := database.AutoMigrate(&db.CpiTenant{}, &db.CentralTmsContext{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	h := &Handler{db: database}
+	h := &Handler{db: database, svc: &service.Service{DB: database}}
 	return h, database
 }
 

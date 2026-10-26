@@ -10,7 +10,6 @@ package handler
 //	GET   /api/v1/cpiTenant/:id/tms-extension          — status overview
 //	POST  /api/v1/cpiTenant/:id/tms-extension/node     — select TMS node
 //	GET   /api/v1/cpiTenant/:id/tms-extension/routes   — live route list
-//	POST  /api/v1/cpiTenant/:id/tms-extension/confirm  — confirm routes (P2b will remove)
 //	POST  /api/v1/cpiTenant/:id/tms-extension/preview  — read-only inspect
 //	POST  /api/v1/cpiTenant/:id/tms-extension/apply    — bootstrap apply/retry
 //	POST  /api/v1/cpiTenant/:id/tms-extension/reset    — escape hatch
@@ -53,11 +52,10 @@ func (h *Handler) GetTmsExtension(ctx *gin.Context) {
 		availabilityReason = lifecycle.TmsReasonBaseNotReady
 	} else {
 		tmsCtx, err := h.svc.LoadCentralTmsContext()
-		if err != nil {
+		if err != nil || tmsCtx.TmsApiDestinationName == "" {
 			available = false
 			availabilityReason = lifecycle.TmsReasonCentralTmsNotConfigured
 		}
-		_ = tmsCtx
 	}
 
 	// Latest TMS job.
@@ -69,12 +67,12 @@ func (h *Handler) GetTmsExtension(ctx *gin.Context) {
 	}
 
 	OK(ctx, gin.H{
-		"tmsExtensionState": tenant.TmsExtensionState,
-		"tmsBlockingReason": tenant.TmsBlockingReason,
-		"available":         available,
-		"availabilityReason": availabilityReason,
-		"nodeName":          tenant.TmsSourceNodeName,
-		"nodeId":            tenant.TmsSourceNodeID,
+		"tmsExtensionState":             tenant.TmsExtensionState,
+		"tmsBlockingReason":             tenant.TmsBlockingReason,
+		"available":                     available,
+		"availabilityReason":            availabilityReason,
+		"nodeName":                      tenant.TmsSourceNodeName,
+		"nodeId":                        tenant.TmsSourceNodeID,
 		"casApplicationStatus":          tenant.CasApplicationStatus,
 		"casStandardStatus":             tenant.CasStandardStatus,
 		"cloudIntegrationDestStatus":    tenant.CloudIntegrationDestStatus,
@@ -206,7 +204,8 @@ func (h *Handler) ApplyTmsExtension(ctx *gin.Context) {
 	OK(ctx, gin.H{"jobId": jobID})
 }
 
-// ResetTmsExtension is the escape hatch for tenants stuck in bootstrapping state.
+// ResetTmsExtension rolls the TMS extension back to not_started, clearing all
+// TMS prerequisite and product fields.
 //
 // POST /api/v1/cpiTenant/:id/tms-extension/reset
 func (h *Handler) ResetTmsExtension(ctx *gin.Context) {

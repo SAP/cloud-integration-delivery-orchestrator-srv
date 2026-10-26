@@ -202,6 +202,7 @@ const (
 // Shared blocking/invalidation reason codes (used by both BASE and TMS layers).
 const (
 	ReasonBootstrapInterrupted = "BOOTSTRAP_INTERRUPTED"
+	ReasonOperatorReset        = "OPERATOR_RESET"
 )
 
 // BootstrapLayer distinguishes tenant bootstrap (BASE) from TMS extension

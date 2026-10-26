@@ -22,9 +22,6 @@ import (
 //
 // It does NOT create a TenantBootstrapJob row — preview is lightweight and
 // read-only.  The result is returned directly to the caller (handler).
-//
-// No cfToken is required because InspectCfSubaccount is the only operation called.
-// Wait — preview still needs a cfToken to call CF API for the inspection.
 func (s *Service) PreviewBootstrap(ctx context.Context, tenantID uint, cfToken string) (*BootstrapPreview, error) {
 	tenant, err := s.getTenantForBootstrap(tenantID)
 	if err != nil {
@@ -157,7 +154,7 @@ func (s *Service) ResetBootstrap(tenantID uint) error {
 		}
 
 		// Clear bootstrap prerequisite and product fields.
-		if err := resetBasePrereqs(tx, tenantID, "OPERATOR_RESET"); err != nil {
+		if err := resetBasePrereqs(tx, tenantID, lifecycle.ReasonOperatorReset); err != nil {
 			return fmt.Errorf("reset: %w", err)
 		}
 		if err := tx.Model(&db.CpiTenant{}).Where("id = ?", tenantID).Updates(map[string]any{
@@ -320,14 +317,20 @@ func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string,
 		}
 	}
 	if pirKeyCreated {
-		if err := s.TransitionTms(tenant.ID, TmsEventInvalidated); err != nil {
-			// State doesn't support invalidation (e.g., not_started) —
-			// no stale CloudIntegration destination exists. Safe to ignore.
+		if err := s.DB.Transaction(func(tx *gorm.DB) error {
+			if err := s.transitionTmsWithTx(tx, tenant.ID, TmsEventInvalidated); err != nil {
+				return err
+			}
+			return tx.Model(&db.CpiTenant{}).Where("id = ?", tenant.ID).
+				Update("tms_blocking_reason", lifecycle.TmsReasonPirKeyChanged).Error
+		}); err != nil {
+			// TmsEventInvalidated only has an edge from bootstrapped → node_confirmed.
+			// Other states (not_started, node_confirmed) are rejected by the state machine,
+			// meaning no stale CloudIntegration destination exists — safe to ignore.
+			// bootstrapping is impossible here due to mutual exclusion (Phase 1 checks).
+			// Rule 3 is a cross-layer notification; failure does NOT abort BASE bootstrap.
 			s.L(ctx).Debugw("rule 3: PIR key recreated but TMS invalidation not applicable",
 				"component", "bootstrap", "tenant_id", tenant.ID, "info", err)
-		} else {
-			_ = s.DB.Model(&db.CpiTenant{}).Where("id = ?", tenant.ID).
-				Update("tms_blocking_reason", lifecycle.TmsReasonPirKeyChanged)
 		}
 	}
 
@@ -470,24 +473,6 @@ func (b *bootstrapApplier) ensureInstanceAndKey(
 	return []credentialAction{{DestinationName: keyName, ActionType: "created"}}, nil
 }
 
-// ensureProviderDestinations writes the two per-tenant destinations into
-// cpi-delivery's own provider-side Destination Service.
-//
-// These are runtime-critical: without them TrResolver cannot reach the
-// subscriber's PIR runtime or CAS engine.
-//
-//   - CPIDELIVERY_PIR_{id}  — PIR api base URL + credentials (it-rt/api)
-//     Used by TrResolver to list artifacts and call deploy endpoints.
-//     URL is the root PIR URL, NOT the Transport Module path
-//     (/api/1.0/transportmodule/Transport is the subscriber-side CloudIntegration
-//     destination URL; these two destinations serve different callers).
-//
-//   - CPIDELIVERY_CAS_{id}  — CAS application base URL + credentials (content-agent/application)
-//     Used by TrResolver to call the subscriber's CAS export API to generate TRs.
-//
-// This function names, creates, and records the provider-side destinations.
-// Unlike subscriber-side destinations (which use a temporary CF service key),
-// these are written directly via cf.DestinationServiceClient.UpsertDestination.
 // ensurePirProviderDestination writes CPIDELIVERY_PIR_{id} into the provider-side
 // Destination Service.  This is the only provider destination written by the BASE
 // bootstrap; CPIDELIVERY_CAS_{id} is written by the TMS extension bootstrap.
@@ -632,7 +617,7 @@ func buildOAuthDestination(name string, urlTransform func(string) string, tenant
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 // resetBasePrereqs clears BASE layer detail statuses to missing and sets blocking_reason.
-// Called by ApplyBootstrap (Phase 3, reason="") and ResetBootstrap (reason="OPERATOR_RESET").
+// Called by ApplyBootstrap (Phase 3, reason="") and ResetBootstrap (reason=lifecycle.ReasonOperatorReset).
 func resetBasePrereqs(tx *gorm.DB, tenantID uint, blockingReason string) error {
 	return tx.Model(&db.CpiTenant{}).Where("id = ?", tenantID).Updates(map[string]any{
 		"blocking_reason": blockingReason,

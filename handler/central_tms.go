@@ -2,14 +2,12 @@ package handler
 
 import (
 	"errors"
-	"fmt"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
-	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/lifecycle"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/service"
 )
 
 // centralTmsContextResponse is the API response for GET /api/v1/centralTmsContext.
@@ -55,8 +53,7 @@ type upsertCentralTmsResponse struct {
 // v1 supports a single record; subsequent PUT calls overwrite it in place.
 //
 // Rule 4 (RFC 032 §5.4): if TmsApiDestinationName is changed and tenants exist
-// with TmsExtensionState=bootstrapped, they are invalidated to node_confirmed
-// (their subscriber TransportManagementService destination holds stale credentials).
+// with TmsExtensionState=bootstrapped, they are invalidated to not_started.
 // If any tenant is in TmsExtensionState=bootstrapping, the modification is rejected (409).
 func (h *Handler) UpsertCentralTmsContext(ctx *gin.Context) {
 	var input db.CentralTmsContext
@@ -65,71 +62,18 @@ func (h *Handler) UpsertCentralTmsContext(ctx *gin.Context) {
 		return
 	}
 
-	var existing db.CentralTmsContext
-	err := h.db.First(&existing).Error
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		Fail(ctx, 500, err.Error())
+	result, err := h.svc.UpsertCentralTmsContext(input)
+	if err != nil {
+		if errors.Is(err, service.ErrTmsBootstrapInProgress) {
+			FailCode(ctx, 409, "TMS_BOOTSTRAP_IN_PROGRESS", err.Error())
+		} else {
+			Fail(ctx, 500, err.Error())
+		}
 		return
 	}
 
-	// If a record already exists, carry its ID so Save does UPDATE instead of INSERT.
-	if existing.ID != 0 {
-		input.ID = existing.ID
-	}
-
-	// Rule 4: check if TmsApiDestinationName actually changed.
-	destNameChanged := existing.ID != 0 && existing.TmsApiDestinationName != input.TmsApiDestinationName
-
-	var affectedCount int64
-	if destNameChanged {
-		// Rule 4 requires atomicity: reject if bootstrapping, invalidate bootstrapped, save context.
-		if err := h.db.Transaction(func(tx *gorm.DB) error {
-			// Reject if any tenant is currently bootstrapping TMS extension.
-			var bootstrappingCount int64
-			tx.Model(&db.CpiTenant{}).
-				Where("tms_extension_state = ?", lifecycle.TmsBootstrapping).
-				Count(&bootstrappingCount)
-			if bootstrappingCount > 0 {
-				return fmt.Errorf("TMS_BOOTSTRAP_IN_PROGRESS: %d tenant(s) have TMS extension bootstrap running; wait for completion before changing Central TMS destination", bootstrappingCount)
-			}
-
-			// Invalidate all bootstrapped tenants.
-			// Reset to not_started and clear node fields — Central TMS destination change
-			// may point to a different TMS system where old node IDs/names map to
-			// different tenants. Only reset fields affected by Central TMS change;
-			// CAS/CloudIntegration fields are unrelated (use CF service key credentials,
-			// not TMS credentials) and will be re-verified during re-apply Phase 3.
-			result := tx.Model(&db.CpiTenant{}).
-				Where("tms_extension_state = ?", lifecycle.TmsBootstrapped).
-				Updates(map[string]any{
-					"tms_extension_state":              lifecycle.TmsNotStarted,
-					"tms_blocking_reason":              lifecycle.TmsReasonCentralTmsChanged,
-					"tms_source_node_name":             "",
-					"tms_source_node_id":               0,
-					"transport_management_dest_status": lifecycle.PrereqMissing,
-				})
-			if result.Error != nil {
-				return fmt.Errorf("rule 4: invalidate tenants: %w", result.Error)
-			}
-			affectedCount = result.RowsAffected
-
-			return tx.Save(&input).Error
-		}); err != nil {
-			if strings.Contains(err.Error(), "TMS_BOOTSTRAP_IN_PROGRESS") {
-				FailCode(ctx, 409, "TMS_BOOTSTRAP_IN_PROGRESS", err.Error())
-			} else {
-				Fail(ctx, 500, err.Error())
-			}
-			return
-		}
-	} else {
-		if err := h.db.Save(&input).Error; err != nil {
-			Fail(ctx, 500, err.Error())
-			return
-		}
-	}
 	OK(ctx, upsertCentralTmsResponse{
-		CentralTmsContext: input,
-		AffectedTenants:   affectedCount,
+		CentralTmsContext: result.Context,
+		AffectedTenants:   result.AffectedTenants,
 	})
 }

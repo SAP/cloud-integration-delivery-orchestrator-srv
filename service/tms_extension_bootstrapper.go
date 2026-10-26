@@ -130,7 +130,7 @@ func (s *Service) ResetTmsExtension(tenantID uint) error {
 		}
 
 		// Clear all TMS prerequisite and product fields.
-		if err := resetTmsPrereqs(tx, tenantID, "OPERATOR_RESET"); err != nil {
+		if err := resetTmsPrereqs(tx, tenantID, lifecycle.ReasonOperatorReset); err != nil {
 			return fmt.Errorf("tms reset: %w", err)
 		}
 		if err := tx.Model(&db.CpiTenant{}).Where("id = ?", tenantID).Updates(map[string]any{
@@ -160,7 +160,7 @@ func (s *Service) ResetTmsExtension(tenantID uint) error {
 }
 
 // resetTmsPrereqs clears TMS layer detail statuses to missing and sets tms_blocking_reason.
-// Called by ApplyTmsExtension (Phase 3, reason="") and ResetTmsExtension (reason="OPERATOR_RESET").
+// Called by ApplyTmsExtension (Phase 3, reason="") and ResetTmsExtension (reason=lifecycle.ReasonOperatorReset).
 func resetTmsPrereqs(tx *gorm.DB, tenantID uint, blockingReason string) error {
 	return tx.Model(&db.CpiTenant{}).Where("id = ?", tenantID).Updates(map[string]any{
 		"tms_blocking_reason":              blockingReason,
@@ -449,6 +449,7 @@ func (b *bootstrapApplier) ensureCasProviderDestination(ctx context.Context, ten
 
 	return []credentialAction{{DestinationName: casDest.Name, ActionType: "upserted"}}, nil
 }
+
 // ensureSubscriberDestinations writes all subscriber-side destinations for one
 // bootstrap run into the subscriber's own Destination Service instance
 // (result.DestinationServiceInstanceGUID).
@@ -463,7 +464,7 @@ func (b *bootstrapApplier) ensureCasProviderDestination(ctx context.Context, ten
 //   - TransportManagementService (TMS credentials copied from provider-side TmsApiDestinationName)
 //
 // Provider-side destinations (CPIDELIVERY_PIR_{id}, CPIDELIVERY_CAS_{id}) are
-// NOT written here — see ensureProviderDestinations.
+// NOT written here — see ensurePirProviderDestination and ensureCasProviderDestination.
 func (b *bootstrapApplier) ensureSubscriberDestinations(ctx context.Context, tenant *db.CpiTenant, result *InspectionResult, tmsCtx *db.CentralTmsContext) ([]credentialAction, error) {
 	if result.DestinationServiceInstanceGUID == "" {
 		return nil, fmt.Errorf("destination service instance GUID is empty")

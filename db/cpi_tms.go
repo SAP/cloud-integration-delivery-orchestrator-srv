@@ -61,7 +61,7 @@ type ApiEndpoint struct {
 //   - Base bootstrap (LifecycleState) — PIR API instance + provider destination.
 //     Reaching READY ("Onboarded") unlocks Version Compare, BPMN Diff, deploy,
 //     and all PIR-dependent capabilities.
-//   - TMS extension (TmsState) — CAS instances, subscriber destinations, TMS node.
+//   - TMS extension (TmsExtensionState) — CAS instances, subscriber destinations, TMS node.
 //     Reaching READY ("TMS Ready") additionally unlocks TR generation and TMS import.
 //
 // The two flows have separate state machines, jobs, and endpoints.
@@ -97,7 +97,7 @@ type CpiTenant struct {
 	// bootstrap (PIR API destination).  READY means the tenant is "Onboarded":
 	// PIR API service instance, service key, and provider-side destination are in place.
 	//
-	// TMS readiness is tracked separately by TmsState.
+	// TMS readiness is tracked separately by TmsExtensionState.
 	// Only the service layer (TransitionLifecycle) may write this field.
 	LifecycleState lifecycle.TenantLifecycleState `gorm:"default:'draft'"`
 
@@ -144,7 +144,7 @@ type CpiTenant struct {
 	// Default naming: "CPIDELIVERY_CAS_{tenantID}".  Written by TMS extension bootstrap.
 	CasEngineDestinationName string
 
-	// TmsNodeRegistrationStatus is superseded by TmsState.
+	// TmsNodeRegistrationStatus is superseded by TmsExtensionState.
 	// Deprecated: retained only so the DB column is not orphaned by GORM.
 	TmsNodeRegistrationStatus lifecycle.PrerequisiteStatus `gorm:"default:'missing'"`
 

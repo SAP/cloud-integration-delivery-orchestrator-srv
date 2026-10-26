@@ -62,8 +62,8 @@ func (s *Service) acquireTenantForTR(ctx context.Context, tenantID uint) (db.Cpi
 			return fmt.Errorf("tenant %d TmsExtensionState=%q, must be bootstrapped: TMS_EXTENSION_NOT_READY",
 				tenantID, tenant.TmsExtensionState)
 		}
-		if tenant.TmsSourceNodeID == 0 {
-			return fmt.Errorf("tenant %d has no TmsSourceNodeID", tenantID)
+		if tenant.TmsSourceNodeName == "" {
+			return fmt.Errorf("tenant %d has no TmsSourceNodeName", tenantID)
 		}
 		return nil
 	})
@@ -152,7 +152,7 @@ func (s *Service) ensureCasGUIDs(ctx context.Context, casClient CasService, ops 
 		ops[i].CasArtifactGUID = e.comp.ID
 		ops[i].CasPackageResourceID = e.pkg.ResourceID
 		ops[i].CasArtifactExportable = e.comp.Exportable
-		
+
 		ops[i].PackageName = e.pkg.Name
 		ops[i].PackageVersion = e.pkg.Version
 

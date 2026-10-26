@@ -34,7 +34,7 @@ type TenantBootstrapJob struct {
 	State lifecycle.BootstrapJobState `gorm:"not null;default:'running'"`
 
 	// CurrentStep is the bootstrap step that is executing or last executed.
-	// BASE: CHECK_PIR_API → CHECK_PIR_KEY → ENSURE_PIR_PROVIDER_DEST
+	// BASE: CHECK_PIR_API → ENSURE_PIR_PROVIDER_DEST
 	// TMS:  CHECK_CAS_APPLICATION → CHECK_CAS_STANDARD → CHECK_DESTINATION_SERVICE →
 	//       CHECK_DESTINATIONS → ENSURE_CAS_PROVIDER_DEST
 	CurrentStep string

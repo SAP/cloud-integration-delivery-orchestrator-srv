@@ -19,16 +19,16 @@ func TestSelectTmsNode_FromBootstrapped_ResetsToNodeConfirmed(t *testing.T) {
 	svc, database := newTestSvc(t)
 
 	tenant := db.CpiTenant{
-		Name:                           "node-switch",
-		LifecycleState:                 lifecycle.TenantReady,
-		TmsExtensionState:              lifecycle.TmsBootstrapped,
-		TmsSourceNodeName:              "old-node",
-		TmsSourceNodeID:                100,
-		TransportManagementDestStatus:  lifecycle.PrereqReady,
-		CasApplicationStatus:           lifecycle.PrereqReady,
-		CasStandardStatus:              lifecycle.PrereqReady,
-		CloudIntegrationDestStatus:     lifecycle.PrereqReady,
-		ContentAssemblyDestStatus:      lifecycle.PrereqReady,
+		Name:                          "node-switch",
+		LifecycleState:                lifecycle.TenantReady,
+		TmsExtensionState:             lifecycle.TmsBootstrapped,
+		TmsSourceNodeName:             "old-node",
+		TmsSourceNodeID:               100,
+		TransportManagementDestStatus: lifecycle.PrereqReady,
+		CasApplicationStatus:          lifecycle.PrereqReady,
+		CasStandardStatus:             lifecycle.PrereqReady,
+		CloudIntegrationDestStatus:    lifecycle.PrereqReady,
+		ContentAssemblyDestStatus:     lifecycle.PrereqReady,
 	}
 	if err := database.Create(&tenant).Error; err != nil {
 		t.Fatalf("create tenant: %v", err)
@@ -387,11 +387,11 @@ func TestResetBootstrap_BlockedByReadying(t *testing.T) {
 	svc, database := newTestSvc(t)
 
 	tenant := db.CpiTenant{
-		Name:              "base-reset-blocked",
-		CfApiEndpoint:     "https://api.cf.reset2.example.com",
-		CfOrg:             "org-reset2",
-		LifecycleState:    lifecycle.TenantReadying,
-		PirApiStatus:      lifecycle.PrereqReady,
+		Name:                  "base-reset-blocked",
+		CfApiEndpoint:         "https://api.cf.reset2.example.com",
+		CfOrg:                 "org-reset2",
+		LifecycleState:        lifecycle.TenantReadying,
+		PirApiStatus:          lifecycle.PrereqReady,
 		PirApiDestinationName: "PIR_DEST",
 	}
 	database.Create(&tenant)
@@ -464,8 +464,8 @@ func TestResetTmsExtension_FromNodeConfirmed(t *testing.T) {
 	if got.TmsExtensionState != lifecycle.TmsNotStarted {
 		t.Errorf("TmsExtensionState = %q, want %q", got.TmsExtensionState, lifecycle.TmsNotStarted)
 	}
-	if got.TmsBlockingReason != "OPERATOR_RESET" {
-		t.Errorf("TmsBlockingReason = %q, want %q", got.TmsBlockingReason, "OPERATOR_RESET")
+	if got.TmsBlockingReason != lifecycle.ReasonOperatorReset {
+		t.Errorf("TmsBlockingReason = %q, want %q", got.TmsBlockingReason, lifecycle.ReasonOperatorReset)
 	}
 	if got.TmsSourceNodeName != "" {
 		t.Errorf("TmsSourceNodeName = %q, want empty", got.TmsSourceNodeName)
@@ -516,8 +516,8 @@ func TestResetBootstrap_FromConfigured(t *testing.T) {
 	if got.LifecycleState != lifecycle.TenantConfigured {
 		t.Errorf("LifecycleState = %q, want %q", got.LifecycleState, lifecycle.TenantConfigured)
 	}
-	if got.BlockingReason != "OPERATOR_RESET" {
-		t.Errorf("BlockingReason = %q, want %q", got.BlockingReason, "OPERATOR_RESET")
+	if got.BlockingReason != lifecycle.ReasonOperatorReset {
+		t.Errorf("BlockingReason = %q, want %q", got.BlockingReason, lifecycle.ReasonOperatorReset)
 	}
 	if got.PirApiStatus != lifecycle.PrereqMissing {
 		t.Errorf("PirApiStatus = %q, want %q", got.PirApiStatus, lifecycle.PrereqMissing)
