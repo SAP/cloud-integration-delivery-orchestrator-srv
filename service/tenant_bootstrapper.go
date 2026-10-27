@@ -23,22 +23,22 @@ import (
 // It does NOT create a TenantBootstrapJob row — preview is lightweight and
 // read-only.  The result is returned directly to the caller (handler).
 func (s *Service) PreviewBootstrap(ctx context.Context, tenantID uint, cfToken string) (*BootstrapPreview, error) {
-	tenant, err := s.getTenantForBootstrap(tenantID)
-	if err != nil {
-		return nil, err
+	var tenant db.CpiTenant
+	if err := s.DB.First(&tenant, tenantID).Error; err != nil {
+		return nil, fmt.Errorf("tenant %d not found: %w", tenantID, err)
 	}
 
-	inspector, err := newInspector(tenant, cfToken)
+	inspector, err := newInspector(&tenant, cfToken)
 	if err != nil {
 		return nil, fmt.Errorf("preview: %w", err)
 	}
 
-	result, err := inspector.InspectCfSubaccount(ctx, tenant)
+	result, err := inspector.InspectCfSubaccount(ctx, &tenant)
 	if err != nil {
 		return nil, fmt.Errorf("preview: inspect: %w", err)
 	}
 
-	return buildPreview(tenant, result), nil
+	return buildPreview(&tenant, result), nil
 }
 
 // ApplyBootstrap synchronously inspects the tenant's prerequisites, then
@@ -53,22 +53,19 @@ func (s *Service) PreviewBootstrap(ctx context.Context, tenantID uint, cfToken s
 // cfToken is the short-lived CF Bearer token provided by the Operator.  It is
 // forwarded to the goroutine and never persisted.
 func (s *Service) ApplyBootstrap(ctx context.Context, tenantID uint, cfToken string) (uint, error) {
-	tenant, err := s.getTenantForBootstrap(tenantID)
-	if err != nil {
-		return 0, err
-	}
-
 	// ── Phase 1: Atomically claim readying state ──────────────────────────────
+	// Read the full tenant under SELECT FOR UPDATE so that the snapshot used by
+	// Phase 2 and the goroutine is guaranteed consistent with the state transition.
+	// No separate pre-read (R5): Phase 1's First handles 404 and acquires the row lock.
 	// Guard: reject if TMS extension bootstrap is running (only one job at a time).
 	// Only claims mutual exclusion — prereq reset is deferred to Phase 3 (§2.1.1).
+	var tenant db.CpiTenant
 	if err := s.DB.Transaction(func(tx *gorm.DB) error {
-		var t db.CpiTenant
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Select("id", "lifecycle_state", "tms_extension_state").
-			First(&t, tenantID).Error; err != nil {
+			First(&tenant, tenantID).Error; err != nil {
 			return err
 		}
-		if t.TmsExtensionState == lifecycle.TmsBootstrapping {
+		if tenant.TmsExtensionState == lifecycle.TmsBootstrapping {
 			return fmt.Errorf("TMS extension bootstrap is running; only one bootstrap job at a time")
 		}
 		return s.transitionLifecycleWithTx(tx, tenantID, EventBootstrapStarted)
@@ -79,22 +76,22 @@ func (s *Service) ApplyBootstrap(ctx context.Context, tenantID uint, cfToken str
 	// ── Phase 2: Synchronous inspect ─────────────────────────────────────────
 	// State is now readying.  Any failure from here must roll back to configured
 	// so the operator can issue another ApplyBootstrap.
-	inspector, err := newInspector(tenant, cfToken)
+	inspector, err := newInspector(&tenant, cfToken)
 	if err != nil {
-		s.failPhase2(tenantID, "INSPECT_FAILED")
+		s.failPhase2(tenantID, lifecycle.ReasonInspectFailed)
 		return 0, fmt.Errorf("apply: build inspector: %w", err)
 	}
-	result, err := inspector.InspectCfSubaccount(ctx, tenant)
+	result, err := inspector.InspectCfSubaccount(ctx, &tenant)
 	if err != nil {
-		s.failPhase2(tenantID, "INSPECT_FAILED")
+		s.failPhase2(tenantID, lifecycle.ReasonInspectFailed)
 		return 0, fmt.Errorf("apply: inspect: %w", err)
 	}
 	if len(result.PermissionIssues) > 0 {
-		s.failPhase2(tenantID, "PERMISSION_BLOCKED")
+		s.failPhase2(tenantID, lifecycle.ReasonPermissionBlocked)
 		return 0, fmt.Errorf("apply: permission issues: %v", result.PermissionIssues)
 	}
 	if len(result.WaitingUserAction) > 0 {
-		s.failPhase2(tenantID, "WAITING_USER_ACTION")
+		s.failPhase2(tenantID, lifecycle.ReasonWaitingUserAction)
 		return 0, fmt.Errorf("apply: waiting user action: %v", result.WaitingUserAction)
 	}
 
@@ -116,11 +113,11 @@ func (s *Service) ApplyBootstrap(ctx context.Context, tenantID uint, cfToken str
 		}
 		return tx.Create(job).Error
 	}); err != nil {
-		_ = s.TransitionLifecycle(tenantID, EventBootstrapFailed)
+		s.failPhase2(tenantID, lifecycle.ReasonApplyStartFailed)
 		return 0, fmt.Errorf("apply: create job: %w", err)
 	}
 
-	go s.runBootstrap(tenant, job.ID, cfToken, result)
+	go s.runBootstrap(&tenant, job.ID, cfToken, result)
 	return job.ID, nil
 }
 
@@ -628,21 +625,16 @@ func resetBasePrereqs(tx *gorm.DB, tenantID uint, blockingReason string) error {
 // failPhase2 atomically rolls back LifecycleState and writes blocking_reason
 // when Phase 2 (synchronous inspect) fails.
 func (s *Service) failPhase2(tenantID uint, reason string) {
-	_ = s.DB.Transaction(func(tx *gorm.DB) error {
+	if err := s.DB.Transaction(func(tx *gorm.DB) error {
 		if err := s.transitionLifecycleWithTx(tx, tenantID, EventBootstrapFailed); err != nil {
 			return err
 		}
 		return tx.Model(&db.CpiTenant{}).Where("id = ?", tenantID).
 			Update("blocking_reason", reason).Error
-	})
-}
-
-func (s *Service) getTenantForBootstrap(tenantID uint) (*db.CpiTenant, error) {
-	var tenant db.CpiTenant
-	if err := s.DB.First(&tenant, tenantID).Error; err != nil {
-		return nil, fmt.Errorf("tenant %d not found: %w", tenantID, err)
+	}); err != nil {
+		s.Logger.Errorw("failPhase2: rollback failed; tenant may be stuck in readying until restart recovery",
+			"component", "bootstrap", "tenant_id", tenantID, "reason", reason, "error", err)
 	}
-	return &tenant, nil
 }
 
 func newInspector(tenant *db.CpiTenant, cfToken string) (*TenantInspector, error) {

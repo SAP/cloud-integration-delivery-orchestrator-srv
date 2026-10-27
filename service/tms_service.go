@@ -26,6 +26,7 @@ import (
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/tms"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // TmsClientFunc resolves and returns a ready-to-use TransportService.
@@ -88,10 +89,15 @@ type UpsertCentralTmsContextResult struct {
 // UpsertCentralTmsContext creates or fully replaces the CentralTmsContext.
 // v1 supports a single record; subsequent calls overwrite it in place.
 //
-// Rule 4 (RFC 032 §5.4): if TmsApiDestinationName is changed and tenants exist
-// with TmsExtensionState=bootstrapped, they are invalidated to not_started
-// (their subscriber TransportManagementService destination holds stale credentials).
+// Rule 4 (RFC 032 §5.4): if TmsApiDestinationName is changed, all tenants with
+// TmsExtensionState IN (node_confirmed, bootstrapped) are invalidated to not_started
+// (their subscriber TransportManagementService destination holds stale credentials
+// or their node selection belongs to the old TMS system).
 // If any tenant is in TmsExtensionState=bootstrapping, returns ErrTmsBootstrapInProgress.
+//
+// The transaction uses SELECT ... FOR UPDATE to lock all affected rows, preventing
+// the race where ApplyTmsExtension's Phase 1 could transition a tenant to
+// bootstrapping between the bootstrapping check and the bulk update (R4).
 func (s *Service) UpsertCentralTmsContext(input db.CentralTmsContext) (*UpsertCentralTmsContextResult, error) {
 	var existing db.CentralTmsContext
 	err := s.DB.First(&existing).Error
@@ -108,25 +114,36 @@ func (s *Service) UpsertCentralTmsContext(input db.CentralTmsContext) (*UpsertCe
 
 	var affectedCount int64
 	if destNameChanged {
-		// Rule 4 requires atomicity: reject if bootstrapping, invalidate bootstrapped, save context.
+		// Rule 4 requires atomicity: reject if bootstrapping, invalidate node_confirmed + bootstrapped, save context.
+		// SELECT ... FOR UPDATE locks all matched rows, serialising against ApplyTmsExtension Phase 1 (R4).
+		// Find loads the locked rows so we can check for bootstrapping in Go — one query to lock + read,
+		// avoiding a dead-variable Count whose result is only needed for its locking side effect.
 		if err := s.DB.Transaction(func(tx *gorm.DB) error {
-			var bootstrappingCount int64
-			if err := tx.Model(&db.CpiTenant{}).
-				Where("tms_extension_state = ?", lifecycle.TmsBootstrapping).
-				Count(&bootstrappingCount).Error; err != nil {
-				return fmt.Errorf("rule 4: count bootstrapping tenants: %w", err)
-			}
-			if bootstrappingCount > 0 {
-				return fmt.Errorf("%d tenant(s) have TMS extension bootstrap running; wait for completion before changing Central TMS destination: %w",
-					bootstrappingCount, ErrTmsBootstrapInProgress)
+			var tenants []db.CpiTenant
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+				Select("id", "tms_extension_state").
+				Where("tms_extension_state IN ?", []lifecycle.TmsExtensionState{
+					lifecycle.TmsBootstrapping, lifecycle.TmsNodeConfirmed, lifecycle.TmsBootstrapped,
+				}).
+				Find(&tenants).Error; err != nil {
+				return fmt.Errorf("rule 4: lock tenants: %w", err)
 			}
 
-			// Reset to not_started and clear node fields — Central TMS destination change
-			// may point to a different TMS system where old node IDs/names map to
-			// different tenants. Only reset fields affected by Central TMS change;
+			for _, t := range tenants {
+				if t.TmsExtensionState == lifecycle.TmsBootstrapping {
+					return fmt.Errorf("tenant %d has TMS extension bootstrap running; wait for completion before changing Central TMS destination: %w",
+						t.ID, ErrTmsBootstrapInProgress)
+				}
+			}
+
+			// Reset to not_started and clear node fields (R3: expanded to include node_confirmed).
+			// Central TMS destination change may point to a different TMS system where old node
+			// IDs/names map to different tenants. Only reset fields affected by Central TMS change;
 			// CAS/CloudIntegration fields are unrelated and will be re-verified during re-apply.
 			result := tx.Model(&db.CpiTenant{}).
-				Where("tms_extension_state = ?", lifecycle.TmsBootstrapped).
+				Where("tms_extension_state IN ?", []lifecycle.TmsExtensionState{
+					lifecycle.TmsNodeConfirmed, lifecycle.TmsBootstrapped,
+				}).
 				Updates(map[string]any{
 					"tms_extension_state":              lifecycle.TmsNotStarted,
 					"tms_blocking_reason":              lifecycle.TmsReasonCentralTmsChanged,

@@ -99,12 +99,12 @@ func (s *Service) SaveCfIdentity(ctx context.Context, tenantID uint, input CfIde
 	// lifecycle_state is intentionally excluded from updates: it is written
 	// exclusively by transitionLifecycleWithTx via the allowedTransitions table.
 	updates := map[string]any{
-		"cf_api_endpoint":  input.CfApiEndpoint,
-		"cf_org":           input.CfOrg,
-		"cf_space":         input.CfSpace,
-		"blocking_reason":  "",
-		"pir_api_status":   lifecycle.PrereqMissing,
-		"pir_api_url":      "",
+		"cf_api_endpoint":          input.CfApiEndpoint,
+		"cf_org":                   input.CfOrg,
+		"cf_space":                 input.CfSpace,
+		"blocking_reason":          "",
+		"pir_api_status":           lifecycle.PrereqMissing,
+		"pir_api_url":              "",
 		"pir_api_destination_name": "",
 	}
 	if err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -128,7 +128,6 @@ func (s *Service) SaveCfIdentity(ctx context.Context, tenantID uint, input CfIde
 			"tms_blocking_reason":              "",
 			"tms_source_node_name":             "",
 			"tms_source_node_id":               0,
-			"central_tms_context_id":           nil,
 			"cas_engine_destination_name":      "",
 			"cas_application_status":           lifecycle.PrereqMissing,
 			"cas_standard_status":              lifecycle.PrereqMissing,

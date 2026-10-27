@@ -32,7 +32,6 @@ func setupTRTest(t *testing.T) trTestSetup {
 	tenant := seedTenant(t, tc, "tr-src-"+suffix)
 	tenant.LifecycleState = lifecycle.TenantReady
 	tenant.TmsExtensionState = lifecycle.TmsBootstrapped
-	tenant.TmsNodeRegistrationStatus = lifecycle.PrereqReady
 	tenant.TmsSourceNodeID = tenant.ID + 1000
 	tenant.TmsSourceNodeName = "source-node-" + suffix
 	if err := testDB.Save(&tenant).Error; err != nil {
@@ -420,7 +419,6 @@ func TestGenerateTransportRequest_MissingTmsSourceNodeInfo(t *testing.T) {
 	tenant := seedTenant(t, tc, "tr-missingnode-"+suffix)
 	tenant.LifecycleState = lifecycle.TenantReady
 	tenant.TmsExtensionState = lifecycle.TmsBootstrapped
-	tenant.TmsNodeRegistrationStatus = lifecycle.PrereqReady
 	if err := testDB.Save(&tenant).Error; err != nil {
 		t.Fatalf("save tenant: %v", err)
 	}

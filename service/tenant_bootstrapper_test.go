@@ -99,21 +99,3 @@ func TestBuildOAuthDestination_RejectsIncompleteCredentials(t *testing.T) {
 		t.Fatalf("expected incomplete credentials error, got %v", err)
 	}
 }
-
-func TestGetTenantForBootstrap_ReturnsSeededTenantAndNotFound(t *testing.T) {
-	tc := newTestCleanup(t)
-	tenant := seedTenant(t, tc, "bootstrap-tenant-"+t.Name())
-
-	svc := newTestService(nil)
-	got, err := svc.getTenantForBootstrap(tenant.ID)
-	if err != nil {
-		t.Fatalf("getTenantForBootstrap failed: %v", err)
-	}
-	if got.ID != tenant.ID {
-		t.Fatalf("tenant ID = %d, want %d", got.ID, tenant.ID)
-	}
-
-	if _, err := svc.getTenantForBootstrap(999999); err == nil || !strings.Contains(err.Error(), "tenant 999999 not found") {
-		t.Fatalf("expected not found error, got %v", err)
-	}
-}

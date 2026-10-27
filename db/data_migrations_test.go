@@ -22,6 +22,10 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	if err := database.AutoMigrate(&CpiTenant{}, &TenantBootstrapJob{}, &DataMigration{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
+	// Add legacy columns that are no longer in the struct but still read by migrations.
+	// In production these columns already exist; AutoMigrate doesn't drop them.
+	database.Exec("ALTER TABLE cpi_tenants ADD COLUMN tms_node_registration_status TEXT DEFAULT 'missing'")
+	database.Exec("ALTER TABLE cpi_tenants ADD COLUMN central_tms_context_id INTEGER")
 	return database
 }
 
@@ -29,18 +33,29 @@ func TestP0TmsStateBackfill(t *testing.T) {
 	database := setupTestDB(t)
 
 	// Seed tenants covering every backfill branch.
+	// TmsNodeRegistrationStatus is no longer on the struct (L19), so we set it via raw SQL.
 	tenants := []CpiTenant{
-		{Name: "ready-tms", CfApiEndpoint: "https://a", CfOrg: "org1", LifecycleState: lifecycle.TenantReady, TmsNodeRegistrationStatus: lifecycle.PrereqReady},
-		{Name: "configured-tms", CfApiEndpoint: "https://a", CfOrg: "org2", LifecycleState: lifecycle.TenantConfigured, TmsNodeRegistrationStatus: lifecycle.PrereqReady},
-		{Name: "registering", CfApiEndpoint: "https://a", CfOrg: "org3", LifecycleState: lifecycle.TenantConfigured, TmsNodeRegistrationStatus: lifecycle.PrereqRegistering},
-		{Name: "no-tms", CfApiEndpoint: "https://a", CfOrg: "org4", LifecycleState: lifecycle.TenantReady, TmsNodeRegistrationStatus: lifecycle.PrereqMissing},
-		{Name: "draft-no-tms", CfApiEndpoint: "https://a", CfOrg: "org5", LifecycleState: lifecycle.TenantDraft, TmsNodeRegistrationStatus: lifecycle.PrereqMissing},
+		{Name: "ready-tms", CfApiEndpoint: "https://a", CfOrg: "org1", LifecycleState: lifecycle.TenantReady},
+		{Name: "configured-tms", CfApiEndpoint: "https://a", CfOrg: "org2", LifecycleState: lifecycle.TenantConfigured},
+		{Name: "registering", CfApiEndpoint: "https://a", CfOrg: "org3", LifecycleState: lifecycle.TenantConfigured},
+		{Name: "no-tms", CfApiEndpoint: "https://a", CfOrg: "org4", LifecycleState: lifecycle.TenantReady},
+		{Name: "draft-no-tms", CfApiEndpoint: "https://a", CfOrg: "org5", LifecycleState: lifecycle.TenantDraft},
+		// L11: seed tenants with old states that the merge steps (5-7) should handle.
+		{Name: "not-ready", CfApiEndpoint: "https://a", CfOrg: "org6", LifecycleState: "not_ready"},
+		{Name: "bootstrap-failed", CfApiEndpoint: "https://a", CfOrg: "org7", LifecycleState: lifecycle.TenantConfigured},
+		{Name: "node-pending", CfApiEndpoint: "https://a", CfOrg: "org8", LifecycleState: lifecycle.TenantConfigured},
 	}
 	for i := range tenants {
 		if err := database.Create(&tenants[i]).Error; err != nil {
 			t.Fatalf("create tenant %q: %v", tenants[i].Name, err)
 		}
 	}
+	// Set TmsNodeRegistrationStatus via raw SQL (column exists in DB, not in struct).
+	database.Exec("UPDATE cpi_tenants SET tms_node_registration_status = 'ready' WHERE name IN ('ready-tms', 'configured-tms')")
+	database.Exec("UPDATE cpi_tenants SET tms_node_registration_status = 'registering' WHERE name = 'registering'")
+	// Set old TMS states for merge step tests (L11).
+	database.Exec("UPDATE cpi_tenants SET tms_extension_state = 'bootstrap_failed' WHERE name = 'bootstrap-failed'")
+	database.Exec("UPDATE cpi_tenants SET tms_extension_state = 'node_pending' WHERE name = 'node-pending'")
 
 	// Run backfill.
 	if err := p0TmsStateBackfill(database); err != nil {
@@ -49,11 +64,14 @@ func TestP0TmsStateBackfill(t *testing.T) {
 
 	// Verify results.
 	expect := map[string]lifecycle.TmsExtensionState{
-		"ready-tms":      lifecycle.TmsBootstrapped,
-		"configured-tms": lifecycle.TmsNodeConfirmed,
-		"registering":    lifecycle.TmsNodeConfirmed,
-		"no-tms":         lifecycle.TmsNotStarted,
-		"draft-no-tms":   lifecycle.TmsNotStarted,
+		"ready-tms":        lifecycle.TmsBootstrapped,
+		"configured-tms":   lifecycle.TmsNodeConfirmed,
+		"registering":      lifecycle.TmsNodeConfirmed,
+		"no-tms":           lifecycle.TmsNotStarted,
+		"draft-no-tms":     lifecycle.TmsNotStarted,
+		"not-ready":        lifecycle.TmsNotStarted,    // step 5: not_ready has no TMS node
+		"bootstrap-failed": lifecycle.TmsNodeConfirmed, // step 6
+		"node-pending":     lifecycle.TmsNodeConfirmed, // step 7
 	}
 	for name, want := range expect {
 		var tenant CpiTenant
@@ -64,19 +82,29 @@ func TestP0TmsStateBackfill(t *testing.T) {
 			t.Errorf("tenant %q: TmsExtensionState = %q, want %q", name, tenant.TmsExtensionState, want)
 		}
 	}
+
+	// Verify lifecycle merge: not_ready → configured.
+	var notReady CpiTenant
+	if err := database.Where("name = 'not-ready'").First(&notReady).Error; err != nil {
+		t.Fatalf("load not-ready: %v", err)
+	}
+	if notReady.LifecycleState != lifecycle.TenantConfigured {
+		t.Errorf("not-ready LifecycleState = %q, want %q", notReady.LifecycleState, lifecycle.TenantConfigured)
+	}
 }
 
 func TestP0TmsStateBackfill_Idempotent(t *testing.T) {
 	database := setupTestDB(t)
 
 	tenant := CpiTenant{
-		Name:                      "idempotent",
-		LifecycleState:            lifecycle.TenantReady,
-		TmsNodeRegistrationStatus: lifecycle.PrereqReady,
+		Name:           "idempotent",
+		LifecycleState: lifecycle.TenantReady,
 	}
 	if err := database.Create(&tenant).Error; err != nil {
 		t.Fatalf("create: %v", err)
 	}
+	// Set TmsNodeRegistrationStatus via raw SQL (column exists in DB, not in struct).
+	database.Exec("UPDATE cpi_tenants SET tms_node_registration_status = 'ready' WHERE id = ?", tenant.ID)
 
 	// Run twice.
 	for i := 0; i < 2; i++ {

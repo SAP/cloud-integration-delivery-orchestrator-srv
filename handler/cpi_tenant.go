@@ -139,7 +139,6 @@ func (h *Handler) SaveCfIdentity(ctx *gin.Context) {
 	OK(ctx, gin.H{"tenantId": tenantID})
 }
 
-
 func (h *Handler) GetCpiTenants(ctx *gin.Context) {
 	var tenants []db.CpiTenant
 	if err := h.db.Find(&tenants).Error; err != nil {

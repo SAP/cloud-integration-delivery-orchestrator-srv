@@ -115,7 +115,6 @@ func TestRule1_SaveCfIdentity_ResetsTmsExtension(t *testing.T) {
 		"tms_blocking_reason":              "",
 		"tms_source_node_name":             "",
 		"tms_source_node_id":               0,
-		"central_tms_context_id":           nil,
 		"cas_engine_destination_name":      "",
 		"cas_application_status":           lifecycle.PrereqMissing,
 		"cas_standard_status":              lifecycle.PrereqMissing,

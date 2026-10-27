@@ -85,5 +85,3 @@ func TestUpsertCpiTenant_Create_SetsDraftState(t *testing.T) {
 		t.Errorf("lifecycle_state = %q, want %q", resp.Data.LifecycleState, lifecycle.TenantDraft)
 	}
 }
-
-

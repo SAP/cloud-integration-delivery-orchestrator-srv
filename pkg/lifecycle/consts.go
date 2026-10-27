@@ -203,6 +203,10 @@ const (
 const (
 	ReasonBootstrapInterrupted = "BOOTSTRAP_INTERRUPTED"
 	ReasonOperatorReset        = "OPERATOR_RESET"
+	ReasonInspectFailed        = "INSPECT_FAILED"
+	ReasonPermissionBlocked    = "PERMISSION_BLOCKED"
+	ReasonWaitingUserAction    = "WAITING_USER_ACTION"
+	ReasonApplyStartFailed     = "APPLY_START_FAILED"
 )
 
 // BootstrapLayer distinguishes tenant bootstrap (BASE) from TMS extension

@@ -51,7 +51,7 @@ const (
 	// changed during BASE bootstrap re-apply).
 	// Valid from: bootstrapped.
 	// Note: rule 4 (Central TMS changed) performs a bulk UPDATE directly and does
-	// not use this event — see handler/central_tms.go UpsertCentralTmsContext.
+	// not use this event — see service.UpsertCentralTmsContext.
 	TmsEventInvalidated TmsEvent = "tms_invalidated"
 
 	// TmsEventReset — TMS extension reset to not_started (rule 1: CF identity

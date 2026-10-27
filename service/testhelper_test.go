@@ -501,15 +501,15 @@ func (m *failingNotifier) OnDeliveryComment(issueKey string, drID uint, message 
 
 // mockCasClient implements CasService for testing.
 type mockCasClient struct {
-	catalog        []cas.CatalogContentResource
-	catalogErr     error
-	exportResp     *cas.ExportResponse
-	exportErr      error
-	pollStatus     *cas.OperationStatus
-	pollErr        error
-	opConfig       *cas.OperationConfig
-	opConfigErr    error
-	panicOnExport  bool // if true, TriggerExport panics instead of returning
+	catalog       []cas.CatalogContentResource
+	catalogErr    error
+	exportResp    *cas.ExportResponse
+	exportErr     error
+	pollStatus    *cas.OperationStatus
+	pollErr       error
+	opConfig      *cas.OperationConfig
+	opConfigErr   error
+	panicOnExport bool // if true, TriggerExport panics instead of returning
 }
 
 func (m *mockCasClient) ListCloudIntegrationResources(_ context.Context, _ []string) ([]cas.CatalogContentResource, error) {

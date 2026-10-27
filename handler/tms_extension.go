@@ -11,8 +11,8 @@ package handler
 //	POST  /api/v1/cpiTenant/:id/tms-extension/node     — select TMS node
 //	GET   /api/v1/cpiTenant/:id/tms-extension/routes   — live route list
 //	POST  /api/v1/cpiTenant/:id/tms-extension/preview  — read-only inspect
-//	POST  /api/v1/cpiTenant/:id/tms-extension/apply    — bootstrap apply/retry
-//	POST  /api/v1/cpiTenant/:id/tms-extension/reset    — escape hatch
+//	POST  /api/v1/cpiTenant/:id/tms-extension/apply    — bootstrap apply
+//	POST  /api/v1/cpiTenant/:id/tms-extension/reset    — rolls TMS extension back to not_started
 
 import (
 	"errors"

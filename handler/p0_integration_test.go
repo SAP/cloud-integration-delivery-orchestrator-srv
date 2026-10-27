@@ -50,20 +50,20 @@ func TestRule4_UpsertCentralTms_InvalidatesBootstrappedTenants(t *testing.T) {
 	// Seed tenants with various TMS states.
 	bootstrapped1 := db.CpiTenant{
 		Name: "tenant-boot1", LifecycleState: lifecycle.TenantReady,
-		TmsExtensionState: lifecycle.TmsBootstrapped,
+		TmsExtensionState:             lifecycle.TmsBootstrapped,
 		TransportManagementDestStatus: lifecycle.PrereqReady,
-		CfApiEndpoint: "https://api.cf.eu10.example.com", CfOrg: "org-1", CfSpace: "space-1",
+		CfApiEndpoint:                 "https://api.cf.eu10.example.com", CfOrg: "org-1", CfSpace: "space-1",
 	}
 	bootstrapped2 := db.CpiTenant{
 		Name: "tenant-boot2", LifecycleState: lifecycle.TenantReady,
-		TmsExtensionState: lifecycle.TmsBootstrapped,
+		TmsExtensionState:             lifecycle.TmsBootstrapped,
 		TransportManagementDestStatus: lifecycle.PrereqReady,
-		CfApiEndpoint: "https://api.cf.eu10.example.com", CfOrg: "org-2", CfSpace: "space-2",
+		CfApiEndpoint:                 "https://api.cf.eu10.example.com", CfOrg: "org-2", CfSpace: "space-2",
 	}
 	notStarted := db.CpiTenant{
 		Name: "tenant-ns", LifecycleState: lifecycle.TenantReady,
 		TmsExtensionState: lifecycle.TmsNotStarted,
-		CfApiEndpoint: "https://api.cf.eu10.example.com", CfOrg: "org-3", CfSpace: "space-3",
+		CfApiEndpoint:     "https://api.cf.eu10.example.com", CfOrg: "org-3", CfSpace: "space-3",
 	}
 	for _, tn := range []*db.CpiTenant{&bootstrapped1, &bootstrapped2, &notStarted} {
 		if err := database.Create(tn).Error; err != nil {
@@ -198,14 +198,14 @@ func TestUpsertCpiTenant_Update_IgnoresTmsFields(t *testing.T) {
 	body := map[string]any{
 		"ID":                    tenant.ID,
 		"Name":                  "whitelist-test-renamed",
-		"TmsExtensionState":    "not_started",
-		"TmsSourceNodeName":    "hacked-node",
-		"TmsSourceNodeID":      999,
+		"TmsExtensionState":     "not_started",
+		"TmsSourceNodeName":     "hacked-node",
+		"TmsSourceNodeID":       999,
 		"PirApiDestinationName": "HACKED_PIR",
-		"LifecycleState":       "draft",
-		"CfApiEndpoint":        "",
-		"CfOrg":                "",
-		"CfSpace":              "",
+		"LifecycleState":        "draft",
+		"CfApiEndpoint":         "",
+		"CfOrg":                 "",
+		"CfSpace":               "",
 	}
 
 	w := postJSON(t, h.UpsertCpiTenant, body)

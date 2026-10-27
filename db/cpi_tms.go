@@ -136,17 +136,12 @@ type CpiTenant struct {
 	TransportManagementDestStatus lifecycle.PrerequisiteStatus `gorm:"default:'missing'"`
 
 	// TMS node binding.
-	TmsSourceNodeName   string
-	TmsSourceNodeID     uint
-	CentralTmsContextID *uint
+	TmsSourceNodeName string
+	TmsSourceNodeID   uint
 
 	// CasEngineDestinationName is the provider-side destination for calling CAS.
 	// Default naming: "CPIDELIVERY_CAS_{tenantID}".  Written by TMS extension bootstrap.
 	CasEngineDestinationName string
-
-	// TmsNodeRegistrationStatus is superseded by TmsExtensionState.
-	// Deprecated: retained only so the DB column is not orphaned by GORM.
-	TmsNodeRegistrationStatus lifecycle.PrerequisiteStatus `gorm:"default:'missing'"`
 
 	// ── Audit ───────────────────────────────────────────────────────────────────────
 

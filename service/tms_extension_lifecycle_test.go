@@ -46,10 +46,10 @@ func TestTmsTransitions_AllValidEdges(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			svc, database := newTestSvc(t)
 			tenant := db.CpiTenant{
-				Name:           tt.name,
-				CfApiEndpoint:  "https://test",
-				CfOrg:          tt.name,
-				LifecycleState: lifecycle.TenantReady,
+				Name:              tt.name,
+				CfApiEndpoint:     "https://test",
+				CfOrg:             tt.name,
+				LifecycleState:    lifecycle.TenantReady,
 				TmsExtensionState: tt.from,
 			}
 			if err := database.Create(&tenant).Error; err != nil {
@@ -101,10 +101,10 @@ func TestTmsTransitions_InvalidEdgesRejected(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			svc, database := newTestSvc(t)
 			tenant := db.CpiTenant{
-				Name:           tt.name,
-				CfApiEndpoint:  "https://test",
-				CfOrg:          tt.name,
-				LifecycleState: lifecycle.TenantReady,
+				Name:              tt.name,
+				CfApiEndpoint:     "https://test",
+				CfOrg:             tt.name,
+				LifecycleState:    lifecycle.TenantReady,
 				TmsExtensionState: tt.from,
 			}
 			if err := database.Create(&tenant).Error; err != nil {

@@ -26,42 +26,38 @@ import (
 
 // PreviewTmsExtension runs a read-only inspection of TMS extension prerequisites.
 func (s *Service) PreviewTmsExtension(ctx context.Context, tenantID uint, cfToken string) (*BootstrapPreview, error) {
-	tenant, err := s.getTenantForBootstrap(tenantID)
-	if err != nil {
-		return nil, err
+	var tenant db.CpiTenant
+	if err := s.DB.First(&tenant, tenantID).Error; err != nil {
+		return nil, fmt.Errorf("tenant %d not found: %w", tenantID, err)
 	}
-	inspector, err := newInspector(tenant, cfToken)
+	inspector, err := newInspector(&tenant, cfToken)
 	if err != nil {
 		return nil, fmt.Errorf("tms preview: %w", err)
 	}
-	result, err := s.inspectTmsExtension(ctx, inspector, tenant)
+	result, err := s.inspectTmsExtension(ctx, inspector, &tenant)
 	if err != nil {
 		return nil, fmt.Errorf("tms preview: inspect: %w", err)
 	}
-	return buildPreview(tenant, result), nil
+	return buildPreview(&tenant, result), nil
 }
 
 // ApplyTmsExtension synchronously inspects the TMS extension prerequisites, then
 // creates a Layer=TMS job and launches the goroutine.
 func (s *Service) ApplyTmsExtension(ctx context.Context, tenantID uint, cfToken string) (uint, error) {
-	tenant, err := s.getTenantForBootstrap(tenantID)
-	if err != nil {
-		return 0, err
-	}
-
-	// Phase 1 only claims mutual exclusion — prereq reset is deferred to Phase 3 (§2.1.1).
+	// Phase 1: read full tenant under SELECT FOR UPDATE (R5).
+	// No separate pre-read: Phase 1's First handles 404 and acquires the row lock.
+	// Only claims mutual exclusion — prereq reset is deferred to Phase 3 (§2.1.1).
+	var tenant db.CpiTenant
 	if err := s.DB.Transaction(func(tx *gorm.DB) error {
-		var t db.CpiTenant
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Select("id", "lifecycle_state", "tms_extension_state").
-			First(&t, tenantID).Error; err != nil {
+			First(&tenant, tenantID).Error; err != nil {
 			return err
 		}
 		// Precondition: tenant must be onboarded.
 		// Covers: draft, configured (not yet onboarded),
 		// and readying (BASE bootstrap running — mutual exclusion).
-		if !t.IsOnboarded() {
-			return fmt.Errorf("tenant %d is not onboarded (LifecycleState=%s)", tenantID, t.LifecycleState)
+		if !tenant.IsOnboarded() {
+			return fmt.Errorf("tenant %d is not onboarded (LifecycleState=%s)", tenantID, tenant.LifecycleState)
 		}
 		return s.transitionTmsWithTx(tx, tenantID, TmsEventApplyStarted)
 	}); err != nil {
@@ -69,22 +65,22 @@ func (s *Service) ApplyTmsExtension(ctx context.Context, tenantID uint, cfToken 
 	}
 
 	// Synchronous inspect (TMS extension resources).
-	inspector, err := newInspector(tenant, cfToken)
+	inspector, err := newInspector(&tenant, cfToken)
 	if err != nil {
-		s.failTmsPhase2(tenantID, "INSPECT_FAILED")
+		s.failTmsPhase2(tenantID, lifecycle.ReasonInspectFailed)
 		return 0, fmt.Errorf("tms apply: build inspector: %w", err)
 	}
-	result, err := s.inspectTmsExtension(ctx, inspector, tenant)
+	result, err := s.inspectTmsExtension(ctx, inspector, &tenant)
 	if err != nil {
-		s.failTmsPhase2(tenantID, "INSPECT_FAILED")
+		s.failTmsPhase2(tenantID, lifecycle.ReasonInspectFailed)
 		return 0, fmt.Errorf("tms apply: inspect: %w", err)
 	}
 	if len(result.PermissionIssues) > 0 {
-		s.failTmsPhase2(tenantID, "PERMISSION_BLOCKED")
+		s.failTmsPhase2(tenantID, lifecycle.ReasonPermissionBlocked)
 		return 0, fmt.Errorf("tms apply: permission issues: %v", result.PermissionIssues)
 	}
 	if len(result.WaitingUserAction) > 0 {
-		s.failTmsPhase2(tenantID, "WAITING_USER_ACTION")
+		s.failTmsPhase2(tenantID, lifecycle.ReasonWaitingUserAction)
 		return 0, fmt.Errorf("tms apply: waiting user action: %v", result.WaitingUserAction)
 	}
 
@@ -104,11 +100,11 @@ func (s *Service) ApplyTmsExtension(ctx context.Context, tenantID uint, cfToken 
 		}
 		return tx.Create(job).Error
 	}); err != nil {
-		_ = s.TransitionTms(tenantID, TmsEventApplyFailed)
+		s.failTmsPhase2(tenantID, lifecycle.ReasonApplyStartFailed)
 		return 0, fmt.Errorf("tms apply: create job: %w", err)
 	}
 
-	go s.runTmsExtensionBootstrap(tenant, job.ID, cfToken, result)
+	go s.runTmsExtensionBootstrap(&tenant, job.ID, cfToken, result)
 	return job.ID, nil
 }
 
@@ -136,7 +132,6 @@ func (s *Service) ResetTmsExtension(tenantID uint) error {
 		if err := tx.Model(&db.CpiTenant{}).Where("id = ?", tenantID).Updates(map[string]any{
 			"tms_source_node_name":        "",
 			"tms_source_node_id":          0,
-			"central_tms_context_id":      nil,
 			"cas_engine_destination_name": "",
 		}).Error; err != nil {
 			return fmt.Errorf("tms reset: clear TMS product fields: %w", err)
@@ -175,13 +170,16 @@ func resetTmsPrereqs(tx *gorm.DB, tenantID uint, blockingReason string) error {
 // failTmsPhase2 atomically rolls back TmsExtensionState and writes tms_blocking_reason
 // when Phase 2 (synchronous inspect) fails.
 func (s *Service) failTmsPhase2(tenantID uint, reason string) {
-	_ = s.DB.Transaction(func(tx *gorm.DB) error {
+	if err := s.DB.Transaction(func(tx *gorm.DB) error {
 		if err := s.transitionTmsWithTx(tx, tenantID, TmsEventApplyFailed); err != nil {
 			return err
 		}
 		return tx.Model(&db.CpiTenant{}).Where("id = ?", tenantID).
 			Update("tms_blocking_reason", reason).Error
-	})
+	}); err != nil {
+		s.Logger.Errorw("failTmsPhase2: rollback failed; tenant may be stuck in bootstrapping until restart recovery",
+			"component", "tms-bootstrap", "tenant_id", tenantID, "reason", reason, "error", err)
+	}
 }
 
 // inspectTmsExtension checks TMS-specific resources (CAS, destination/lite, subscriber destinations).
@@ -361,10 +359,9 @@ func (s *Service) runTmsExtensionBootstrap(tenant *db.CpiTenant, jobID uint, cfT
 	}
 
 	// ── CHECK_DESTINATIONS (subscriber-side) ─────────────────────────────────
-	// Load Central TMS context NOW — state is bootstrapping, so UpsertCentralTmsContext
-	// is blocked (409).  Reading here instead of ApplyTmsExtension eliminates the
-	// race window where Central TMS could change between the read and the transition
-	// to bootstrapping.
+	// Load Central TMS context NOW — state is bootstrapping, so concurrent
+	// UpsertCentralTmsContext will either wait on FOR UPDATE (R4) or see
+	// bootstrapping and return 409.
 	setStep(StepCheckDestinations)
 	tmsCtx, err := loadTmsContext(s.DB)
 	if err != nil {
