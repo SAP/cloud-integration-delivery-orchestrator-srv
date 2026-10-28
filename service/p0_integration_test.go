@@ -12,6 +12,9 @@ import (
 
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/lifecycle"
+
+	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 // ── §6.1: Node switch from bootstrapped → node_confirmed ────────────────────
@@ -717,5 +720,248 @@ func TestApplyTmsExtension_RejectsWhenBaseReadying(t *testing.T) {
 	}
 	if !errorContains(err, "not onboarded") && !errorContains(err, "bootstrap is running") {
 		t.Errorf("error = %q, want it to mention not onboarded or bootstrap running", err)
+	}
+}
+
+// ── L18: Test gaps — RecoverStuckBootstraps ─────────────────────────────────
+
+func TestRecoverStuckBootstraps(t *testing.T) {
+	database := newTestDB(t)
+	svc := &Service{DB: database, Logger: zap.NewNop().Sugar()}
+
+	// Seed tenants in various states.
+	tenants := []db.CpiTenant{
+		{Name: "stuck-readying", CfApiEndpoint: "https://a", CfOrg: "o1", LifecycleState: lifecycle.TenantReadying},
+		{Name: "stuck-bootstrapping", CfApiEndpoint: "https://a", CfOrg: "o2", LifecycleState: lifecycle.TenantReady, TmsExtensionState: lifecycle.TmsBootstrapping},
+		{Name: "healthy-ready", CfApiEndpoint: "https://a", CfOrg: "o3", LifecycleState: lifecycle.TenantReady, TmsExtensionState: lifecycle.TmsBootstrapped},
+		{Name: "healthy-configured", CfApiEndpoint: "https://a", CfOrg: "o4", LifecycleState: lifecycle.TenantConfigured},
+	}
+	for i := range tenants {
+		database.Create(&tenants[i])
+	}
+
+	// Seed running jobs for stuck tenants.
+	database.Create(&db.TenantBootstrapJob{CpiTenantID: tenants[0].ID, Layer: lifecycle.LayerBase, State: lifecycle.JobRunning})
+	database.Create(&db.TenantBootstrapJob{CpiTenantID: tenants[1].ID, Layer: lifecycle.LayerTMS, State: lifecycle.JobRunning})
+	// Seed a finished job that should NOT be touched.
+	database.Create(&db.TenantBootstrapJob{CpiTenantID: tenants[2].ID, Layer: lifecycle.LayerBase, State: lifecycle.JobFinished})
+
+	svc.RecoverStuckBootstraps()
+
+	// Verify stuck tenants recovered.
+	var readying db.CpiTenant
+	database.Where("name = 'stuck-readying'").First(&readying)
+	if readying.LifecycleState != lifecycle.TenantConfigured {
+		t.Errorf("stuck-readying: LifecycleState = %q, want configured", readying.LifecycleState)
+	}
+	if readying.BlockingReason != lifecycle.ReasonBootstrapInterrupted {
+		t.Errorf("stuck-readying: BlockingReason = %q, want %q", readying.BlockingReason, lifecycle.ReasonBootstrapInterrupted)
+	}
+
+	var bootstrapping db.CpiTenant
+	database.Where("name = 'stuck-bootstrapping'").First(&bootstrapping)
+	if bootstrapping.TmsExtensionState != lifecycle.TmsNodeConfirmed {
+		t.Errorf("stuck-bootstrapping: TmsExtensionState = %q, want node_confirmed", bootstrapping.TmsExtensionState)
+	}
+	if bootstrapping.TmsBlockingReason != lifecycle.ReasonBootstrapInterrupted {
+		t.Errorf("stuck-bootstrapping: TmsBlockingReason = %q, want %q", bootstrapping.TmsBlockingReason, lifecycle.ReasonBootstrapInterrupted)
+	}
+
+	// Verify healthy tenants untouched.
+	var ready db.CpiTenant
+	database.Where("name = 'healthy-ready'").First(&ready)
+	if ready.LifecycleState != lifecycle.TenantReady || ready.TmsExtensionState != lifecycle.TmsBootstrapped {
+		t.Errorf("healthy-ready: state changed unexpectedly: lifecycle=%q tms=%q", ready.LifecycleState, ready.TmsExtensionState)
+	}
+
+	// Verify running jobs marked failed, finished job untouched.
+	var jobs []db.TenantBootstrapJob
+	database.Where("state = ?", lifecycle.JobFailed).Find(&jobs)
+	if len(jobs) != 2 {
+		t.Errorf("expected 2 failed jobs, got %d", len(jobs))
+	}
+	var finishedJobs []db.TenantBootstrapJob
+	database.Where("state = ?", lifecycle.JobFinished).Find(&finishedJobs)
+	if len(finishedJobs) != 1 {
+		t.Errorf("expected 1 finished job (untouched), got %d", len(finishedJobs))
+	}
+}
+
+// ── L18: Test gaps — R2 field assertions ────────────────────────────────────
+
+func TestSelectTmsNode_FromBootstrapped_SetsR2Fields(t *testing.T) {
+	database := newTestDB(t)
+	mock := &mockTMSClient{
+		nodes: []db.TransportNode{{ID: 200, Name: "new-node"}},
+	}
+	svc := &Service{
+		DB:     database,
+		TmsSvc: func(ctx context.Context) (TransportService, error) { return mock, nil },
+	}
+
+	tenant := db.CpiTenant{
+		Name:                          "r2-fields",
+		LifecycleState:                lifecycle.TenantReady,
+		TmsExtensionState:             lifecycle.TmsBootstrapped,
+		TmsSourceNodeName:             "old-node",
+		TmsSourceNodeID:               100,
+		TransportManagementDestStatus: lifecycle.PrereqReady,
+		TmsBlockingReason:             "",
+	}
+	database.Create(&tenant)
+
+	if err := svc.SelectTmsNode(t.Context(), tenant.ID, 200, "new-node"); err != nil {
+		t.Fatalf("SelectTmsNode: %v", err)
+	}
+
+	var got db.CpiTenant
+	database.First(&got, tenant.ID)
+	if got.TransportManagementDestStatus != lifecycle.PrereqMissing {
+		t.Errorf("TransportManagementDestStatus = %q, want %q", got.TransportManagementDestStatus, lifecycle.PrereqMissing)
+	}
+	if got.TmsBlockingReason != lifecycle.TmsReasonNodeChanged {
+		t.Errorf("TmsBlockingReason = %q, want %q", got.TmsBlockingReason, lifecycle.TmsReasonNodeChanged)
+	}
+}
+
+// ── L18: Test gaps — Rule 3 (PIR key invalidation) ──────────────────────────
+
+func TestRule3_PirKeyInvalidation(t *testing.T) {
+	svc, database := newTestSvc(t)
+
+	// Bootstrapped tenant — should be invalidated by Rule 3.
+	bootstrapped := db.CpiTenant{
+		Name:              "rule3-bootstrapped",
+		CfApiEndpoint:     "https://a",
+		CfOrg:             "rule3-org1",
+		LifecycleState:    lifecycle.TenantReady,
+		TmsExtensionState: lifecycle.TmsBootstrapped,
+	}
+	database.Create(&bootstrapped)
+
+	// node_confirmed tenant — should NOT be affected.
+	confirmed := db.CpiTenant{
+		Name:              "rule3-confirmed",
+		CfApiEndpoint:     "https://a",
+		CfOrg:             "rule3-org2",
+		LifecycleState:    lifecycle.TenantReady,
+		TmsExtensionState: lifecycle.TmsNodeConfirmed,
+	}
+	database.Create(&confirmed)
+
+	// Simulate Rule 3: transition bootstrapped → node_confirmed + PIR_KEY_CHANGED.
+	if err := svc.DB.Transaction(func(tx *gorm.DB) error {
+		if err := svc.transitionTmsWithTx(tx, bootstrapped.ID, TmsEventInvalidated); err != nil {
+			return err
+		}
+		return tx.Model(&db.CpiTenant{}).Where("id = ?", bootstrapped.ID).
+			Update("tms_blocking_reason", lifecycle.TmsReasonPirKeyChanged).Error
+	}); err != nil {
+		t.Fatalf("Rule 3 transition: %v", err)
+	}
+
+	var got db.CpiTenant
+	database.First(&got, bootstrapped.ID)
+	if got.TmsExtensionState != lifecycle.TmsNodeConfirmed {
+		t.Errorf("bootstrapped: TmsExtensionState = %q, want node_confirmed", got.TmsExtensionState)
+	}
+	if got.TmsBlockingReason != lifecycle.TmsReasonPirKeyChanged {
+		t.Errorf("bootstrapped: TmsBlockingReason = %q, want %q", got.TmsBlockingReason, lifecycle.TmsReasonPirKeyChanged)
+	}
+
+	// Rule 3 on node_confirmed should be rejected (no edge from node_confirmed for TmsEventInvalidated).
+	err := svc.DB.Transaction(func(tx *gorm.DB) error {
+		return svc.transitionTmsWithTx(tx, confirmed.ID, TmsEventInvalidated)
+	})
+	if err == nil {
+		t.Fatal("Rule 3 should be rejected for node_confirmed, got nil")
+	}
+
+	// Verify node_confirmed tenant unchanged.
+	database.First(&got, confirmed.ID)
+	if got.TmsExtensionState != lifecycle.TmsNodeConfirmed {
+		t.Errorf("confirmed: TmsExtensionState = %q, want node_confirmed (unchanged)", got.TmsExtensionState)
+	}
+}
+
+// ── L18: Test gaps — Rule 4 covers node_confirmed ───────────────────────────
+
+func TestRule4_UpsertCentralTms_InvalidatesNodeConfirmed(t *testing.T) {
+	svc, database := newTestSvc(t)
+
+	// Seed Central TMS.
+	database.Create(&db.CentralTmsContext{TmsApiDestinationName: "old-dest"})
+
+	// Bootstrapped tenant.
+	bootstrapped := db.CpiTenant{
+		Name:              "rule4-bootstrapped",
+		CfApiEndpoint:     "https://a",
+		CfOrg:             "rule4-org1",
+		LifecycleState:    lifecycle.TenantReady,
+		TmsExtensionState: lifecycle.TmsBootstrapped,
+		TmsSourceNodeName: "node-a",
+		TmsSourceNodeID:   10,
+	}
+	database.Create(&bootstrapped)
+
+	// node_confirmed tenant with node — should also be invalidated (R3 fix).
+	confirmed := db.CpiTenant{
+		Name:              "rule4-confirmed",
+		CfApiEndpoint:     "https://a",
+		CfOrg:             "rule4-org2",
+		LifecycleState:    lifecycle.TenantReady,
+		TmsExtensionState: lifecycle.TmsNodeConfirmed,
+		TmsSourceNodeName: "node-b",
+		TmsSourceNodeID:   20,
+	}
+	database.Create(&confirmed)
+
+	// not_started tenant — should be unaffected.
+	notStarted := db.CpiTenant{
+		Name:              "rule4-notstarted",
+		CfApiEndpoint:     "https://a",
+		CfOrg:             "rule4-org3",
+		LifecycleState:    lifecycle.TenantReady,
+		TmsExtensionState: lifecycle.TmsNotStarted,
+	}
+	database.Create(&notStarted)
+
+	// Change Central TMS destination.
+	result, err := svc.UpsertCentralTmsContext(db.CentralTmsContext{TmsApiDestinationName: "new-dest"})
+	if err != nil {
+		t.Fatalf("UpsertCentralTmsContext: %v", err)
+	}
+	if result.AffectedTenants != 2 {
+		t.Errorf("AffectedTenants = %d, want 2", result.AffectedTenants)
+	}
+
+	// Both should be reset to not_started.
+	var got db.CpiTenant
+	database.First(&got, bootstrapped.ID)
+	if got.TmsExtensionState != lifecycle.TmsNotStarted {
+		t.Errorf("bootstrapped: TmsExtensionState = %q, want not_started", got.TmsExtensionState)
+	}
+	if got.TmsSourceNodeName != "" {
+		t.Errorf("bootstrapped: TmsSourceNodeName = %q, want empty", got.TmsSourceNodeName)
+	}
+	if got.TmsBlockingReason != lifecycle.TmsReasonCentralTmsChanged {
+		t.Errorf("bootstrapped: TmsBlockingReason = %q, want %q", got.TmsBlockingReason, lifecycle.TmsReasonCentralTmsChanged)
+	}
+
+	database.First(&got, confirmed.ID)
+	if got.TmsExtensionState != lifecycle.TmsNotStarted {
+		t.Errorf("confirmed: TmsExtensionState = %q, want not_started", got.TmsExtensionState)
+	}
+	if got.TmsSourceNodeName != "" {
+		t.Errorf("confirmed: TmsSourceNodeName = %q, want empty", got.TmsSourceNodeName)
+	}
+	if got.TmsSourceNodeID != 0 {
+		t.Errorf("confirmed: TmsSourceNodeID = %d, want 0", got.TmsSourceNodeID)
+	}
+
+	// not_started should be unchanged.
+	database.First(&got, notStarted.ID)
+	if got.TmsExtensionState != lifecycle.TmsNotStarted {
+		t.Errorf("notstarted: TmsExtensionState = %q, want not_started", got.TmsExtensionState)
 	}
 }
