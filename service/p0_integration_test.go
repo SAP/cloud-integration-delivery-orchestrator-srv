@@ -7,6 +7,7 @@ package service
 // handler layer — those are in handler/p0_integration_test.go.
 
 import (
+	"context"
 	"testing"
 
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
@@ -16,7 +17,16 @@ import (
 // ── §6.1: Node switch from bootstrapped → node_confirmed ────────────────────
 
 func TestSelectTmsNode_FromBootstrapped_ResetsToNodeConfirmed(t *testing.T) {
-	svc, database := newTestSvc(t)
+	database := newTestDB(t)
+	mock := &mockTMSClient{
+		nodes: []db.TransportNode{
+			{ID: 200, Name: "new-node"},
+		},
+	}
+	svc := &Service{
+		DB:     database,
+		TmsSvc: func(ctx context.Context) (TransportService, error) { return mock, nil },
+	}
 
 	tenant := db.CpiTenant{
 		Name:                          "node-switch",
@@ -53,7 +63,17 @@ func TestSelectTmsNode_FromBootstrapped_ResetsToNodeConfirmed(t *testing.T) {
 }
 
 func TestSelectTmsNode_FromNodeConfirmed_Succeeds(t *testing.T) {
-	svc, database := newTestSvc(t)
+	database := newTestDB(t)
+	mock := &mockTMSClient{
+		nodes: []db.TransportNode{
+			{ID: 1, Name: "first-pick"},
+			{ID: 2, Name: "second-pick"},
+		},
+	}
+	svc := &Service{
+		DB:     database,
+		TmsSvc: func(ctx context.Context) (TransportService, error) { return mock, nil },
+	}
 
 	tenant := db.CpiTenant{
 		Name:              "re-select",
@@ -78,6 +98,80 @@ func TestSelectTmsNode_FromNodeConfirmed_Succeeds(t *testing.T) {
 	}
 	if got.TmsSourceNodeName != "second-pick" {
 		t.Errorf("TmsSourceNodeName = %q, want %q", got.TmsSourceNodeName, "second-pick")
+	}
+}
+
+// ── §6.1: R4-B — SelectTmsNode validates node against current TMS system ────
+
+func TestSelectTmsNode_RejectsInvalidNode(t *testing.T) {
+	database := newTestDB(t)
+	// Mock TMS that knows only node 100 "valid-node".
+	mock := &mockTMSClient{
+		nodes: []db.TransportNode{
+			{ID: 100, Name: "valid-node"},
+		},
+	}
+	svc := &Service{
+		DB:     database,
+		TmsSvc: func(ctx context.Context) (TransportService, error) { return mock, nil },
+	}
+
+	tenant := db.CpiTenant{
+		Name:              "node-validate",
+		LifecycleState:    lifecycle.TenantConfigured,
+		TmsExtensionState: lifecycle.TmsNotStarted,
+	}
+	if err := database.Create(&tenant).Error; err != nil {
+		t.Fatalf("create tenant: %v", err)
+	}
+
+	// Valid node should succeed.
+	if err := svc.SelectTmsNode(t.Context(), tenant.ID, 100, "valid-node"); err != nil {
+		t.Fatalf("SelectTmsNode with valid node: %v", err)
+	}
+	var got db.CpiTenant
+	database.First(&got, tenant.ID)
+	if got.TmsSourceNodeID != 100 || got.TmsSourceNodeName != "valid-node" {
+		t.Errorf("node = %d/%q, want 100/valid-node", got.TmsSourceNodeID, got.TmsSourceNodeName)
+	}
+
+	// Invalid node (wrong ID) should be rejected.
+	if err := svc.SelectTmsNode(t.Context(), tenant.ID, 999, "nonexistent"); err == nil {
+		t.Fatal("expected error for nonexistent node, got nil")
+	}
+	// Verify node fields unchanged.
+	database.First(&got, tenant.ID)
+	if got.TmsSourceNodeID != 100 {
+		t.Errorf("node ID changed to %d after rejected SelectTmsNode", got.TmsSourceNodeID)
+	}
+
+	// Mismatched name (ID exists but name differs) should be rejected.
+	if err := svc.SelectTmsNode(t.Context(), tenant.ID, 100, "wrong-name"); err == nil {
+		t.Fatal("expected error for name mismatch, got nil")
+	}
+}
+
+func TestSelectTmsNode_RejectsTmsSvcNil(t *testing.T) {
+	svc, database := newTestSvc(t) // TmsSvc is nil
+
+	tenant := db.CpiTenant{
+		Name:              "no-tms",
+		LifecycleState:    lifecycle.TenantConfigured,
+		TmsExtensionState: lifecycle.TmsNotStarted,
+	}
+	if err := database.Create(&tenant).Error; err != nil {
+		t.Fatalf("create tenant: %v", err)
+	}
+
+	// Should be rejected — no TMS configured.
+	if err := svc.SelectTmsNode(t.Context(), tenant.ID, 42, "any-node"); err == nil {
+		t.Fatal("expected error when TmsSvc is nil, got nil")
+	}
+	// Verify node fields unchanged.
+	var got db.CpiTenant
+	database.First(&got, tenant.ID)
+	if got.TmsSourceNodeID != 0 {
+		t.Errorf("node ID = %d, want 0 (unchanged)", got.TmsSourceNodeID)
 	}
 }
 

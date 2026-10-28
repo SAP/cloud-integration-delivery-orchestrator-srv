@@ -86,7 +86,34 @@ var allowedTmsTransitions = map[lifecycle.TmsExtensionState]map[TmsEvent]lifecyc
 // SelectTmsNode atomically transitions to node_confirmed and writes node fields.
 // Also unconditionally marks TransportManagement destination as stale (R2 fix).
 // Rejects draft tenants (CF identity not yet configured).
+//
+// Validates that the node exists in the current TMS system before writing,
+// preventing stale UI node lists from writing an invalid node after Central TMS
+// has been changed (R4-B). Requires TmsSvc (Central TMS must be configured).
 func (s *Service) SelectTmsNode(ctx context.Context, tenantID uint, nodeID uint, nodeName string) error {
+	// Validate node against current TMS system before acquiring the DB lock.
+	if s.TmsSvc == nil {
+		return fmt.Errorf("SelectTmsNode: TMS not configured")
+	}
+	tmsClient, err := s.TmsSvc(ctx)
+	if err != nil {
+		return fmt.Errorf("SelectTmsNode: TMS not available: %w", err)
+	}
+	nodes, err := tmsClient.GetNodes(ctx)
+	if err != nil {
+		return fmt.Errorf("SelectTmsNode: cannot verify node: %w", err)
+	}
+	found := false
+	for _, n := range nodes {
+		if n.ID == nodeID && n.Name == nodeName {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("SelectTmsNode: node %d (%q) not found in current TMS system", nodeID, nodeName)
+	}
+
 	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// Draft check under lock — transitionTmsWithTx reads lifecycle_state
 		// but does not enforce the LifecycleState ≠ draft precondition.
