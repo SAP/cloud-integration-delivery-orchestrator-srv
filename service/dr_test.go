@@ -29,7 +29,7 @@ type drTestSetup struct {
 	artifactName   string
 	artifactType   consts.ArtifactType
 	packageID      string
-	cpiFactory     IntegrationFactory // pre-configured mock: serves downgrade check
+	cpiFactory     func(ctx context.Context, tenantID uint) (cpi.IntegrationService, error) // pre-configured mock: serves downgrade check
 }
 
 func setupDRTest(t *testing.T) drTestSetup {
@@ -68,7 +68,7 @@ func setupDRTest(t *testing.T) drTestSetup {
 	// cpiFactory serves PIR lookup (GetPackageArtifactsByType) and downgrade check (GetDesignTimeArtifact).
 	// GetPackageArtifactsByType returns the artifact with the real tech ID so resolveTechID succeeds.
 	// GetDesignTimeArtifact returns the same version so the downgrade check passes.
-	cpiFactory := func(ctx context.Context, tenant string) (IntegrationService, error) {
+	cpiFactory := func(ctx context.Context, tenantID uint) (cpi.IntegrationService, error) {
 		return &mockCPIClientWithDesignTime{
 			mockCPIClient: mockCPIClient{
 				artifacts: map[string][]cpi.ArtifactCommonItem{

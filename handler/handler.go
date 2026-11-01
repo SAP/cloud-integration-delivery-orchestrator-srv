@@ -6,7 +6,6 @@ import (
 	"net/url"
 
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cf"
-	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cpi"
 	gh "github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/github"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/xsuaa"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/service"
@@ -24,7 +23,6 @@ type Handler struct {
 	svc         *service.Service
 	db          *gorm.DB
 	logger      *zap.SugaredLogger
-	cpi         *cpi.Manager
 	xsuaa       *xsuaa.UaaClient
 	destSvc     *cf.DestinationServiceClient
 	hub         *service.WSHub
@@ -104,7 +102,6 @@ func NewHandler(
 	svc *service.Service,
 	db *gorm.DB,
 	logger *zap.SugaredLogger,
-	cpiManager *cpi.Manager,
 	xsuaaClient *xsuaa.UaaClient,
 	destSvc *cf.DestinationServiceClient,
 	hub *service.WSHub,
@@ -114,7 +111,6 @@ func NewHandler(
 		svc:         svc,
 		db:          db,
 		logger:      logger,
-		cpi:         cpiManager,
 		xsuaa:       xsuaaClient,
 		destSvc:     destSvc,
 		hub:         hub,

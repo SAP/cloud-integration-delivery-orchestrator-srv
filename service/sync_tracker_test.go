@@ -99,7 +99,7 @@ func TestRecoverActiveSyncs_RecoversDRWithDeployInProgress(t *testing.T) {
 		DeployState:       lifecycle.DeployInProgress,
 	})
 
-	svc := newTestService(func(ctx context.Context, tenant string) (IntegrationService, error) {
+	svc := newTestService(func(ctx context.Context, tenantID uint) (cpi.IntegrationService, error) {
 		return &mockRuntimeCPI{runtimeByID: map[string]cpi.RuntimeArtifact{}}, nil
 	})
 	svc.SyncTracker = NewSyncTracker()

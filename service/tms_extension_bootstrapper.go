@@ -363,13 +363,13 @@ func (s *Service) runTmsExtensionBootstrap(tenant *db.CpiTenant, jobID uint, cfT
 	// UpsertCentralTmsContext will either wait on FOR UPDATE (R4) or see
 	// bootstrapping and return 409.
 	setStep(StepCheckDestinations)
-	tmsCtx, err := loadTmsContext(s.DB)
+	tmsDest, err := s.TMS.Destination(ctx)
 	if err != nil {
 		fail(lifecycle.FailureRemoteSystemError, StepCheckDestinations,
-			fmt.Sprintf("load Central TMS context: %s", err.Error()))
+			fmt.Sprintf("get TMS destination snapshot: %s", err.Error()))
 		return
 	}
-	destActs, err := bootstrapper.ensureSubscriberDestinations(ctx, tenant, result, tmsCtx)
+	destActs, err := bootstrapper.ensureSubscriberDestinations(ctx, tenant, result, tmsDest)
 	if err != nil {
 		fail(lifecycle.FailureRemoteSystemError, StepCheckDestinations, err.Error())
 		return
@@ -381,7 +381,7 @@ func (s *Service) runTmsExtensionBootstrap(tenant *db.CpiTenant, jobID uint, cfT
 	if result.CasStandardInstanceGUID != "" {
 		markReady("content_assembly_dest_status")
 	}
-	if tmsCtx != nil && s.ProviderDest != nil {
+	if tmsDest.URL != "" {
 		markReady("transport_management_dest_status")
 	}
 
@@ -462,7 +462,7 @@ func (b *bootstrapApplier) ensureCasProviderDestination(ctx context.Context, ten
 //
 // Provider-side destinations (CPIDELIVERY_PIR_{id}, CPIDELIVERY_CAS_{id}) are
 // NOT written here — see ensurePirProviderDestination and ensureCasProviderDestination.
-func (b *bootstrapApplier) ensureSubscriberDestinations(ctx context.Context, tenant *db.CpiTenant, result *InspectionResult, tmsCtx *db.CentralTmsContext) ([]credentialAction, error) {
+func (b *bootstrapApplier) ensureSubscriberDestinations(ctx context.Context, tenant *db.CpiTenant, result *InspectionResult, tmsDest cf.Destination) ([]credentialAction, error) {
 	if result.DestinationServiceInstanceGUID == "" {
 		return nil, fmt.Errorf("destination service instance GUID is empty")
 	}
@@ -490,7 +490,7 @@ func (b *bootstrapApplier) ensureSubscriberDestinations(ctx context.Context, ten
 	var actions []credentialAction
 
 	// Build subscriber-side destination payloads from service key credentials.
-	destinations, err := b.buildSubscriberDestinations(ctx, result, tenant, tmsCtx)
+	destinations, err := b.buildSubscriberDestinations(ctx, result, tenant, tmsDest)
 	if err != nil {
 		return nil, err
 	}
@@ -525,7 +525,7 @@ func (b *bootstrapApplier) ensureSubscriberDestinations(ctx context.Context, ten
 //
 // This function validates all prerequisites and returns an error if any are
 // missing, serving as a final safety net against upstream regressions.
-func (b *bootstrapApplier) buildSubscriberDestinations(ctx context.Context, result *InspectionResult, tenant *db.CpiTenant, tmsCtx *db.CentralTmsContext) ([]cf.Destination, error) {
+func (b *bootstrapApplier) buildSubscriberDestinations(ctx context.Context, result *InspectionResult, tenant *db.CpiTenant, tmsDest cf.Destination) ([]cf.Destination, error) {
 	var dests []cf.Destination
 
 	// CloudIntegration — PIR api service key credentials.
@@ -564,24 +564,11 @@ func (b *bootstrapApplier) buildSubscriberDestinations(ctx context.Context, resu
 	}
 	dests = append(dests, casDest)
 
-	// TransportManagementService — TMS OAuth credentials copied from provider-side.
-	if tmsCtx == nil || tmsCtx.TmsApiDestinationName == "" {
-		return nil, fmt.Errorf("Central TMS context not configured — cannot create TransportManagementService destination")
-	}
-	if b.providerDest == nil {
-		return nil, fmt.Errorf("provider Destination Service client is nil — cannot resolve TMS credentials")
-	}
+	// TransportManagementService — TMS OAuth credentials from manager's cached snapshot.
 	if tenant.TmsSourceNodeName == "" {
 		return nil, fmt.Errorf("TmsSourceNodeName is empty — node selection is incomplete")
 	}
-	tmsDest, err := b.providerDest.GetDestination(ctx, tmsCtx.TmsApiDestinationName)
-	if err != nil {
-		return nil, fmt.Errorf("get TMS API destination %q from provider: %w", tmsCtx.TmsApiDestinationName, err)
-	}
-	if tmsDest == nil {
-		return nil, fmt.Errorf("TMS API destination %q not found in provider Destination Service", tmsCtx.TmsApiDestinationName)
-	}
-	tmsSubDest := *tmsDest
+	tmsSubDest := tmsDest
 	tmsSubDest.Name = "TransportManagementService"
 	tmsSubDest.Description = fmt.Sprintf("DO NOT MODIFY. TransportManagementService for tenant %d, sourceSystemId=%s. Created by cpi-delivery bootstrap.", tenant.ID, tenant.TmsSourceNodeName)
 	tmsSubDest.SourceSystemId = tenant.TmsSourceNodeName

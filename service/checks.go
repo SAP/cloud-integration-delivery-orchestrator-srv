@@ -81,7 +81,7 @@ func checkVersionPattern(op *db.ArtifactTenantOperation, rule *db.DeliveryRule) 
 }
 
 func (s *Service) checkVersionDowngradeInTenant(ctx context.Context, op *db.ArtifactTenantOperation, targetTenant *db.CpiTenant) error {
-	cli, err := s.CPI(ctx, targetTenant.PirApiDestinationName)
+	cli, err := s.CPI.Get(ctx, targetTenant.ID)
 	if err != nil {
 		return err
 	}
@@ -197,7 +197,7 @@ func (s *Service) TrExist(ctx context.Context, op *db.ArtifactTenantOperation, s
 	if trNumber == "" {
 		return false, fmt.Errorf("artifact %s has empty transport request number", op.ArtifactTechID)
 	}
-	tmsClient, err := s.TmsSvc(ctx)
+	tmsClient, err := s.TMS.Get(ctx)
 	if err != nil {
 		return false, fmt.Errorf("error resolving TMS client: %w", err)
 	}

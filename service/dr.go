@@ -74,7 +74,7 @@ func (s *Service) queryOpsInDrWithAcc(drID uint) (ops []db.ArtifactTenantOperati
 // generate source tenant, included routes and nodes from included tenants
 func (s *Service) SourceAndRoute(ctx context.Context, includedTenants []db.CpiTenant) (sorceTenant *db.CpiTenant, includedRoutes []db.TransportRoute, includedNodes []db.TransportNode, err error) {
 	var transportRoutes []db.TransportRoute
-	tmsClient, err := s.TmsSvc(ctx)
+	tmsClient, err := s.TMS.Get(ctx)
 	if err != nil {
 		return
 	}

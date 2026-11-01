@@ -11,6 +11,15 @@ import (
 	"gorm.io/gorm"
 )
 
+// CasService defines the CAS operations used by the service layer.
+// Satisfied by *CasClient in production; test code may use a mock.
+type CasService interface {
+	ListCloudIntegrationResources(ctx context.Context, packageIDs []string) ([]CatalogContentResource, error)
+	TriggerExport(ctx context.Context, req ExportRequest) (*ExportResponse, error)
+	PollOperation(ctx context.Context, processID string) (*OperationStatus, error)
+	GetOperationConfig(ctx context.Context, processID string) (*OperationConfig, error)
+}
+
 // Manager provides thread-safe, cached access to CAS clients.
 // Clients are created lazily on first access and reused thereafter.
 // Token refresh is handled by the underlying HttpClient's 401 retry mechanism.
@@ -27,7 +36,7 @@ func NewManager(database *gorm.DB, resolver *cf.DestinationServiceClient) *Manag
 
 // Get returns a cached CAS client for the given tenant, creating one if needed.
 // Thread-safe via double-checked locking.
-func (m *Manager) Get(ctx context.Context, tenantID uint) (*CasClient, error) {
+func (m *Manager) Get(ctx context.Context, tenantID uint) (CasService, error) {
 	// Fast path: read lock
 	m.mu.RLock()
 	if cli, ok := m.clients[tenantID]; ok {

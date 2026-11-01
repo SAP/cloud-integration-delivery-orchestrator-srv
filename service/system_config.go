@@ -33,7 +33,7 @@ func (s *Service) CheckDatabase() ConnectivityStatus {
 
 // CheckTMS verifies TMS API connectivity by calling GetNodes.
 func (s *Service) CheckTMS(ctx context.Context) ConnectivityStatus {
-	tmsClient, err := s.TmsSvc(ctx)
+	tmsClient, err := s.TMS.Get(ctx)
 	if err != nil {
 		return ConnectivityStatus{Name: "TMS", Type: "tms", Status: "error", Message: err.Error()}
 	}

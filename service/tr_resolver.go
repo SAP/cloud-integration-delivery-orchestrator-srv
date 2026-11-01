@@ -79,7 +79,7 @@ func (s *Service) acquireTenantForTR(ctx context.Context, tenantID uint) (db.Cpi
 // packages, fills in the 5 cache fields (3 on op, 2 on artifact), and persists them.
 // On return, every op in the slice is guaranteed to have CasArtifactGUID set (or an
 // error is returned).
-func (s *Service) ensureCasGUIDs(ctx context.Context, casClient CasService, ops []db.ArtifactTenantOperation) error {
+func (s *Service) ensureCasGUIDs(ctx context.Context, casClient cas.CasService, ops []db.ArtifactTenantOperation) error {
 	// Fast path: all GUIDs already cached.
 	allCached := true
 	for i := range ops {
@@ -242,7 +242,7 @@ func (s *Service) GenerateTransportRequest(ctx context.Context, tenantID, delive
 	}
 
 	// ── 4. Build per-tenant CasClient ────────────────────────────────────────
-	casClient, err := s.CAS(ctx, tenantID)
+	casClient, err := s.CAS.Get(ctx, tenantID)
 	if err != nil {
 		return fatalf(fmt.Errorf("GenerateTransportRequest: build CAS client: %w", err))
 	}
@@ -339,7 +339,7 @@ func (s *Service) GenerateTransportRequest(ctx context.Context, tenantID, delive
 // Precondition: op.CasArtifactGUID must be non-empty (ensureCasGUIDs guarantees this).
 func (s *Service) exportOneTR(
 	ctx context.Context,
-	casClient CasService,
+	casClient cas.CasService,
 	tenant *db.CpiTenant,
 	dr *db.DeliveryRequest,
 	op db.ArtifactTenantOperation,

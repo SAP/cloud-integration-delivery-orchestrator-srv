@@ -130,7 +130,7 @@ func (s *Service) collectVersionSnapshot(rule db.DeliveryRule) {
 
 	// Get CPI client for source tenant and fetch package list via PIR
 	sourceTenant := rule.SourceTenant
-	sourceCPI, err := s.CPI(ctx, sourceTenant.PirApiDestinationName)
+	sourceCPI, err := s.CPI.Get(ctx, sourceTenant.ID)
 	if err != nil {
 		completeWithError(fmt.Sprintf("failed to get source tenant CPI client: %s", err))
 		return
@@ -205,7 +205,7 @@ func (s *Service) fetchRuntimeIndex(ctx context.Context, tenants []db.CpiTenant)
 	for _, tenant := range tenants {
 		tenant := tenant // capture loop variable
 		rtGroup.Go(func() error {
-			client, err := s.CPI(rtCtx, tenant.PirApiDestinationName)
+			client, err := s.CPI.Get(rtCtx, tenant.ID)
 			if err != nil {
 				s.L(ctx).Warnw("failed to get CPI client", "component", "version_compare", "tenant", tenant.PirApiDestinationName, "tenant_id", tenant.ID, "error", err)
 				// Store empty map, don't fail entire operation
@@ -286,7 +286,7 @@ func (s *Service) collectPackageSnapshot(
 	for i, tenant := range tenants {
 		i, tenant := i, tenant
 		g.Go(func() error {
-			cpiClient, err := s.CPI(gctx, tenant.PirApiDestinationName)
+			cpiClient, err := s.CPI.Get(gctx, tenant.ID)
 			if err != nil {
 				results[i] = tenantArtifacts{tenantID: tenant.ID, err: err}
 				return nil // error tolerance: don't fail entire group
@@ -589,7 +589,7 @@ func (s *Service) AdhocVersionCompare(ctx context.Context, tenantIDs []uint) (*V
 	sourceTenantID := tenants[0].ID
 
 	// 3. Get source CPI client and fetch package list via PIR
-	sourceCPI, err := s.CPI(ctx, tenants[0].PirApiDestinationName)
+	sourceCPI, err := s.CPI.Get(ctx, tenants[0].ID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get source CPI client: %w", err)
 	}

@@ -183,7 +183,7 @@ func TestSyncDeployState_UpdatesRuntimeStatesAndCreatesConditions(t *testing.T) 
 		DeployState:       lifecycle.DeployInProgress,
 	})
 
-	svc := newTestService(func(ctx context.Context, tenant string) (IntegrationService, error) {
+	svc := newTestService(func(ctx context.Context, tenantID uint) (cpi.IntegrationService, error) {
 		return &mockRuntimeCPI{
 			runtimeByID: map[string]cpi.RuntimeArtifact{
 				"artifact-success": {
@@ -272,7 +272,7 @@ func TestSyncDeployState_PendingDeploy_SkipsWhenRuntimeVersionLower(t *testing.T
 		DeployState:       lifecycle.DeployInProgress,
 	})
 
-	svc := newTestService(func(ctx context.Context, tenant string) (IntegrationService, error) {
+	svc := newTestService(func(ctx context.Context, tenantID uint) (cpi.IntegrationService, error) {
 		return &mockRuntimeCPI{
 			runtimeByID: map[string]cpi.RuntimeArtifact{
 				"artifact-pending": {

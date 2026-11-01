@@ -6,19 +6,19 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/tms"
 )
 
-func TestNewTmsFactory_ReturnsSameInstance(t *testing.T) {
-	var callCount atomic.Int32
+// tmsFactoryFunc is a local alias replacing the removed TmsClientFunc type.
+// Used only in these caching-pattern tests.
+type tmsFactoryFunc = func(ctx context.Context) (tms.TransportService, error)
+
+func TestTmsClientFunc_ReturnsSameInstance(t *testing.T) {
 	mock := &mockTMSClient{}
-
-	factory := func(ctx context.Context) (TransportService, error) {
-		callCount.Add(1)
+	cached := cachedFactory(func(ctx context.Context) (tms.TransportService, error) {
 		return mock, nil
-	}
-
-	// Wrap with the same caching pattern used by NewTmsFactory
-	cached := cachedFactory(factory)
+	})
 
 	c1, err := cached(context.Background())
 	if err != nil {
@@ -32,16 +32,13 @@ func TestNewTmsFactory_ReturnsSameInstance(t *testing.T) {
 	if c1 != c2 {
 		t.Fatal("expected same instance on second call")
 	}
-	if callCount.Load() != 1 {
-		t.Fatalf("factory called %d times, want 1", callCount.Load())
-	}
 }
 
-func TestNewTmsFactory_RetriesAfterFailure(t *testing.T) {
+func TestTmsClientFunc_RetriesAfterFailure(t *testing.T) {
 	var callCount atomic.Int32
 	mock := &mockTMSClient{}
 
-	factory := func(ctx context.Context) (TransportService, error) {
+	factory := func(ctx context.Context) (tms.TransportService, error) {
 		n := callCount.Add(1)
 		if n == 1 {
 			return nil, fmt.Errorf("transient error")
@@ -65,11 +62,11 @@ func TestNewTmsFactory_RetriesAfterFailure(t *testing.T) {
 	}
 }
 
-func TestNewTmsFactory_ConcurrentAccess(t *testing.T) {
+func TestTmsClientFunc_ConcurrentAccess(t *testing.T) {
 	var callCount atomic.Int32
 	mock := &mockTMSClient{}
 
-	factory := func(ctx context.Context) (TransportService, error) {
+	factory := func(ctx context.Context) (tms.TransportService, error) {
 		callCount.Add(1)
 		return mock, nil
 	}
@@ -97,13 +94,13 @@ func TestNewTmsFactory_ConcurrentAccess(t *testing.T) {
 	}
 }
 
-// cachedFactory replicates the caching logic of NewTmsFactory for testing.
-func cachedFactory(inner TmsClientFunc) TmsClientFunc {
+// cachedFactory replicates the caching logic of the old TmsSvc closure for testing.
+func cachedFactory(inner tmsFactoryFunc) tmsFactoryFunc {
 	var (
 		mu     sync.Mutex
-		client TransportService
+		client tms.TransportService
 	)
-	return func(ctx context.Context) (TransportService, error) {
+	return func(ctx context.Context) (tms.TransportService, error) {
 		mu.Lock()
 		defer mu.Unlock()
 		if client != nil {

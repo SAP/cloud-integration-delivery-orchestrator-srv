@@ -11,6 +11,7 @@ import (
 
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/consts"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cpi"
 	gh "github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/github"
 
 	"github.com/google/go-github/v89/github"
@@ -118,7 +119,7 @@ func TestGitSync_HappyPath(t *testing.T) {
 	})
 
 	mockCPI := &mockCPIForGitSync{zipContent: zipContent}
-	factory := func(ctx context.Context, dest string) (IntegrationService, error) {
+	factory := func(ctx context.Context, tenantID uint) (cpi.IntegrationService, error) {
 		return mockCPI, nil
 	}
 	svc := newTestService(factory)
@@ -177,7 +178,7 @@ func TestGitSync_IdempotencySkip(t *testing.T) {
 		"META-INF/MANIFEST.MF": "Bundle-Version: 2.0.0",
 	})
 	mockCPI := &mockCPIForGitSync{zipContent: zipContent}
-	factory := func(ctx context.Context, dest string) (IntegrationService, error) {
+	factory := func(ctx context.Context, tenantID uint) (cpi.IntegrationService, error) {
 		return mockCPI, nil
 	}
 	svc := newTestService(factory)
@@ -227,7 +228,7 @@ func TestGitSync_CommitFailure(t *testing.T) {
 		"test.txt":             "content",
 	})
 	mockCPI := &mockCPIForGitSync{zipContent: zipContent}
-	factory := func(ctx context.Context, dest string) (IntegrationService, error) {
+	factory := func(ctx context.Context, tenantID uint) (cpi.IntegrationService, error) {
 		return mockCPI, nil
 	}
 	svc := newTestService(factory)
@@ -270,7 +271,7 @@ func TestGitSync_TagCreationFailure(t *testing.T) {
 		"test.txt":             "content",
 	})
 	mockCPI := &mockCPIForGitSync{zipContent: zipContent}
-	factory := func(ctx context.Context, dest string) (IntegrationService, error) {
+	factory := func(ctx context.Context, tenantID uint) (cpi.IntegrationService, error) {
 		return mockCPI, nil
 	}
 	svc := newTestService(factory)
@@ -313,7 +314,7 @@ func TestGitSync_CpiSyncYamlContent(t *testing.T) {
 		"file.txt":             "data",
 	})
 	mockCPI := &mockCPIForGitSync{zipContent: zipContent}
-	factory := func(ctx context.Context, dest string) (IntegrationService, error) {
+	factory := func(ctx context.Context, tenantID uint) (cpi.IntegrationService, error) {
 		return mockCPI, nil
 	}
 	svc := newTestService(factory)
@@ -391,7 +392,7 @@ func seedCompletedSnapshot(t *testing.T, tenantID uint) db.GitArtifactSnapshot {
 func TestGetSnapshotFiles_ErrorClassification(t *testing.T) {
 	tc := newTestCleanup(t)
 	tenant := seedTenant(t, tc, "orphan-tenant")
-	svc := newTestService(func(context.Context, string) (IntegrationService, error) { return nil, nil })
+	svc := newTestService(func(context.Context, uint) (cpi.IntegrationService, error) { return nil, nil })
 
 	cases := []struct {
 		name       string
@@ -431,7 +432,7 @@ func TestGetSnapshotFiles_ErrorClassification(t *testing.T) {
 func TestInvalidateSnapshot(t *testing.T) {
 	tc := newTestCleanup(t)
 	tenant := seedTenant(t, tc, "invalidate-tenant")
-	svc := newTestService(func(context.Context, string) (IntegrationService, error) { return nil, nil })
+	svc := newTestService(func(context.Context, uint) (cpi.IntegrationService, error) { return nil, nil })
 
 	t.Run("completed becomes failed", func(t *testing.T) {
 		snap := seedCompletedSnapshot(t, tenant.ID)

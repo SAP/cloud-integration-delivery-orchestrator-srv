@@ -4,42 +4,20 @@ import (
 	"errors"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/service"
 )
 
-// centralTmsContextResponse is the API response for GET /api/v1/centralTmsContext.
-// TmsApiEndpoint is derived at read-time from the provider Destination Service and
-// is never persisted in the database.
-type centralTmsContextResponse struct {
-	db.CentralTmsContext
-	TmsApiEndpoint string `json:"TmsApiEndpoint,omitempty"`
-}
-
-// GetCentralTmsContext returns the current CentralTmsContext configuration.
-// In v1 there is exactly one row; returns 404 if none exists yet.
-// The response includes TmsApiEndpoint, dynamically resolved from the provider
-// Destination Service using TmsApiDestinationName.
+// GetCentralTmsContext returns the current Central TMS configuration.
+// All data is read from the TMS manager's cached snapshot.
 func (h *Handler) GetCentralTmsContext(ctx *gin.Context) {
-	var tmsCtx db.CentralTmsContext
-	if err := h.db.First(&tmsCtx).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			Fail(ctx, 404, "central TMS context not configured")
-		} else {
-			Fail(ctx, 500, err.Error())
-		}
+	info, err := h.svc.TMS.RuntimeInfo(ctx.Request.Context())
+	if err != nil {
+		Fail(ctx, 404, "central TMS context not configured")
 		return
 	}
-
-	resp := centralTmsContextResponse{CentralTmsContext: tmsCtx}
-	if tmsCtx.TmsApiDestinationName != "" {
-		if dest, err := h.destSvc.GetDestination(ctx.Request.Context(), tmsCtx.TmsApiDestinationName); err == nil && dest != nil {
-			resp.TmsApiEndpoint = dest.URL
-		}
-	}
-	OK(ctx, resp)
+	OK(ctx, info)
 }
 
 // upsertCentralTmsResponse extends the saved record with the count of tenants

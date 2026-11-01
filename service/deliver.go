@@ -96,7 +96,7 @@ func (s *Service) BatchImportTenantOps(ctx context.Context, drID uint, opIDs []u
 			s.NotifyDrUpdated(drID)
 		}()
 
-		tmsClient, err := s.TmsSvc(ctx)
+		tmsClient, err := s.TMS.Get(ctx)
 		var actionID uint
 		if err == nil {
 			actionID, err = tmsClient.ImportTransportRequest(ctx, targetNodeID, trs)
@@ -219,7 +219,7 @@ func (s *Service) BatchDeployTenantOps(ctx context.Context, drID uint, opIDs []u
 
 		for i := range ops {
 			op := &ops[i]
-			cpiCli, err := s.CPI(ctx, op.Tenant.PirApiDestinationName)
+			cpiCli, err := s.CPI.Get(ctx, op.Tenant.ID)
 			if err != nil {
 				errOps[op.ID] = fmt.Errorf("failed to create cpi client for tenant %s: %s", op.Tenant.Name, err)
 				// mark as failed and continue

@@ -207,7 +207,7 @@ func (s *Service) downloadArtifactZip(ctx context.Context, req GitSyncRequest) (
 		return nil, fmt.Errorf("tenant %d not found: %w", req.CpiTenantID, err)
 	}
 
-	cpiClient, err := s.CPI(ctx, tenant.PirApiDestinationName)
+	cpiClient, err := s.CPI.Get(ctx, tenant.ID)
 	if err != nil {
 		return nil, fmt.Errorf("CPI client for tenant %s: %w", tenant.Name, err)
 	}

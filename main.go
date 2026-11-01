@@ -20,6 +20,7 @@ import (
 	gh "github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/github"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/notify"
 	cpiotel "github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/otel"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/tms"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/xsuaa"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/service"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/web"
@@ -60,9 +61,9 @@ func main() {
 		panic("failed to create XSUAA client: " + err.Error())
 	}
 
-	cpiManager := cpi.NewManager(resolver)
+	cpiManager := cpi.NewManager(database, resolver)
 	casManager := cas.NewManager(database, resolver)
-	tmsSvc := service.NewTmsFactory(database, resolver)
+	tmsManager := tms.NewManager(database, resolver)
 
 	// --- WebSocket Hub (always active) ---
 	hub := service.NewWSHub(env.Logger())
@@ -71,13 +72,9 @@ func main() {
 	svc := &service.Service{
 		DB:     database,
 		Logger: env.Logger(),
-		TmsSvc: tmsSvc,
-		CAS: func(ctx context.Context, tenantID uint) (service.CasService, error) {
-			return casManager.Get(ctx, tenantID)
-		},
-		CPI: func(ctx context.Context, tenant string) (service.IntegrationService, error) {
-			return cpiManager.Get(ctx, tenant)
-		},
+		TMS:    tmsManager,
+		CPI:    cpiManager,
+		CAS:    casManager,
 		GetUserEmail: xsuaa.GetUserEmail,
 		Notifier: notify.NewCompositeNotifier(
 			func() string {
@@ -108,7 +105,7 @@ func main() {
 
 	// --- Build handler with all injected dependencies ---
 	gitAppState := gh.NewStateStore(gh.DefaultStateTTL)
-	h := handler.NewHandler(svc, database, env.Logger(), cpiManager, xsuaaClient, resolver, hub, gitAppState)
+	h := handler.NewHandler(svc, database, env.Logger(), xsuaaClient, resolver, hub, gitAppState)
 
 	// --- OAuth2 setup ---
 	oauthCfg, err := auth.LoadOAuthConfigFromEnv()

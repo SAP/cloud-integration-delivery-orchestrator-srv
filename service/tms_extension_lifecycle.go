@@ -89,13 +89,13 @@ var allowedTmsTransitions = map[lifecycle.TmsExtensionState]map[TmsEvent]lifecyc
 //
 // Validates that the node exists in the current TMS system before writing,
 // preventing stale UI node lists from writing an invalid node after Central TMS
-// has been changed (R4-B). Requires TmsSvc (Central TMS must be configured).
+// has been changed (R4-B). Requires TMS manager (Central TMS must be configured).
 func (s *Service) SelectTmsNode(ctx context.Context, tenantID uint, nodeID uint, nodeName string) error {
 	// Validate node against current TMS system before acquiring the DB lock.
-	if s.TmsSvc == nil {
+	if s.TMS == nil {
 		return fmt.Errorf("SelectTmsNode: TMS not configured")
 	}
-	tmsClient, err := s.TmsSvc(ctx)
+	tmsClient, err := s.TMS.Get(ctx)
 	if err != nil {
 		return fmt.Errorf("SelectTmsNode: TMS not available: %w", err)
 	}
@@ -227,34 +227,20 @@ func (s *Service) GetCurrentNodeRoutes(ctx context.Context, tenantID uint) (*Get
 		return nil, ErrNodeNotRegistered
 	}
 
-	tmsCtx, err := loadTmsContext(s.DB)
+	tmsClient, err := s.TMS.Get(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("GetCurrentNodeRoutes: get central TMS context: %w", err)
+		return nil, fmt.Errorf("GetCurrentNodeRoutes: get TMS client: %w", err)
 	}
 
-	routes, err := s.fetchRoutesForNodeID(ctx, tmsCtx, tenant.TmsSourceNodeID)
-	if err != nil {
-		return nil, fmt.Errorf("GetCurrentNodeRoutes: fetch routes: %w", err)
-	}
-	return &GetCurrentNodeRoutesResult{NodeName: tenant.TmsSourceNodeName, Routes: routes}, nil
-}
-
-// fetchRoutesForNodeID builds a TMS client and returns all v2 routes where
-// nodeID appears as source or target.
-func (s *Service) fetchRoutesForNodeID(ctx context.Context, tmsCtx *db.CentralTmsContext, nodeID uint) ([]db.TransportRoute, error) {
-	tmsClient, err := buildTmsClient(ctx, tmsCtx, s.ProviderDest)
-	if err != nil {
-		return nil, fmt.Errorf("fetchRoutesForNodeID: build TMS client: %w", err)
-	}
 	all, err := tmsClient.GetRoutes(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("fetchRoutesForNodeID: get routes: %w", err)
+		return nil, fmt.Errorf("GetCurrentNodeRoutes: get routes: %w", err)
 	}
-	var result []db.TransportRoute
+	var routes []db.TransportRoute
 	for _, r := range all {
-		if r.SourceNodeID == nodeID || r.TargetNodeID == nodeID {
-			result = append(result, r)
+		if r.SourceNodeID == tenant.TmsSourceNodeID || r.TargetNodeID == tenant.TmsSourceNodeID {
+			routes = append(routes, r)
 		}
 	}
-	return result, nil
+	return &GetCurrentNodeRoutesResult{NodeName: tenant.TmsSourceNodeName, Routes: routes}, nil
 }

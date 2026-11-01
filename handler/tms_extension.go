@@ -51,8 +51,7 @@ func (h *Handler) GetTmsExtension(ctx *gin.Context) {
 		available = false
 		availabilityReason = lifecycle.TmsReasonBaseNotReady
 	} else {
-		tmsCtx, err := h.svc.LoadCentralTmsContext()
-		if err != nil || tmsCtx.TmsApiDestinationName == "" {
+		if _, err := h.svc.TMS.RuntimeInfo(ctx.Request.Context()); err != nil {
 			available = false
 			availabilityReason = lifecycle.TmsReasonCentralTmsNotConfigured
 		}

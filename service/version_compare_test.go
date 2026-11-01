@@ -615,7 +615,7 @@ func TestTriggerVersionCompare_FirstTrigger(t *testing.T) {
 		packages: []cpi.CPIPackage{{ID: "pkg1"}},
 		artifacts: map[string][]cpi.ArtifactCommonItem{"pkg1/" + string(consts.Artifact_Type_Iflow): {}},
 	}
-	factory := func(ctx context.Context, tenant string) (IntegrationService, error) {
+	factory := func(ctx context.Context, tenantID uint) (cpi.IntegrationService, error) {
 		return mockClient, nil
 	}
 	svc := newTestService(factory)
@@ -711,7 +711,7 @@ func TestTriggerVersionCompare_CooldownExpired(t *testing.T) {
 		packages: []cpi.CPIPackage{{ID: "pkg1"}},
 		artifacts: map[string][]cpi.ArtifactCommonItem{"pkg1/" + string(consts.Artifact_Type_Iflow): {}},
 	}
-	factory := func(ctx context.Context, tenant string) (IntegrationService, error) {
+	factory := func(ctx context.Context, tenantID uint) (cpi.IntegrationService, error) {
 		return mockClient, nil
 	}
 	svc := newTestService(factory)
@@ -747,8 +747,8 @@ func TestCollectVersionSnapshot_Success(t *testing.T) {
 	})
 
 	// Build mock per tenant
-	clients := map[string]*mockCPIClient{
-		source.PirApiDestinationName: {
+	clients := map[uint]*mockCPIClient{
+		source.ID: {
 			packages: []cpi.CPIPackage{{ID: "pkg1"}},
 			artifacts: map[string][]cpi.ArtifactCommonItem{
 				"pkg1/" + string(consts.Artifact_Type_Iflow): {
@@ -763,7 +763,7 @@ func TestCollectVersionSnapshot_Success(t *testing.T) {
 				{ID: "sc1", Version: "2.0.0", Status: consts.Artifact_Rt_Started},
 			},
 		},
-		target.PirApiDestinationName: {
+		target.ID: {
 			artifacts: map[string][]cpi.ArtifactCommonItem{
 				"pkg1/" + string(consts.Artifact_Type_Iflow): {
 					{ID: "iflow1", Name: "IFlow 1", Version: "0.9.0", PackageID: "pkg1"},
@@ -778,11 +778,11 @@ func TestCollectVersionSnapshot_Success(t *testing.T) {
 			},
 		},
 	}
-	factory := func(ctx context.Context, tenant string) (IntegrationService, error) {
-		if c, ok := clients[tenant]; ok {
+	factory := func(ctx context.Context, tenantID uint) (cpi.IntegrationService, error) {
+		if c, ok := clients[tenantID]; ok {
 			return c, nil
 		}
-		return nil, fmt.Errorf("unknown tenant: %s", tenant)
+		return nil, fmt.Errorf("unknown tenant: %d", tenantID)
 	}
 
 	svc := newTestService(factory)
@@ -871,7 +871,7 @@ func TestCollectVersionSnapshot_CPIClientError(t *testing.T) {
 		TriggeredBy:    "test",
 	})
 
-	factory := func(ctx context.Context, tenant string) (IntegrationService, error) {
+	factory := func(ctx context.Context, tenantID uint) (cpi.IntegrationService, error) {
 		return nil, fmt.Errorf("connection refused")
 	}
 	svc := newTestService(factory)
@@ -902,7 +902,7 @@ func TestCollectVersionSnapshot_GetPackagesError(t *testing.T) {
 		TriggeredBy:    "test",
 	})
 
-	factory := func(ctx context.Context, tenant string) (IntegrationService, error) {
+	factory := func(ctx context.Context, tenantID uint) (cpi.IntegrationService, error) {
 		return &mockCPIClient{packagesErr: fmt.Errorf("API timeout")}, nil
 	}
 	svc := newTestService(factory)
@@ -931,25 +931,25 @@ func TestCollectVersionSnapshot_PartialTenantFailure(t *testing.T) {
 		TriggeredBy:    "test",
 	})
 
-	clients := map[string]*mockCPIClient{
-		source.PirApiDestinationName: {
+	clients := map[uint]*mockCPIClient{
+		source.ID: {
 			packages: []cpi.CPIPackage{{ID: "pkg1"}},
 			artifacts: map[string][]cpi.ArtifactCommonItem{
 				"pkg1/" + string(consts.Artifact_Type_Iflow): {{ID: "iflow1", Name: "Integration Flow", Version: "1.0", PackageID: "pkg1"}},
 			},
 			runtimeArts: []cpi.RuntimeArtifact{{ID: "iflow1", Version: "1.0", Status: consts.Artifact_Rt_Started}},
 		},
-		target.PirApiDestinationName: {
+		target.ID: {
 			// Runtime succeeds but iflow fetch will fail
 			artifactsErr: map[string]error{"pkg1/" + string(consts.Artifact_Type_Iflow): fmt.Errorf("timeout")},
 			runtimeArts:  []cpi.RuntimeArtifact{},
 		},
 	}
-	factory := func(ctx context.Context, tenant string) (IntegrationService, error) {
-		if c, ok := clients[tenant]; ok {
+	factory := func(ctx context.Context, tenantID uint) (cpi.IntegrationService, error) {
+		if c, ok := clients[tenantID]; ok {
 			return c, nil
 		}
-		return nil, fmt.Errorf("unknown: %s", tenant)
+		return nil, fmt.Errorf("unknown: %d", tenantID)
 	}
 	svc := newTestService(factory)
 
@@ -1301,7 +1301,7 @@ func TestTrigger_WithIncludedPackagesFilter(t *testing.T) {
 			{ID: "FlowT", Version: "1.0.0"},
 		},
 	}
-	factory := func(ctx context.Context, tenant string) (IntegrationService, error) {
+	factory := func(ctx context.Context, tenantID uint) (cpi.IntegrationService, error) {
 		return mock, nil
 	}
 	svc := newTestService(factory)
@@ -1376,7 +1376,7 @@ func TestTrigger_EmptyWhitelistIncludesAll(t *testing.T) {
 		},
 		runtimeArts: []cpi.RuntimeArtifact{},
 	}
-	factory := func(ctx context.Context, tenant string) (IntegrationService, error) {
+	factory := func(ctx context.Context, tenantID uint) (cpi.IntegrationService, error) {
 		return mock, nil
 	}
 	svc := newTestService(factory)
@@ -1778,7 +1778,7 @@ func TestCreateDR_Basic(t *testing.T) {
 	ruleID, snapshotID, completedAt, _, tc := setupCreateTestData(t)
 
 	// CPI mock for downgrade check — target has lower version, so no downgrade error
-	factory := func(ctx context.Context, tenant string) (IntegrationService, error) {
+	factory := func(ctx context.Context, tenantID uint) (cpi.IntegrationService, error) {
 		return &mockCPIClient{}, nil
 	}
 	svc := newTestService(factory)
@@ -1915,7 +1915,7 @@ func TestCreateDR_JiraRequired(t *testing.T) {
 	}
 
 	// With JIRA link → should succeed (assuming CPI mock for downgrade passes)
-	factory := func(ctx context.Context, tenant string) (IntegrationService, error) {
+	factory := func(ctx context.Context, tenantID uint) (cpi.IntegrationService, error) {
 		return &mockCPIClient{}, nil
 	}
 	svc2 := newTestService(factory)
@@ -1934,7 +1934,7 @@ func TestCreateDR_JiraRequired(t *testing.T) {
 func TestCreateDR_SnapshotFKSet(t *testing.T) {
 	ruleID, snapshotID, completedAt, _, tc := setupCreateTestData(t)
 
-	factory := func(ctx context.Context, tenant string) (IntegrationService, error) {
+	factory := func(ctx context.Context, tenantID uint) (cpi.IntegrationService, error) {
 		return &mockCPIClient{}, nil
 	}
 	svc := newTestService(factory)
@@ -2035,7 +2035,7 @@ func TestCreateDR_DuplicateIncluded(t *testing.T) {
 	}
 
 	// Create should still work when user selects the duplicate
-	factory := func(ctx context.Context, tenant string) (IntegrationService, error) {
+	factory := func(ctx context.Context, tenantID uint) (cpi.IntegrationService, error) {
 		return &mockCPIClient{}, nil
 	}
 	svc2 := newTestService(factory)
@@ -2112,10 +2112,10 @@ func TestCreateDR_VersionDowngradeSkip(t *testing.T) {
 	// CPI mock: GetDesignTimeArtifact returns the target's current version
 	// For the downgrade check, checkVersionDowngradeInTenant calls GetDesignTimeArtifact(ctx, techID, "active", type)
 	// and compares the returned version to the source version.
-	factoryWithDowngrade := func(ctx context.Context, tenant string) (IntegrationService, error) {
+	factoryWithDowngrade := func(ctx context.Context, tenantID uint) (cpi.IntegrationService, error) {
 		// If this is the target tenant, GetDesignTimeArtifact returns version 1.0.5 (for dg-iflow)
 		// and 1.0.8 (for ok-iflow)
-		if tenant == target.PirApiDestinationName {
+		if tenantID == target.ID {
 			return &mockCPIClientWithDesignTime{
 				artifactVersions: map[string]string{
 					"dg-iflow": "1.0.5", // higher than source 1.0.1 → downgrade
@@ -2154,7 +2154,7 @@ func TestCreateDR_VersionDowngradeSkip(t *testing.T) {
 func TestCreateDR_AutoGeneratedName(t *testing.T) {
 	ruleID, snapshotID, completedAt, _, tc := setupCreateTestData(t)
 
-	factory := func(ctx context.Context, tenant string) (IntegrationService, error) {
+	factory := func(ctx context.Context, tenantID uint) (cpi.IntegrationService, error) {
 		return &mockCPIClient{}, nil
 	}
 	svc := newTestService(factory)
@@ -2187,7 +2187,7 @@ func TestCreateDR_AutoGeneratedName(t *testing.T) {
 func TestCreateDR_SkipDeploy(t *testing.T) {
 	ruleID, snapshotID, completedAt, _, tc := setupCreateTestData(t)
 
-	factory := func(ctx context.Context, tenant string) (IntegrationService, error) {
+	factory := func(ctx context.Context, tenantID uint) (cpi.IntegrationService, error) {
 		return &mockCPIClient{}, nil
 	}
 	svc := newTestService(factory)

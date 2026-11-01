@@ -52,14 +52,10 @@ type CpiClient struct {
 // maxConcurrentRequests limits parallel outgoing requests per CPI tenant to avoid 429.
 const maxConcurrentRequests = 10
 
-func NewClient(ctx context.Context, destinationName string, resolver *cf.DestinationServiceClient) (*CpiClient, error) {
-	cpiDest, err := resolver.GetDestination(ctx, destinationName)
-	if err != nil {
-		return nil, fmt.Errorf("CPI destination(for it-tr/api) %s not found: %w", destinationName, err)
-	}
+func NewClient(ctx context.Context, dest cf.Destination) (*CpiClient, error) {
 	// Normalise base URL: strip any trailing /api/v1, /v1, or / that may have been
 	// included in the destination configuration, then always append /api/v1.
-	base := strings.TrimRight(cpiDest.URL, "/")
+	base := strings.TrimRight(dest.URL, "/")
 	for _, suffix := range []string{"/api/v1", "/v1"} {
 		if trimmed, ok := strings.CutSuffix(base, suffix); ok {
 			base = trimmed
@@ -67,7 +63,7 @@ func NewClient(ctx context.Context, destinationName string, resolver *cf.Destina
 		}
 	}
 	apiUrl := base + "/api/v1"
-	client, err := env.NewClient(ctx, cpiDest.ClientId, cpiDest.ClientSecret, cpiDest.TokenServiceURL, apiUrl)
+	client, err := env.NewClient(ctx, dest.ClientId, dest.ClientSecret, dest.TokenServiceURL, apiUrl)
 	return &CpiClient{HttpClient: client, sem: make(chan struct{}, maxConcurrentRequests)}, err
 }
 

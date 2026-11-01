@@ -9,6 +9,7 @@ import (
 
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/consts"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cpi"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/lifecycle"
 )
 
@@ -133,7 +134,7 @@ func TestBatchImportTenantOps_PrecheckAggregatesErrors(t *testing.T) {
 		ImportState:            lifecycle.ImportQueued,
 	})
 
-	svc := newTestService(func(ctx context.Context, tenant string) (IntegrationService, error) {
+	svc := newTestService(func(ctx context.Context, tenantID uint) (cpi.IntegrationService, error) {
 		return &mockCPIClientWithDesignTime{
 			artifactVersions: map[string]string{
 				"artifact-downgrade": "2.0.0",
@@ -199,7 +200,7 @@ func TestBatchImportTenantOps_PartialSkipProceedsWithValidOps(t *testing.T) {
 		ImportState:            lifecycle.ImportQueued,
 	})
 
-	svc := newTestService(func(ctx context.Context, tenant string) (IntegrationService, error) {
+	svc := newTestService(func(ctx context.Context, tenantID uint) (cpi.IntegrationService, error) {
 		return &mockCPIClientWithDesignTime{
 			artifactVersions: map[string]string{
 				"artifact-downgrade": "2.0.0", // target has higher version → downgrade error
@@ -268,7 +269,7 @@ func TestBatchImportTenantOps_AsyncFailureRollsBackStateAndRecordsCondition(t *t
 		ImportState:            lifecycle.ImportQueued,
 	})
 
-	svc := newTestService(func(ctx context.Context, tenant string) (IntegrationService, error) {
+	svc := newTestService(func(ctx context.Context, tenantID uint) (cpi.IntegrationService, error) {
 		return &mockCPIClientWithDesignTime{
 			artifactVersions: map[string]string{
 				"artifact-import": "1.0.0",
@@ -338,7 +339,7 @@ func TestBatchDeployTenantOps_PrecheckAggregatesErrorsAndSkipsDisabled(t *testin
 		DeployState:       lifecycle.DeployNotStarted,
 	})
 
-	svc := newTestService(func(ctx context.Context, tenant string) (IntegrationService, error) {
+	svc := newTestService(func(ctx context.Context, tenantID uint) (cpi.IntegrationService, error) {
 		return &mockRuntimeCPI{}, nil
 	})
 
@@ -396,7 +397,7 @@ func TestBatchDeployTenantOps_PartialSkipProceedsWithValidOps(t *testing.T) {
 		DeployState:       lifecycle.DeployQueued,
 	})
 
-	svc := newTestService(func(ctx context.Context, tenant string) (IntegrationService, error) {
+	svc := newTestService(func(ctx context.Context, tenantID uint) (cpi.IntegrationService, error) {
 		return &mockRuntimeCPI{}, nil
 	})
 
@@ -463,7 +464,7 @@ func TestBatchDeployTenantOps_AsyncPartialFailureRecordsConditions(t *testing.T)
 		DeployState:       lifecycle.DeployQueued,
 	})
 
-	svc := newTestService(func(ctx context.Context, tenant string) (IntegrationService, error) {
+	svc := newTestService(func(ctx context.Context, tenantID uint) (cpi.IntegrationService, error) {
 		return &mockRuntimeCPI{
 			deployErrs: map[string]error{
 				"artifact-fail": errors.New("deploy failed"),

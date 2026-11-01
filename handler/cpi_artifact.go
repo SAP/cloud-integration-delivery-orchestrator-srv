@@ -6,52 +6,42 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cpi"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/service"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 )
 
 
-// resolveCpiDestination looks up a tenant by ID from the DB and returns its PirApiDestinationName.
-// Writes an appropriate error response and returns ("", false) on any failure.
-func (h *Handler) resolveCpiDestination(ctx *gin.Context) (string, bool) {
+// resolveCpiClient parses the tenant ID from the query string, gets a CPI client
+// from the manager, and returns it. Writes an appropriate error response on failure.
+func (h *Handler) resolveCpiClient(ctx *gin.Context) (cpi.IntegrationService, bool) {
 	idStr := ctx.Query("tenant")
 	if idStr == "" {
 		Fail(ctx, 400, "missing required query param: tenant (tenant ID)")
-		return "", false
+		return nil, false
 	}
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
 		Fail(ctx, 400, fmt.Sprintf("invalid tenant id %q: %s", idStr, err))
-		return "", false
+		return nil, false
 	}
-	var tenant db.CpiTenant
-	if err := h.db.First(&tenant, id).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			Fail(ctx, 404, fmt.Sprintf("tenant %d not found", id))
+	client, err := h.svc.CPI.Get(ctx, uint(id))
+	if err != nil {
+		if errors.Is(err, cpi.ErrNoDestination) {
+			Fail(ctx, 400, fmt.Sprintf("tenant %d has no CPI destination configured (bootstrap required)", id))
 		} else {
 			Fail(ctx, 500, err.Error())
 		}
-		return "", false
+		return nil, false
 	}
-	if tenant.PirApiDestinationName == "" {
-		Fail(ctx, 400, fmt.Sprintf("tenant %d has no CPI destination configured (bootstrap required)", id))
-		return "", false
-	}
-	return tenant.PirApiDestinationName, true
+	return client, true
 }
 
 // get all packages within a cpi tenant
 func (h *Handler) GetPackagesHandler(ctx *gin.Context) {
-	destName, ok := h.resolveCpiDestination(ctx)
+	cpiClient, ok := h.resolveCpiClient(ctx)
 	if !ok {
-		return
-	}
-	cpiClient, err := h.cpi.Get(ctx, destName)
-	if err != nil {
-		Fail(ctx, 500, err.Error())
 		return
 	}
 	packages, err := cpiClient.GetPackages(ctx)
@@ -93,7 +83,7 @@ func (h *Handler) GetDestinationsHandler(ctx *gin.Context) {
 //
 // GET /api/v1/tenant/packages/artifacts?tenant=<tenantID>&packages=<pkg1,pkg2,...>
 func (h *Handler) GetPackageArtifactsHandler(ctx *gin.Context) {
-	destName, ok := h.resolveCpiDestination(ctx)
+	cpiClient, ok := h.resolveCpiClient(ctx)
 	if !ok {
 		return
 	}
@@ -104,24 +94,13 @@ func (h *Handler) GetPackageArtifactsHandler(ctx *gin.Context) {
 	}
 	packageIDs := strings.Split(packagesParam, ",")
 
-	cpiClient, err := h.cpi.Get(ctx, destName)
-	if err != nil {
-		Fail(ctx, 500, fmt.Sprintf("failed to create CPI client: %s", err))
-		return
-	}
-
 	results := service.GetPackageArtifactsBatch(ctx, cpiClient, packageIDs)
 	OK(ctx, results)
 }
 
 func (h *Handler) GetRuntimeArtifacts(ctx *gin.Context) {
-	destName, ok := h.resolveCpiDestination(ctx)
+	client, ok := h.resolveCpiClient(ctx)
 	if !ok {
-		return
-	}
-	client, err := h.cpi.Get(ctx, destName)
-	if err != nil {
-		Fail(ctx, 500, fmt.Sprintf("failed to create cpi client: %s", err))
 		return
 	}
 	artifacts, err := client.GetRuntimeArtifacts(ctx)

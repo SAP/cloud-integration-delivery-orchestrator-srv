@@ -170,7 +170,7 @@ func (s *Service) syncDeployState(ctx context.Context, deliveryRequestID uint, u
 		if op.DeployState != lifecycle.DeployInProgress {
 			continue
 		}
-		cpiCli, err := s.CPI(ctx, op.Tenant.PirApiDestinationName)
+		cpiCli, err := s.CPI.Get(ctx, op.Tenant.ID)
 		if err != nil {
 			conditions = append(conditions, db.Condition{
 				DeliveryRequestID:         deliveryRequestID,
@@ -307,7 +307,7 @@ func (s *Service) syncImportState(ctx context.Context, deliveryRequestID uint, u
 	tenantToOps := make(map[uint]map[string]db.ArtifactTenantOperation) // arTenantOp record in each node. cpi tenant ID - map[trNumber]ArtifactTenantOperation
 	conditions := make([]db.Condition, 0)
 
-	tmsClient, err := s.TmsSvc(ctx)
+	tmsClient, err := s.TMS.Get(ctx)
 	if err != nil {
 		return []db.Condition{{
 			DeliveryRequestID: deliveryRequestID,

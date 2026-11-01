@@ -8,6 +8,7 @@ import (
 
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/consts"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cpi"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/tms"
 
 	"gorm.io/gorm"
@@ -249,7 +250,7 @@ func TestCompileVersionPattern(t *testing.T) {
 
 func TestDeliveryRuleCheck_RejectsPatternMismatchWithoutCallingCPI(t *testing.T) {
 	callCount := 0
-	svc := newTestService(func(ctx context.Context, tenant string) (IntegrationService, error) {
+	svc := newTestService(func(ctx context.Context, tenantID uint) (cpi.IntegrationService, error) {
 		callCount++
 		return &mockCPIClientWithDesignTime{}, nil
 	})
@@ -274,7 +275,7 @@ func TestDeliveryRuleCheck_RejectsPatternMismatchWithoutCallingCPI(t *testing.T)
 
 func TestDeliveryRuleCheck_SkipsCurrentTenantInIncludedTenants(t *testing.T) {
 	callCount := 0
-	svc := newTestService(func(ctx context.Context, tenant string) (IntegrationService, error) {
+	svc := newTestService(func(ctx context.Context, tenantID uint) (cpi.IntegrationService, error) {
 		callCount++
 		return nil, errors.New("should not be called")
 	})
@@ -308,7 +309,7 @@ func TestDeliveryRuleCheck_RejectsDowngradeInTargetTenant(t *testing.T) {
 		PirApiDestinationName: "pir-target",
 	}
 
-	svc := newTestService(func(ctx context.Context, tenant string) (IntegrationService, error) {
+	svc := newTestService(func(ctx context.Context, tenantID uint) (cpi.IntegrationService, error) {
 		return &mockCPIClientWithDesignTime{
 			artifactVersions: map[string]string{
 				"artifact-1": "1.2.0",

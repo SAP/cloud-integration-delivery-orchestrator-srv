@@ -11,6 +11,7 @@ import (
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/consts"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cas"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cf"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cpi"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/env"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/tms"
@@ -89,40 +90,75 @@ func TestMain(m *testing.M) {
 
 // testServiceOpts holds optional dependencies for building a test Service.
 type testServiceOpts struct {
-	tms          TransportService
-	cas          CasService
+	tms          tms.TransportService
+	cas          cas.CasService
 	notifier     Notifier
 	getUserEmail func(ctx context.Context, userID string) (string, error)
 }
 
-// newTestService creates a Service wired to testDB with a given mock CPI factory.
+// --- Mock providers that satisfy TmsProvider / CpiProvider / CasProvider ---
+
+type mockTmsProvider struct {
+	client tms.TransportService
+}
+
+func (m *mockTmsProvider) Get(_ context.Context) (tms.TransportService, error) {
+	if m.client == nil {
+		return nil, fmt.Errorf("TMS not configured in test")
+	}
+	return m.client, nil
+}
+func (m *mockTmsProvider) Destination(_ context.Context) (cf.Destination, error) {
+	return cf.Destination{}, fmt.Errorf("Destination not configured in test")
+}
+func (m *mockTmsProvider) RuntimeInfo(_ context.Context) (tms.RuntimeInfo, error) {
+	if m.client == nil {
+		return tms.RuntimeInfo{}, fmt.Errorf("TMS not configured in test")
+	}
+	return tms.RuntimeInfo{Loaded: true}, nil
+}
+
+type mockCpiProvider struct {
+	getFunc func(ctx context.Context, tenantID uint) (cpi.IntegrationService, error)
+}
+
+func (m *mockCpiProvider) Get(ctx context.Context, tenantID uint) (cpi.IntegrationService, error) {
+	if m.getFunc == nil {
+		return nil, fmt.Errorf("CPI not configured in test")
+	}
+	return m.getFunc(ctx, tenantID)
+}
+
+type mockCasProvider struct {
+	client cas.CasService
+}
+
+func (m *mockCasProvider) Get(_ context.Context, _ uint) (cas.CasService, error) {
+	if m.client == nil {
+		return nil, fmt.Errorf("CAS not configured in test")
+	}
+	return m.client, nil
+}
+
+// newTestService creates a Service wired to testDB with a given mock CPI factory function.
 // It sets sensible defaults for TMS/Notifier/GetUserEmail (no-op mocks) so that
 // existing tests that only care about CPI continue to work unchanged.
-// Automatically skips the calling test when testDB is nil.
-func newTestService(factory IntegrationFactory, opts ...testServiceOpts) *Service {
+func newTestService(cpiGet func(ctx context.Context, tenantID uint) (cpi.IntegrationService, error), opts ...testServiceOpts) *Service {
 	l, _ := zap.NewDevelopment()
 	svc := &Service{
 		DB:     testDB,
 		Logger: l.Sugar(),
-		CPI:    factory,
-		TmsSvc: func(ctx context.Context) (TransportService, error) {
-			return nil, fmt.Errorf("TMS not configured in test")
-		},
-		CAS: func(ctx context.Context, tenantID uint) (CasService, error) {
-			return nil, fmt.Errorf("CAS not configured in test")
-		},
+		CPI:    &mockCpiProvider{getFunc: cpiGet},
+		TMS:    &mockTmsProvider{},
+		CAS:    &mockCasProvider{},
 	}
 	if len(opts) > 0 {
 		o := opts[0]
 		if o.tms != nil {
-			svc.TmsSvc = func(ctx context.Context) (TransportService, error) {
-				return o.tms, nil
-			}
+			svc.TMS = &mockTmsProvider{client: o.tms}
 		}
 		if o.cas != nil {
-			svc.CAS = func(ctx context.Context, tenantID uint) (CasService, error) {
-				return o.cas, nil
-			}
+			svc.CAS = &mockCasProvider{client: o.cas}
 		}
 		if o.notifier != nil {
 			svc.Notifier = o.notifier
@@ -198,7 +234,7 @@ func (tc *testCleanup) trackDR(id uint)     { tc.drIDs = append(tc.drIDs, id) }
 
 // --- Mock CPI Client ---
 
-// mockCPIClient implements IntegrationService for testing.
+// mockCPIClient implements cpi.IntegrationService for testing.
 type mockCPIClient struct {
 	packages       []cpi.CPIPackage
 	packagesErr    error
@@ -402,7 +438,7 @@ func waitForSnapshotComplete(t *testing.T, ruleID uint, timeout time.Duration) {
 
 // --- Mock TMS Client ---
 
-// mockTMSClient implements TransportService for testing.
+// mockTMSClient implements tms.TransportService for testing.
 type mockTMSClient struct {
 	nodes    []db.TransportNode
 	nodesErr error
@@ -499,7 +535,7 @@ func (m *failingNotifier) OnDeliveryComment(issueKey string, drID uint, message 
 
 // --- Mock CAS Client ---
 
-// mockCasClient implements CasService for testing.
+// mockCasClient implements cas.CasService for testing.
 type mockCasClient struct {
 	catalog       []cas.CatalogContentResource
 	catalogErr    error

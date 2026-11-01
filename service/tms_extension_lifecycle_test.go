@@ -244,12 +244,13 @@ func TestGetCurrentNodeRoutes_RequiresRegistrationAndReturnsFilteredRoutes(t *te
 		t.Fatalf("save tenant: %v", err)
 	}
 
-	ctx := seedCentralTmsContext(t, "tms-api-routes")
-	svc.ProviderDest = newProviderDestForRoutes(t, ctx.TmsApiDestinationName, []db.TransportRoute{
-		{ID: 10, SourceNodeID: 400, TargetNodeID: 401, Name: "outbound"},
-		{ID: 11, SourceNodeID: 402, TargetNodeID: 400, Name: "inbound"},
-		{ID: 12, SourceNodeID: 500, TargetNodeID: 501, Name: "unrelated"},
-	})
+	svc.TMS = &mockTmsProvider{client: &mockTMSClient{
+		routes: []db.TransportRoute{
+			{ID: 10, SourceNodeID: 400, TargetNodeID: 401, Name: "outbound"},
+			{ID: 11, SourceNodeID: 402, TargetNodeID: 400, Name: "inbound"},
+			{ID: 12, SourceNodeID: 500, TargetNodeID: 501, Name: "unrelated"},
+		},
+	}}
 
 	result, err := svc.GetCurrentNodeRoutes(context.Background(), tenant.ID)
 	if err != nil {

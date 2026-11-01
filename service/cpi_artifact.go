@@ -34,7 +34,7 @@ type BatchPackageResult struct {
 // GetPackageArtifactsBatch fetches artifacts for multiple packages concurrently.
 // Concurrency is bounded by the CPI client's built-in semaphore.
 // Failed packages are reported in the result (partial success) rather than aborting the whole operation.
-func GetPackageArtifactsBatch(ctx context.Context, client IntegrationService, packageIDs []string) []BatchPackageResult {
+func GetPackageArtifactsBatch(ctx context.Context, client cpi.IntegrationService, packageIDs []string) []BatchPackageResult {
 	results := make([]BatchPackageResult, len(packageIDs))
 	var wg sync.WaitGroup
 
@@ -66,7 +66,7 @@ func isNotFoundError(err error) bool {
 // GetPackageArtifacts returns all design-time artifacts of all supported types for a package,
 // fetching all types in parallel. Types that return 404 (package doesn't contain that type)
 // are silently skipped.
-func GetPackageArtifacts(ctx context.Context, client IntegrationService, packageID string) ([]PackageArtifact, error) {
+func GetPackageArtifacts(ctx context.Context, client cpi.IntegrationService, packageID string) ([]PackageArtifact, error) {
 	types := consts.AllArtifactTypes()
 
 	type result struct {

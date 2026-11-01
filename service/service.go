@@ -4,8 +4,6 @@ import (
 	"context"
 	"sync"
 
-	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/consts"
-	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cas"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cf"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cpi"
@@ -16,58 +14,27 @@ import (
 	"gorm.io/gorm"
 )
 
-// --- Interfaces for external dependencies (used by Service for testability) ---
+// --- Provider interfaces (consumer-defined, satisfied by *Manager in each package) ---
 
-// TransportService defines the TMS operations needed by the service layer.
-type TransportService interface {
-	GetNodes(ctx context.Context) ([]db.TransportNode, error)
-	GetRoutes(ctx context.Context) ([]db.TransportRoute, error)
-	ImportTransportRequest(ctx context.Context, nodeID uint, trs []uint) (uint, error)
-	GetTransportRequest(ctx context.Context, TrNumber string) (*tms.TransportRequestV1, error)
-	TrNodeStatuses(ctx context.Context, trNumber string) (map[uint]tms.TrNodeStatus, error)
-	ErrLogsInTransportLog(ctx context.Context, trNumber string, nodeID uint) ([]string, error)
-	WarnLogsInTransportLog(ctx context.Context, trNumber string, nodeID uint) ([]string, error)
-	GetNodeTransportRequests(ctx context.Context, nodeID uint) ([]tms.NodeTransportRequest, error)
+// TmsProvider abstracts TMS manager capabilities needed by the service layer.
+// Production: *tms.Manager. Tests: mock in test files.
+type TmsProvider interface {
+	Get(ctx context.Context) (tms.TransportService, error)
+	Destination(ctx context.Context) (cf.Destination, error)
+	RuntimeInfo(ctx context.Context) (tms.RuntimeInfo, error)
 }
 
-// IntegrationService defines the CPI operations needed by the service layer.
-// It is a facade over CpiClient for testability — all methods are direct pass-throughs.
-//
-// Two query patterns exist for design-time artifacts:
-//
-//   - Package Artifacts (GetPackageArtifactsByType): queries via Navigation Property.
-//     Draft artifacts return Version="Active" (not the real version number).
-//     Used for discovery/listing.
-//
-//   - Direct Artifact (GetDesignTimeArtifact): queries by artifact ID + version.
-//     When version="active" is passed, returns the actual formal version (e.g. "6.2.9").
-//     Used for version downgrade checks where the real version is needed.
-type IntegrationService interface {
-	DeployArtifact(ctx context.Context, artifactID, artifactVersion string, artifactType consts.ArtifactType) (string, error)
-	RuntimeArtifact(ctx context.Context, artifactId string) (cpi.RuntimeArtifact, error)
-	GetDesignTimeArtifact(ctx context.Context, artifactID, version string, artifactType consts.ArtifactType) (cpi.ArtifactCommonItem, error)
-	GetPackages(ctx context.Context) ([]cpi.CPIPackage, error)
-	GetPackageArtifactsByType(ctx context.Context, packageID string, artifactType consts.ArtifactType) ([]cpi.ArtifactCommonItem, error)
-	GetRuntimeArtifacts(ctx context.Context) ([]cpi.RuntimeArtifact, error)
-
-	// Git Sync: download artifact ZIP content
-	DownloadArtifactZip(ctx context.Context, artifactID, version string, artifactType consts.ArtifactType) ([]byte, error)
+// CpiProvider abstracts CPI manager capabilities needed by the service layer.
+// Production: *cpi.Manager. Tests: mock in test files.
+type CpiProvider interface {
+	Get(ctx context.Context, tenantID uint) (cpi.IntegrationService, error)
 }
 
-// IntegrationFactory creates or retrieves a cached CPI client for a given tenant.
-type IntegrationFactory func(ctx context.Context, tenant string) (IntegrationService, error)
-
-// CasService defines the CAS operations needed by the service layer.
-type CasService interface {
-	ListCloudIntegrationResources(ctx context.Context, packageIDs []string) ([]cas.CatalogContentResource, error)
-	TriggerExport(ctx context.Context, req cas.ExportRequest) (*cas.ExportResponse, error)
-	PollOperation(ctx context.Context, processID string) (*cas.OperationStatus, error)
-	GetOperationConfig(ctx context.Context, processID string) (*cas.OperationConfig, error)
+// CasProvider abstracts CAS manager capabilities needed by the service layer.
+// Production: *cas.Manager. Tests: mock in test files.
+type CasProvider interface {
+	Get(ctx context.Context, tenantID uint) (cas.CasService, error)
 }
-
-// CasFactory resolves and returns a ready-to-use CasService for a given tenant.
-// Production value built by NewCasFactory; test value is a literal returning a mock.
-type CasFactory func(ctx context.Context, tenantID uint) (CasService, error)
 
 // Notifier abstracts delivery event notifications.
 // Implementations decide the delivery channel (ANS, Jira API, etc.).
@@ -84,9 +51,9 @@ type Notifier interface {
 type Service struct {
 	DB           *gorm.DB
 	Logger       *zap.SugaredLogger
-	TmsSvc       TmsClientFunc
-	CPI          IntegrationFactory
-	CAS          CasFactory
+	TMS          TmsProvider
+	CPI          CpiProvider
+	CAS          CasProvider
 	GetUserEmail func(ctx context.Context, userID string) (string, error)
 	Notifier     Notifier
 	Hub         *WSHub       // WebSocket hub for per-DR event push; nil-safe (no-op when nil)

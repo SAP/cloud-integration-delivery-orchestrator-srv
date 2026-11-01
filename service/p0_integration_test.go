@@ -7,7 +7,6 @@ package service
 // handler layer — those are in handler/p0_integration_test.go.
 
 import (
-	"context"
 	"testing"
 
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
@@ -28,7 +27,7 @@ func TestSelectTmsNode_FromBootstrapped_ResetsToNodeConfirmed(t *testing.T) {
 	}
 	svc := &Service{
 		DB:     database,
-		TmsSvc: func(ctx context.Context) (TransportService, error) { return mock, nil },
+		TMS:    &mockTmsProvider{client: mock},
 	}
 
 	tenant := db.CpiTenant{
@@ -75,7 +74,7 @@ func TestSelectTmsNode_FromNodeConfirmed_Succeeds(t *testing.T) {
 	}
 	svc := &Service{
 		DB:     database,
-		TmsSvc: func(ctx context.Context) (TransportService, error) { return mock, nil },
+		TMS:    &mockTmsProvider{client: mock},
 	}
 
 	tenant := db.CpiTenant{
@@ -116,7 +115,7 @@ func TestSelectTmsNode_RejectsInvalidNode(t *testing.T) {
 	}
 	svc := &Service{
 		DB:     database,
-		TmsSvc: func(ctx context.Context) (TransportService, error) { return mock, nil },
+		TMS:    &mockTmsProvider{client: mock},
 	}
 
 	tenant := db.CpiTenant{
@@ -796,7 +795,7 @@ func TestSelectTmsNode_FromBootstrapped_SetsR2Fields(t *testing.T) {
 	}
 	svc := &Service{
 		DB:     database,
-		TmsSvc: func(ctx context.Context) (TransportService, error) { return mock, nil },
+		TMS:    &mockTmsProvider{client: mock},
 	}
 
 	tenant := db.CpiTenant{
