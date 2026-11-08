@@ -18,9 +18,19 @@ import (
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cf"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/lifecycle"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
+
+// isUniqueViolation reports whether err is a Postgres unique-constraint
+// violation (SQLSTATE 23505). The project does not enable gorm TranslateError
+// (handler code matches the raw pgconn error directly), so we detect it the
+// same way here.
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
 
 // ErrTmsBootstrapInProgress is returned by UpsertCentralTmsContext when one or
 // more tenants have TMS extension bootstrap running.
@@ -154,13 +164,21 @@ func (s *Service) UpsertCentralTmsContext(ctx context.Context, input db.CentralT
 			// that already committed makes this collide on the fixed singleton key
 			// and fail (rolling back). Save's upsert semantics would instead find
 			// the just-inserted row, turn into an UPDATE, and silently overwrite it
-			// — reintroducing the lost-update bug this fix closes.
+			// — reintroducing the lost-update bug this fix closes. The PK-collision
+			// error is mapped to ErrTmsConfigConflict so the loser gets a 409, not
+			// a raw 500 (same contract as the steady-state version conflict).
 			//
 			// Steady state (row exists): the FOR UPDATE lock + version compare above
 			// already serialise racers and reject the stale one, so Save's UPDATE is
 			// safe here.
 			if firstTime {
-				return tx.Create(&input).Error
+				if err := tx.Create(&input).Error; err != nil {
+					if isUniqueViolation(err) {
+						return fmt.Errorf("%w: concurrent first-time configuration", ErrTmsConfigConflict)
+					}
+					return err
+				}
+				return nil
 			}
 			return tx.Save(&input).Error
 		})
