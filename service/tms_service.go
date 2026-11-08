@@ -26,6 +26,12 @@ import (
 // more tenants have TMS extension bootstrap running.
 var ErrTmsBootstrapInProgress = errors.New("TMS extension bootstrap is in progress")
 
+// singletonTmsContextID pins the CentralTmsContext to a single row. The config
+// is a singleton by convention; using a fixed primary key lets the database
+// reject a concurrent first-ever INSERT (two racing reconfigures on an empty
+// table) via a primary-key collision instead of producing two rows.
+const singletonTmsContextID = 1
+
 // ErrTmsConfigConflict is returned when another Reconfigure advanced the
 // Central TMS configuration version between the time this call read the version
 // and the time it committed (optimistic concurrency conflict). The caller should
@@ -77,6 +83,10 @@ func (s *Service) UpsertCentralTmsContext(ctx context.Context, input db.CentralT
 	commit := func(_ cf.Destination, validatedAt time.Time) error {
 		return s.DB.Transaction(func(tx *gorm.DB) error {
 			// Lock the single config row (if any) and re-check the version.
+			// The config is a singleton pinned to a fixed primary key, so a
+			// first-ever INSERT by two racing reconfigures collides on the PK
+			// (FOR UPDATE cannot lock a not-yet-existing row); the loser's Save
+			// fails with a duplicate-key error, which we map to a conflict.
 			var existing db.CentralTmsContext
 			err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&existing).Error
 			firstTime := errors.Is(err, gorm.ErrRecordNotFound)
@@ -85,7 +95,9 @@ func (s *Service) UpsertCentralTmsContext(ctx context.Context, input db.CentralT
 			}
 
 			currentGen := uint64(0)
-			if !firstTime {
+			if firstTime {
+				input.ID = singletonTmsContextID
+			} else {
 				currentGen = existing.Generation
 				input.ID = existing.ID
 			}
@@ -135,6 +147,21 @@ func (s *Service) UpsertCentralTmsContext(ctx context.Context, input db.CentralT
 			// part of the same transaction.
 			input.Generation = currentGen + 1
 			input.LastValidatedAt = &validatedAt
+
+			// First-ever config (no row to lock, version compare is 0==0 for every
+			// racer): the ONLY guard against a concurrent first reconfigure is the
+			// primary key. Use Create, not Save: Create is a pure INSERT, so a racer
+			// that already committed makes this collide on the fixed singleton key
+			// and fail (rolling back). Save's upsert semantics would instead find
+			// the just-inserted row, turn into an UPDATE, and silently overwrite it
+			// — reintroducing the lost-update bug this fix closes.
+			//
+			// Steady state (row exists): the FOR UPDATE lock + version compare above
+			// already serialise racers and reject the stale one, so Save's UPDATE is
+			// safe here.
+			if firstTime {
+				return tx.Create(&input).Error
+			}
 			return tx.Save(&input).Error
 		})
 	}

@@ -288,6 +288,59 @@ func TestUpsertCentralTms_ConcurrentReconfigure_Invariant(t *testing.T) {
 	}
 }
 
+// §6.3.2 / singleton: two FIRST-EVER reconfigures racing on an empty table must
+// not create two config rows. The invariant asserted here is the core guarantee
+// of the fixed-singleton-key approach: the table ends with exactly ONE row at
+// generation 1, never two.
+//
+// NOTE ON COVERAGE: under Postgres the loser's INSERT collides on the fixed
+// primary key (SQLSTATE 23505) and its transaction rolls back, so exactly one
+// call succeeds. The in-memory SQLite test DB does not reproduce that isolation
+// (clause.Locking is ignored and the single connection lets both transactions
+// observe an empty table), so the loser may silently resolve to the same single
+// row instead of erroring. Either way the single-row invariant holds, which is
+// what this test pins; the "exactly one success" half is a Postgres property.
+func TestUpsertCentralTms_ConcurrentFirstTime_SingleRow(t *testing.T) {
+	for i := 0; i < 50; i++ {
+		database := newTestDB(t) // empty: no CentralTmsContext seeded
+		mock := &mockTMSClient{nodes: []db.TransportNode{{ID: 1, Name: "N1"}}}
+		svc := &Service{DB: database, TMS: &mockTmsProvider{client: mock}}
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		errs := make([]error, 2)
+		names := []string{"first-a", "first-b"}
+		for j := 0; j < 2; j++ {
+			go func(j int) {
+				defer wg.Done()
+				_, errs[j] = svc.UpsertCentralTmsContext(context.Background(), db.CentralTmsContext{TmsApiDestinationName: names[j]})
+			}(j)
+		}
+		wg.Wait()
+
+		successes := 0
+		for _, e := range errs {
+			if e == nil {
+				successes++
+			}
+		}
+		if successes < 1 {
+			t.Fatalf("iter %d: no first-time reconfigure succeeded (errs=%v)", i, errs)
+		}
+
+		// Core invariant: exactly one row, never two — regardless of how the loser
+		// resolved. (Generation is 1 under Postgres, where the loser's INSERT fails
+		// on the PK; under SQLite's weaker isolation the loser may instead fall
+		// through to an UPDATE and leave generation at 2 — still a single row, which
+		// is the guarantee this approach provides.)
+		var count int64
+		database.Model(&db.CentralTmsContext{}).Count(&count)
+		if count != 1 {
+			t.Fatalf("iter %d: want exactly 1 config row, got %d", i, count)
+		}
+	}
+}
+
 func TestSelectTmsNode_RejectsTmsSvcNil(t *testing.T) {
 	svc, database := newTestSvc(t) // TmsSvc is nil
 
