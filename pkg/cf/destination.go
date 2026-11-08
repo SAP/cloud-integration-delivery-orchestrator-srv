@@ -48,9 +48,14 @@ type DestinationServiceClient struct {
 	*env.HttpClient
 
 	// TTL cache — optional.  Zero ttl disables caching.
+	// cache and gen are both guarded by mu (one lock, no atomics). gen is a
+	// per-name version counter: Invalidate bumps it, and GetDestination refuses
+	// to write back a snapshot whose version changed while it was being fetched
+	// off-lock, so a slow in-flight read cannot resurrect a stale entry (§5.3).
 	ttl   time.Duration
 	mu    sync.RWMutex
 	cache map[string]*cachedDest
+	gen   map[string]uint64
 }
 
 type cachedDest struct {
@@ -147,6 +152,7 @@ func NewDestinationServiceClientFromVCAP(appEnv *cfenv.App) (*DestinationService
 		HttpClient: httpClient,
 		ttl:        defaultDestTTL,
 		cache:      make(map[string]*cachedDest),
+		gen:        make(map[string]uint64),
 	}, nil
 }
 
@@ -196,7 +202,9 @@ func (c *DestinationServiceClient) ListDestinations(ctx context.Context) ([]Dest
 //
 // API: GET /destination-configuration/v1/subaccountDestinations/{name}
 func (c *DestinationServiceClient) GetDestination(ctx context.Context, name string) (*Destination, error) {
-	// Fast path: read cache
+	// Fast path: read cache. On miss, capture the name's version so we can detect
+	// an Invalidate that races the off-lock fetch below.
+	var genStart uint64
 	if c.ttl > 0 {
 		c.mu.RLock()
 		if entry, ok := c.cache[name]; ok && time.Since(entry.fetchedAt) < c.ttl {
@@ -204,6 +212,7 @@ func (c *DestinationServiceClient) GetDestination(ctx context.Context, name stri
 			c.mu.RUnlock()
 			return &dest, nil
 		}
+		genStart = c.gen[name]
 		c.mu.RUnlock()
 	}
 
@@ -228,33 +237,37 @@ func (c *DestinationServiceClient) GetDestination(ctx context.Context, name stri
 		return nil, fmt.Errorf("cf/dest: decode destination %q: %w", name, err)
 	}
 
-	// Populate cache
+	// Populate cache only if no Invalidate advanced the version while we were
+	// fetching off-lock. On a version mismatch we return the freshly-read value
+	// (it is at least as new as what we would have cached) but do NOT write it
+	// back, so a stale in-flight read cannot resurrect an evicted entry (§5.3).
+	//
+	// Unlike the CPI/CAS managers, we do NOT de-duplicate concurrent misses here:
+	// the cached value is an immutable Destination snapshot, so two racing reads
+	// just re-fetch the same data and a last-writer-wins overwrite is harmless.
+	// (The managers must de-dup because they cache stateful clients that each own
+	// a rate-limiting semaphore — see pkg/cpi/manager.go Get.)
 	if c.ttl > 0 {
 		c.mu.Lock()
-		c.cache[name] = &cachedDest{dest: dest, fetchedAt: time.Now()}
+		if c.gen[name] == genStart {
+			c.cache[name] = &cachedDest{dest: dest, fetchedAt: time.Now()}
+		}
 		c.mu.Unlock()
 	}
 
 	return &dest, nil
 }
 
-// Invalidate removes a specific destination from the cache.
+// Invalidate removes a specific destination from the cache and advances its
+// version so that any in-flight GetDestination fetched off-lock will refuse to
+// write its now-stale snapshot back (§5.3).
 func (c *DestinationServiceClient) Invalidate(name string) {
 	if c.ttl == 0 {
 		return
 	}
 	c.mu.Lock()
 	delete(c.cache, name)
-	c.mu.Unlock()
-}
-
-// InvalidateAll clears the entire destination cache.
-func (c *DestinationServiceClient) InvalidateAll() {
-	if c.ttl == 0 {
-		return
-	}
-	c.mu.Lock()
-	c.cache = make(map[string]*cachedDest)
+	c.gen[name]++
 	c.mu.Unlock()
 }
 
