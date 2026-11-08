@@ -18,18 +18,20 @@ import (
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cf"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/lifecycle"
 
+	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
 // isUniqueViolation reports whether err is a Postgres unique-constraint
-// violation (SQLSTATE 23505). The project does not enable gorm TranslateError
-// (handler code matches the raw pgconn error directly), so we detect it the
-// same way here.
+// violation (SQLSTATE 23505 / unique_violation). The project does not enable
+// gorm TranslateError (handler code matches the raw pgconn error directly), so
+// we detect it the same way here, using the library-provided SQLSTATE constant
+// rather than a bare string literal.
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+	return errors.As(err, &pgErr) && pgErr.Code == pgerrcode.UniqueViolation
 }
 
 // ErrTmsBootstrapInProgress is returned by UpsertCentralTmsContext when one or
