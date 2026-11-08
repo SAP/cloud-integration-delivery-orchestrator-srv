@@ -92,3 +92,11 @@ func (m *Manager) Get(ctx context.Context, tenantID uint) (IntegrationService, e
 	m.clients[tenantID] = cli
 	return cli, nil
 }
+
+// Invalidate removes the cached CPI client for the given tenant.
+// The next Get call will re-read the tenant binding and rebuild the client.
+func (m *Manager) Invalidate(tenantID uint) {
+	m.mu.Lock()
+	delete(m.clients, tenantID)
+	m.mu.Unlock()
+}

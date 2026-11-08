@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cas"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cf"
@@ -22,18 +23,21 @@ type TmsProvider interface {
 	Get(ctx context.Context) (tms.TransportService, error)
 	Destination(ctx context.Context) (cf.Destination, error)
 	RuntimeInfo(ctx context.Context) (tms.RuntimeInfo, error)
+	Reconfigure(ctx context.Context, destName string, commit func(validatedDest cf.Destination, validatedAt time.Time) error) (tms.RuntimeInfo, error)
 }
 
 // CpiProvider abstracts CPI manager capabilities needed by the service layer.
 // Production: *cpi.Manager. Tests: mock in test files.
 type CpiProvider interface {
 	Get(ctx context.Context, tenantID uint) (cpi.IntegrationService, error)
+	Invalidate(tenantID uint)
 }
 
 // CasProvider abstracts CAS manager capabilities needed by the service layer.
 // Production: *cas.Manager. Tests: mock in test files.
 type CasProvider interface {
 	Get(ctx context.Context, tenantID uint) (cas.CasService, error)
+	Invalidate(tenantID uint)
 }
 
 // Notifier abstracts delivery event notifications.

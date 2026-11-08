@@ -6,20 +6,47 @@ package handler
 // upsert whitelist enforcement.
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"testing"
+	"time"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cf"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/lifecycle"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/tms"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/service"
 )
 
-// newTestHandlerWithTms creates a handler with CpiTenant + CentralTmsContext migrated.
+// handlerMockTmsProvider satisfies service.TmsProvider for handler-level tests
+// that exercise UpsertCentralTmsContext. Reconfigure runs the commit callback so
+// the handler can test the DB-level Rule 4 logic.
+type handlerMockTmsProvider struct{}
+
+func (m *handlerMockTmsProvider) Get(_ context.Context) (tms.TransportService, error) {
+	return nil, fmt.Errorf("not configured in handler test")
+}
+func (m *handlerMockTmsProvider) Destination(_ context.Context) (cf.Destination, error) {
+	return cf.Destination{}, fmt.Errorf("not configured in handler test")
+}
+func (m *handlerMockTmsProvider) RuntimeInfo(_ context.Context) (tms.RuntimeInfo, error) {
+	return tms.RuntimeInfo{}, fmt.Errorf("not configured in handler test")
+}
+func (m *handlerMockTmsProvider) Reconfigure(_ context.Context, destName string, commit func(cf.Destination, time.Time) error) (tms.RuntimeInfo, error) {
+	if err := commit(cf.Destination{Name: destName}, time.Now()); err != nil {
+		return tms.RuntimeInfo{}, err
+	}
+	return tms.RuntimeInfo{Loaded: true, DestinationName: destName}, nil
+}
+
+// newTestHandlerWithTms creates a handler with CpiTenant + CentralTmsContext migrated
+// and a mock TMS provider that supports Reconfigure for Rule 4 tests.
 func newTestHandlerWithTms(t *testing.T) (*Handler, *gorm.DB) {
 	t.Helper()
 	dsn := "file:" + t.Name() + "?mode=memory&cache=private"
@@ -32,7 +59,10 @@ func newTestHandlerWithTms(t *testing.T) (*Handler, *gorm.DB) {
 	if err := database.AutoMigrate(&db.CpiTenant{}, &db.CentralTmsContext{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	h := &Handler{db: database, svc: &service.Service{DB: database}}
+	h := &Handler{db: database, svc: &service.Service{
+		DB:  database,
+		TMS: &handlerMockTmsProvider{},
+	}}
 	return h, database
 }
 
@@ -147,7 +177,7 @@ func TestRule4_UpsertCentralTms_RejectsWhenBootstrapping(t *testing.T) {
 	}
 }
 
-func TestRule4_UpsertCentralTms_NoChangeNoInvalidation(t *testing.T) {
+func TestRule4_UpsertCentralTms_SameDestStillInvalidates(t *testing.T) {
 	h, database := newTestHandlerWithTms(t)
 
 	existing := db.CentralTmsContext{TmsApiDestinationName: "same-dest"}
@@ -156,10 +186,12 @@ func TestRule4_UpsertCentralTms_NoChangeNoInvalidation(t *testing.T) {
 	bootstrapped := db.CpiTenant{
 		Name: "tenant-stable", LifecycleState: lifecycle.TenantReady,
 		TmsExtensionState: lifecycle.TmsBootstrapped,
+		CfApiEndpoint:     "https://api.cf.eu10.example.com", CfOrg: "org-stable",
 	}
 	database.Create(&bootstrapped)
 
-	// PUT with the SAME destination name — should NOT invalidate.
+	// PUT with the SAME destination name — Rule 4 still fires (RFC 033 §6.1:
+	// every call triggers full Reconfigure + Rule 4, not just on name change).
 	w := postJSON(t, h.UpsertCentralTmsContext, map[string]string{
 		"TmsApiDestinationName": "same-dest",
 	})
@@ -170,9 +202,9 @@ func TestRule4_UpsertCentralTms_NoChangeNoInvalidation(t *testing.T) {
 
 	var got db.CpiTenant
 	database.First(&got, bootstrapped.ID)
-	if got.TmsExtensionState != lifecycle.TmsBootstrapped {
-		t.Errorf("TmsExtensionState = %q, want %q (no change = no invalidation)",
-			got.TmsExtensionState, lifecycle.TmsBootstrapped)
+	if got.TmsExtensionState != lifecycle.TmsNotStarted {
+		t.Errorf("TmsExtensionState = %q, want %q (same-dest still triggers Rule 4)",
+			got.TmsExtensionState, lifecycle.TmsNotStarted)
 	}
 }
 

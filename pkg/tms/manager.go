@@ -36,8 +36,15 @@ type RuntimeInfo struct {
 // Manager provides thread-safe, cached access to the Central TMS client and
 // the destination snapshot used to build it.
 //
-// Stage 1: lazy build on first access, reuse thereafter. No Invalidate or Reconfigure.
-// Stage 2 will add Reconfigure (candidate validate → atomic publish + Rule 4).
+// There are exactly two writers of the active entry: lazy build (ensureLoaded,
+// cold start only) and Reconfigure (the single entry point for configuration
+// changes). Normal reads reuse the active client and never reload.
+//
+// The Manager does NOT own the configuration version. The authoritative version
+// is CentralTmsContext.Generation in the database; Reconfigure's commit callback
+// advances it transactionally and SelectTmsNode compares it transactionally. The
+// Manager only caches the active client/dest and swaps them atomically (under mu)
+// after a successful commit.
 type Manager struct {
 	mu       sync.Mutex
 	database *gorm.DB
@@ -124,6 +131,80 @@ func (m *Manager) RuntimeInfo(ctx context.Context) (RuntimeInfo, error) {
 	if err := m.ensureLoaded(ctx); err != nil {
 		return RuntimeInfo{}, err
 	}
+	return RuntimeInfo{
+		Loaded:          true,
+		DestinationName: m.destName,
+		Endpoint:        m.dest.URL,
+		LastValidatedAt: m.lastValidatedAt,
+	}, nil
+}
+
+// Reconfigure is the activation half of a Central TMS configuration change.
+// It force-reads the destination from BTP, builds a candidate client, and
+// validates it by calling GetNodes — all without holding the lock, so the old
+// active client stays usable throughout (§6.3.1).
+//
+// commit is the caller's DB transaction (version compare-and-set + Rule 4 +
+// save). It runs under the Manager lock and receives the validated destination
+// snapshot plus the validation timestamp, which it must persist to
+// CentralTmsContext.LastValidatedAt in the same transaction so the DB and the
+// Manager's in-memory snapshot agree. The optimistic version check lives in
+// commit, against the authoritative CentralTmsContext.Generation row (§6.3.2);
+// the Manager itself holds no version.
+//
+// On commit success the active entry (client + dest) is replaced atomically
+// under mu, so no in-process reader observes "new DB config + old client"
+// (§6.3.3). On any failure — validation or commit (incl. version conflict) —
+// the old active entry and DB config are preserved.
+func (m *Manager) Reconfigure(ctx context.Context, destName string, commit func(validatedDest cf.Destination, validatedAt time.Time) error) (RuntimeInfo, error) {
+	if m.resolver == nil {
+		return RuntimeInfo{}, fmt.Errorf("destination resolver not injected")
+	}
+
+	// ── Prepare (lock-free): force-read, build, validate ──────────────────
+	// TODO(stage 2b, §5.3): a concurrent in-flight read can refill the resolver
+	// cache with the stale snapshot between Invalidate and GetDestination.
+	// Generation-based anti-stale protection at the resolver layer still needs
+	// to cover this window.
+	m.resolver.Invalidate(destName)
+	dest, err := m.resolver.GetDestination(ctx, destName)
+	if err != nil {
+		return RuntimeInfo{}, fmt.Errorf("force-read destination %q: %w", destName, err)
+	}
+	if dest == nil {
+		return RuntimeInfo{}, fmt.Errorf("destination %q not found", destName)
+	}
+	if dest.ClientId == "" || dest.ClientSecret == "" || dest.TokenServiceURL == "" {
+		return RuntimeInfo{}, fmt.Errorf("destination %q missing OAuth credentials", destName)
+	}
+
+	client, err := NewTmsClient(ctx, dest.URL, dest.TokenServiceURL, dest.ClientId, dest.ClientSecret)
+	if err != nil {
+		return RuntimeInfo{}, fmt.Errorf("build candidate TMS client: %w", err)
+	}
+
+	// Validate: authenticate and call GetNodes to verify the TMS system is reachable.
+	if _, err := client.GetNodes(ctx); err != nil {
+		return RuntimeInfo{}, fmt.Errorf("candidate validation (GetNodes) failed: %w", err)
+	}
+
+	// ── Commit (locked): run the DB transaction, then swap the active entry ──
+	// now is generated before commit so the DB row and the in-memory snapshot
+	// record the same validation timestamp (they must not diverge across restart).
+	now := time.Now()
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if err := commit(*dest, now); err != nil {
+		return RuntimeInfo{}, err
+	}
+
+	m.client = client
+	m.dest = dest
+	m.destName = destName
+	m.lastValidatedAt = &now
+
 	return RuntimeInfo{
 		Loaded:          true,
 		DestinationName: m.destName,

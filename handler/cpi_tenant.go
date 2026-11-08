@@ -203,6 +203,11 @@ func (h *Handler) DeleteCpiTenant(ctx *gin.Context) {
 		return
 	}
 
+	// Tenant binding removed — invalidate cached CPI/CAS clients so the map
+	// entries do not outlive the tenant (§5.2: binding cleared → invalidate).
+	h.svc.CPI.Invalidate(uint(id))
+	h.svc.CAS.Invalidate(uint(id))
+
 	OK(ctx, id)
 }
 

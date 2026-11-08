@@ -99,7 +99,8 @@ type testServiceOpts struct {
 // --- Mock providers that satisfy TmsProvider / CpiProvider / CasProvider ---
 
 type mockTmsProvider struct {
-	client tms.TransportService
+	client         tms.TransportService
+	reconfigureErr error // when set, Reconfigure returns this without running commit
 }
 
 func (m *mockTmsProvider) Get(_ context.Context) (tms.TransportService, error) {
@@ -118,6 +119,16 @@ func (m *mockTmsProvider) RuntimeInfo(_ context.Context) (tms.RuntimeInfo, error
 	return tms.RuntimeInfo{Loaded: true}, nil
 }
 
+func (m *mockTmsProvider) Reconfigure(_ context.Context, destName string, commit func(cf.Destination, time.Time) error) (tms.RuntimeInfo, error) {
+	if m.reconfigureErr != nil {
+		return tms.RuntimeInfo{}, m.reconfigureErr
+	}
+	if err := commit(cf.Destination{Name: destName}, time.Now()); err != nil {
+		return tms.RuntimeInfo{}, err
+	}
+	return tms.RuntimeInfo{Loaded: true, DestinationName: destName}, nil
+}
+
 type mockCpiProvider struct {
 	getFunc func(ctx context.Context, tenantID uint) (cpi.IntegrationService, error)
 }
@@ -129,6 +140,8 @@ func (m *mockCpiProvider) Get(ctx context.Context, tenantID uint) (cpi.Integrati
 	return m.getFunc(ctx, tenantID)
 }
 
+func (m *mockCpiProvider) Invalidate(_ uint) {}
+
 type mockCasProvider struct {
 	client cas.CasService
 }
@@ -139,6 +152,8 @@ func (m *mockCasProvider) Get(_ context.Context, _ uint) (cas.CasService, error)
 	}
 	return m.client, nil
 }
+
+func (m *mockCasProvider) Invalidate(_ uint) {}
 
 // newTestService creates a Service wired to testDB with a given mock CPI factory function.
 // It sets sensible defaults for TMS/Notifier/GetUserEmail (no-op mocks) so that
@@ -443,6 +458,10 @@ type mockTMSClient struct {
 	nodes    []db.TransportNode
 	nodesErr error
 
+	// getNodesWait, when > 0, makes GetNodes sleep before returning. Used to
+	// widen the validate→commit window in concurrency tests.
+	getNodesWait time.Duration
+
 	routes    []db.TransportRoute
 	routesErr error
 
@@ -459,6 +478,9 @@ type mockTMSClient struct {
 }
 
 func (m *mockTMSClient) GetNodes(ctx context.Context) ([]db.TransportNode, error) {
+	if m.getNodesWait > 0 {
+		time.Sleep(m.getNodesWait)
+	}
 	return m.nodes, m.nodesErr
 }
 func (m *mockTMSClient) GetRoutes(ctx context.Context) ([]db.TransportRoute, error) {

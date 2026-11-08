@@ -48,4 +48,13 @@ type CentralTmsContext struct {
 	// LastValidatedAt records when the connectivity between cpi-delivery and the
 	// TMS API endpoint was last successfully verified.  Nil until first validation.
 	LastValidatedAt *time.Time
+
+	// Generation is the authoritative version of the active Central TMS config.
+	// It is advanced by exactly 1 inside each successful Reconfigure commit
+	// transaction. Cross-step operations (Reconfigure itself, SelectTmsNode)
+	// compare it within their own transaction — under a FOR UPDATE lock on this
+	// row — to detect a concurrent Reconfigure and reject the stale write
+	// (optimistic concurrency; RFC 032 L20, RFC 033 §6.3). generation == 0 means
+	// no Reconfigure has ever succeeded.
+	Generation uint64 `gorm:"not null;default:0"`
 }

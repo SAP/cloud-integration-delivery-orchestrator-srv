@@ -131,6 +131,30 @@ func TestTmsTransitions_InvalidEdgesRejected(t *testing.T) {
 	}
 }
 
+// TestTmsConfigChanged covers the L20 version-comparison decision in isolation
+// (deterministic, no DB/concurrency): equal versions accept, any difference
+// (including a decrease, defensively) rejects.
+func TestTmsConfigChanged(t *testing.T) {
+	cases := []struct {
+		name               string
+		before, underLock  uint64
+		wantChanged        bool
+	}{
+		{"unchanged", 5, 5, false},
+		{"first-config (0→0)", 0, 0, false},
+		{"advanced by one", 1, 2, true},
+		{"advanced by many", 1, 9, true},
+		{"decreased (defensive)", 3, 2, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tmsConfigChanged(tc.before, tc.underLock); got != tc.wantChanged {
+				t.Errorf("tmsConfigChanged(%d, %d) = %v, want %v", tc.before, tc.underLock, got, tc.wantChanged)
+			}
+		})
+	}
+}
+
 // TestTmsTransitions_BootstrappingBlocksReset verifies that bootstrapping state blocks reset
 // (rule 1 cannot fire while TMS bootstrap is running).
 func TestTmsTransitions_BootstrappingBlocksReset(t *testing.T) {
@@ -153,10 +177,12 @@ func TestTmsTransitions_BootstrappingBlocksReset(t *testing.T) {
 }
 
 // newTestSvc creates a Service with a per-test in-memory SQLite DB.
+// Sets minimal provider mocks (CPI, CAS) so nil-pointer panics don't occur
+// when service methods call provider.Invalidate after transactions.
 func newTestSvc(t *testing.T) (*Service, *gorm.DB) {
 	t.Helper()
 	database := newTestDB(t)
-	svc := &Service{DB: database}
+	svc := &Service{DB: database, CPI: &mockCpiProvider{}, CAS: &mockCasProvider{}}
 	return svc, database
 }
 
@@ -168,6 +194,15 @@ func newTestDB(t *testing.T) *gorm.DB {
 	})
 	if err != nil {
 		t.Fatalf("open test db: %v", err)
+	}
+	// Pin to a single connection: a private in-memory SQLite database lives on its
+	// connection, so a multi-connection pool would let one goroutine migrate the
+	// schema while another sees an empty database. One connection keeps every
+	// access (including concurrent goroutines in invariant tests) on the same DB;
+	// it also serialises writes, matching production FOR UPDATE semantics closely
+	// enough for these tests.
+	if sqlDB, err := database.DB(); err == nil {
+		sqlDB.SetMaxOpenConns(1)
 	}
 	if err := database.AutoMigrate(&db.CpiTenant{}, &db.TenantBootstrapJob{}, &db.CentralTmsContext{}); err != nil {
 		t.Fatalf("migrate: %v", err)

@@ -143,7 +143,7 @@ func (s *Service) GetBootstrapStatus(tenantID uint) (*db.TenantBootstrapJob, err
 // first (SELECT FOR UPDATE), so readying/draft are rejected before any
 // field cleanup or job marking occurs.
 func (s *Service) ResetBootstrap(tenantID uint) error {
-	return s.DB.Transaction(func(tx *gorm.DB) error {
+	if err := s.DB.Transaction(func(tx *gorm.DB) error {
 		// State transition first: validates state + acquires row lock.
 		// draft/readying are rejected here → rollback, zero side effects.
 		if err := s.transitionLifecycleWithTx(tx, tenantID, EventReset); err != nil {
@@ -175,7 +175,12 @@ func (s *Service) ResetBootstrap(tenantID uint) error {
 		}
 
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	// PIR binding cleared — invalidate cached CPI client (§5.2).
+	s.CPI.Invalidate(tenantID)
+	return nil
 }
 
 // ── BootstrapPreview ──────────────────────────────────────────────────────────
@@ -344,6 +349,9 @@ func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string,
 		return
 	}
 	credentialActions = append(credentialActions, provActs...)
+	// Destination written successfully — invalidate cached CPI client so the next
+	// Get rebuilds with the new credentials (§5.2: write succeeds → must invalidate).
+	s.CPI.Invalidate(tenant.ID)
 
 	// Persist credential action log (audit-only; failure is best-effort).
 	actsJSON, _ := json.Marshal(credentialActions)

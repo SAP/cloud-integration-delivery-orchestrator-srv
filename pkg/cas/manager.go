@@ -59,6 +59,14 @@ func (m *Manager) Get(ctx context.Context, tenantID uint) (CasService, error) {
 	return cli, nil
 }
 
+// Invalidate removes the cached CAS client for the given tenant.
+// The next Get call will re-read the tenant binding and rebuild the client.
+func (m *Manager) Invalidate(tenantID uint) {
+	m.mu.Lock()
+	delete(m.clients, tenantID)
+	m.mu.Unlock()
+}
+
 func (m *Manager) newClient(ctx context.Context, tenantID uint) (*CasClient, error) {
 	if m.resolver == nil {
 		return nil, fmt.Errorf("CAS manager: DestinationServiceClient not injected")

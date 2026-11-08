@@ -118,7 +118,7 @@ func (s *Service) ApplyTmsExtension(ctx context.Context, tenantID uint, cfToken 
 // first (SELECT FOR UPDATE), so bootstrapping is rejected before any
 // field cleanup or job marking occurs.
 func (s *Service) ResetTmsExtension(tenantID uint) error {
-	return s.DB.Transaction(func(tx *gorm.DB) error {
+	if err := s.DB.Transaction(func(tx *gorm.DB) error {
 		// State transition first: validates state + acquires row lock.
 		// bootstrapping is rejected here → rollback, zero side effects.
 		if err := s.transitionTmsWithTx(tx, tenantID, TmsEventReset); err != nil {
@@ -151,7 +151,12 @@ func (s *Service) ResetTmsExtension(tenantID uint) error {
 		}
 
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	// CAS binding cleared — invalidate cached CAS client (§5.2).
+	s.CAS.Invalidate(tenantID)
+	return nil
 }
 
 // resetTmsPrereqs clears TMS layer detail statuses to missing and sets tms_blocking_reason.
@@ -399,6 +404,8 @@ func (s *Service) runTmsExtensionBootstrap(tenant *db.CpiTenant, jobID uint, cfT
 		return
 	}
 	credentialActions = append(credentialActions, casActs...)
+	// Destination written successfully — invalidate cached CAS client (§5.2).
+	s.CAS.Invalidate(tenant.ID)
 
 	// Persist credential actions (audit-only).
 	actsJSON, _ := json.Marshal(credentialActions)

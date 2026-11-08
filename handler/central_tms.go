@@ -40,11 +40,14 @@ func (h *Handler) UpsertCentralTmsContext(ctx *gin.Context) {
 		return
 	}
 
-	result, err := h.svc.UpsertCentralTmsContext(input)
+	result, err := h.svc.UpsertCentralTmsContext(ctx.Request.Context(), input)
 	if err != nil {
-		if errors.Is(err, service.ErrTmsBootstrapInProgress) {
+		switch {
+		case errors.Is(err, service.ErrTmsBootstrapInProgress):
 			FailCode(ctx, 409, "TMS_BOOTSTRAP_IN_PROGRESS", err.Error())
-		} else {
+		case errors.Is(err, service.ErrTmsConfigConflict):
+			FailCode(ctx, 409, "TMS_CONFIG_CHANGED", err.Error())
+		default:
 			Fail(ctx, 500, err.Error())
 		}
 		return

@@ -7,7 +7,12 @@ package service
 // handler layer — those are in handler/p0_integration_test.go.
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/lifecycle"
@@ -16,10 +21,24 @@ import (
 	"gorm.io/gorm"
 )
 
+// seedCentralTmsGen creates the single CentralTmsContext row with the given
+// generation. SelectTmsNode reads this row to capture the config version it
+// validates against (L20), so success-path tests must seed it.
+func seedCentralTmsGen(t *testing.T, database *gorm.DB, generation uint64) {
+	t.Helper()
+	if err := database.Create(&db.CentralTmsContext{
+		TmsApiDestinationName: "tms-dest",
+		Generation:            generation,
+	}).Error; err != nil {
+		t.Fatalf("seed CentralTmsContext: %v", err)
+	}
+}
+
 // ── §6.1: Node switch from bootstrapped → node_confirmed ────────────────────
 
 func TestSelectTmsNode_FromBootstrapped_ResetsToNodeConfirmed(t *testing.T) {
 	database := newTestDB(t)
+	seedCentralTmsGen(t, database, 1)
 	mock := &mockTMSClient{
 		nodes: []db.TransportNode{
 			{ID: 200, Name: "new-node"},
@@ -66,6 +85,7 @@ func TestSelectTmsNode_FromBootstrapped_ResetsToNodeConfirmed(t *testing.T) {
 
 func TestSelectTmsNode_FromNodeConfirmed_Succeeds(t *testing.T) {
 	database := newTestDB(t)
+	seedCentralTmsGen(t, database, 1)
 	mock := &mockTMSClient{
 		nodes: []db.TransportNode{
 			{ID: 1, Name: "first-pick"},
@@ -107,6 +127,7 @@ func TestSelectTmsNode_FromNodeConfirmed_Succeeds(t *testing.T) {
 
 func TestSelectTmsNode_RejectsInvalidNode(t *testing.T) {
 	database := newTestDB(t)
+	seedCentralTmsGen(t, database, 1)
 	// Mock TMS that knows only node 100 "valid-node".
 	mock := &mockTMSClient{
 		nodes: []db.TransportNode{
@@ -150,6 +171,120 @@ func TestSelectTmsNode_RejectsInvalidNode(t *testing.T) {
 	// Mismatched name (ID exists but name differs) should be rejected.
 	if err := svc.SelectTmsNode(t.Context(), tenant.ID, 100, "wrong-name"); err == nil {
 		t.Fatal("expected error for name mismatch, got nil")
+	}
+}
+
+// L20 (concurrency invariant): SelectTmsNode and UpsertCentralTmsContext run
+// concurrently against the same DB. The invariant asserted here is the absence
+// of a stale write — SelectTmsNode must never fail its version check yet leave
+// node 200 persisted. No production test hooks: the race is driven by real
+// concurrent calls and we assert the invariant, not a specific interleaving.
+//
+// NOTE ON COVERAGE: under the in-memory SQLite test DB the two transactions are
+// serialised on a single connection (clause.Locking is ignored), so the stale
+// write this guards against can rarely be *produced* here — this test mainly
+// proves the code paths compose without deadlock or logic error. The real
+// FOR UPDATE row-lock behaviour is exercised against Postgres (LOCAL_POSTGRES_URI);
+// the version-comparison decision itself is covered deterministically by
+// TestTmsConfigChanged.
+func TestSelectTmsNode_ConcurrentReconfigure_Invariant(t *testing.T) {
+	for i := 0; i < 50; i++ {
+		database := newTestDB(t)
+		seedCentralTmsGen(t, database, 1)
+		mock := &mockTMSClient{
+			nodes:        []db.TransportNode{{ID: 200, Name: "new-node"}},
+			getNodesWait: 200 * time.Microsecond,
+		}
+		svc := &Service{DB: database, TMS: &mockTmsProvider{client: mock}}
+
+		tenant := db.CpiTenant{
+			Name:              fmt.Sprintf("inv-%d", i),
+			LifecycleState:    lifecycle.TenantReady,
+			TmsExtensionState: lifecycle.TmsNodeConfirmed,
+			TmsSourceNodeName: "old-node",
+			TmsSourceNodeID:   100,
+		}
+		if err := database.Create(&tenant).Error; err != nil {
+			t.Fatalf("create tenant: %v", err)
+		}
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		var selErr error
+		go func() {
+			defer wg.Done()
+			selErr = svc.SelectTmsNode(context.Background(), tenant.ID, 200, "new-node")
+		}()
+		go func() {
+			defer wg.Done()
+			_, _ = svc.UpsertCentralTmsContext(context.Background(), db.CentralTmsContext{TmsApiDestinationName: "reconfigured"})
+		}()
+		wg.Wait()
+
+		var got db.CpiTenant
+		database.First(&got, tenant.ID)
+		wroteNode := got.TmsSourceNodeID == 200
+
+		// The L20 invariant is the absence of a STALE WRITE: SelectTmsNode must
+		// never fail its version check yet leave node 200 persisted. (The converse
+		// — success followed by node 200 being cleared — is legal: a Reconfigure
+		// that commits after SelectTmsNode runs Rule 4 and resets this tenant. That
+		// is correct behaviour, not a violation.)
+		if selErr != nil && wroteNode {
+			t.Fatalf("iter %d: SelectTmsNode failed yet node 200 was persisted (stale write!)", i)
+		}
+	}
+}
+
+// §6.3.2 (concurrency invariant): two Reconfigures racing on the same starting
+// version. The DB config row FOR UPDATE serialises them; the second committer
+// sees an advanced generation and is rejected with ErrTmsConfigConflict. Across
+// iterations the invariant holds: exactly one wins, generation ends at the
+// seeded value + (number of successes), and no update is silently lost.
+func TestUpsertCentralTms_ConcurrentReconfigure_Invariant(t *testing.T) {
+	for i := 0; i < 50; i++ {
+		database := newTestDB(t)
+		seedCentralTmsGen(t, database, 1)
+		mock := &mockTMSClient{nodes: []db.TransportNode{{ID: 1, Name: "N1"}}}
+		svc := &Service{DB: database, TMS: &mockTmsProvider{client: mock}}
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		errs := make([]error, 2)
+		names := []string{"cfg-a", "cfg-b"}
+		for j := 0; j < 2; j++ {
+			go func(j int) {
+				defer wg.Done()
+				_, errs[j] = svc.UpsertCentralTmsContext(context.Background(), db.CentralTmsContext{TmsApiDestinationName: names[j]})
+			}(j)
+		}
+		wg.Wait()
+
+		successes := 0
+		conflicts := 0
+		for _, e := range errs {
+			switch {
+			case e == nil:
+				successes++
+			case errors.Is(e, ErrTmsConfigConflict):
+				conflicts++
+			default:
+				t.Fatalf("iter %d: unexpected error: %v", i, e)
+			}
+		}
+		// At least one must win; the other wins only if it was fully serialised
+		// after the first (then it saw the new version as its own genAtStart).
+		if successes < 1 {
+			t.Fatalf("iter %d: no reconfigure succeeded (successes=%d conflicts=%d)", i, successes, conflicts)
+		}
+
+		var cfg db.CentralTmsContext
+		database.First(&cfg)
+		// Generation advanced by exactly the number of successful commits; no
+		// lost update, no double-apply from a single success.
+		if cfg.Generation != uint64(1+successes) {
+			t.Fatalf("iter %d: generation = %d, want %d (seed 1 + %d successes)", i, cfg.Generation, 1+successes, successes)
+		}
 	}
 }
 
@@ -790,6 +925,7 @@ func TestRecoverStuckBootstraps(t *testing.T) {
 
 func TestSelectTmsNode_FromBootstrapped_SetsR2Fields(t *testing.T) {
 	database := newTestDB(t)
+	seedCentralTmsGen(t, database, 1)
 	mock := &mockTMSClient{
 		nodes: []db.TransportNode{{ID: 200, Name: "new-node"}},
 	}
@@ -886,7 +1022,12 @@ func TestRule3_PirKeyInvalidation(t *testing.T) {
 // ── L18: Test gaps — Rule 4 covers node_confirmed ───────────────────────────
 
 func TestRule4_UpsertCentralTms_InvalidatesNodeConfirmed(t *testing.T) {
-	svc, database := newTestSvc(t)
+	database := newTestDB(t)
+	// Mock TMS provider whose Reconfigure runs the commit callback (Rule 4 + save).
+	svc := &Service{
+		DB:  database,
+		TMS: &mockTmsProvider{},
+	}
 
 	// Seed Central TMS.
 	database.Create(&db.CentralTmsContext{TmsApiDestinationName: "old-dest"})
@@ -926,12 +1067,23 @@ func TestRule4_UpsertCentralTms_InvalidatesNodeConfirmed(t *testing.T) {
 	database.Create(&notStarted)
 
 	// Change Central TMS destination.
-	result, err := svc.UpsertCentralTmsContext(db.CentralTmsContext{TmsApiDestinationName: "new-dest"})
+	result, err := svc.UpsertCentralTmsContext(t.Context(), db.CentralTmsContext{TmsApiDestinationName: "new-dest"})
 	if err != nil {
 		t.Fatalf("UpsertCentralTmsContext: %v", err)
 	}
 	if result.AffectedTenants != 2 {
 		t.Errorf("AffectedTenants = %d, want 2", result.AffectedTenants)
+	}
+
+	// The config row was persisted with an advanced generation and a
+	// last-validated timestamp recorded in the same transaction.
+	var savedCfg db.CentralTmsContext
+	database.First(&savedCfg)
+	if savedCfg.Generation != 1 {
+		t.Errorf("Generation = %d, want 1 after first reconfigure", savedCfg.Generation)
+	}
+	if savedCfg.LastValidatedAt == nil {
+		t.Error("LastValidatedAt was not persisted by Reconfigure (still nil)")
 	}
 
 	// Both should be reset to not_started.

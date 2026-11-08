@@ -83,6 +83,16 @@ var allowedTmsTransitions = map[lifecycle.TmsExtensionState]map[TmsEvent]lifecyc
 	},
 }
 
+// tmsConfigChanged reports whether the Central TMS configuration version
+// observed before node validation differs from the version seen under the
+// commit lock. A difference means a Reconfigure committed in between, so the
+// validated node belongs to a superseded TMS system and the write must be
+// rejected (RFC 032 L20). Extracted as a pure function so the decision has a
+// deterministic unit test independent of DB/concurrency.
+func tmsConfigChanged(genBefore, genUnderLock uint64) bool {
+	return genUnderLock != genBefore
+}
+
 // SelectTmsNode atomically transitions to node_confirmed and writes node fields.
 // Also unconditionally marks TransportManagement destination as stale (R2 fix).
 // Rejects draft tenants (CF identity not yet configured).
@@ -95,6 +105,17 @@ func (s *Service) SelectTmsNode(ctx context.Context, tenantID uint, nodeID uint,
 	if s.TMS == nil {
 		return fmt.Errorf("SelectTmsNode: TMS not configured")
 	}
+	// Capture the authoritative Central TMS config version the node list is
+	// validated against. If a Reconfigure advances it before we commit, the node
+	// we verified belongs to a now-superseded TMS system and must not be written
+	// (L20). The version lives in CentralTmsContext.Generation (DB), so the check
+	// and the node write share one transaction below.
+	var cfgBefore db.CentralTmsContext
+	if err := s.DB.WithContext(ctx).First(&cfgBefore).Error; err != nil {
+		return fmt.Errorf("SelectTmsNode: read central TMS version: %w", err)
+	}
+	genBefore := cfgBefore.Generation
+
 	tmsClient, err := s.TMS.Get(ctx)
 	if err != nil {
 		return fmt.Errorf("SelectTmsNode: TMS not available: %w", err)
@@ -115,6 +136,17 @@ func (s *Service) SelectTmsNode(ctx context.Context, tenantID uint, nodeID uint,
 	}
 
 	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Lock the config row first (shared lock order with UpsertCentralTmsContext:
+		// config row → tenant rows) and re-check the version under the lock. A
+		// Reconfigure that raced node validation either advanced Generation already
+		// (we reject here) or is blocked on this row lock until we commit (L20).
+		var cfgNow db.CentralTmsContext
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&cfgNow).Error; err != nil {
+			return fmt.Errorf("SelectTmsNode: lock central TMS version: %w", err)
+		}
+		if tmsConfigChanged(genBefore, cfgNow.Generation) {
+			return fmt.Errorf("SelectTmsNode: Central TMS was reconfigured during node selection; re-select the node")
+		}
 		// Draft check under lock — transitionTmsWithTx reads lifecycle_state
 		// but does not enforce the LifecycleState ≠ draft precondition.
 		var tenant db.CpiTenant
