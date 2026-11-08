@@ -54,7 +54,7 @@ func (h *Handler) UpsertCpiTenant(ctx *gin.Context) {
 			LifecycleState: lifecycle.TenantDraft,
 		}
 		if err := h.db.Create(&placeholder).Error; err != nil {
-			if isUniqueViolation(err) {
+			if db.IsUniqueViolation(err) {
 				FailCode(ctx, 409, "TENANT_NAME_EXISTS", fmt.Sprintf("tenant name %q already exists", input.Name))
 				return
 			}
@@ -86,7 +86,7 @@ func (h *Handler) UpsertCpiTenant(ctx *gin.Context) {
 		"group":      input.Group,
 		"updated_by": input.UpdatedBy,
 	}).Error; err != nil {
-		if isUniqueViolation(err) {
+		if db.IsUniqueViolation(err) {
 			FailCode(ctx, 409, "TENANT_NAME_EXISTS", fmt.Sprintf("tenant name %q already exists", input.Name))
 			return
 		}

@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"errors"
 	"net/http"
 	"net/url"
 
@@ -12,7 +11,6 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
-	"github.com/jackc/pgx/v5/pgconn"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
@@ -88,14 +86,6 @@ func RedirectSPA(c *gin.Context, path, severity, message string, extra url.Value
 		}
 	}
 	c.Redirect(http.StatusFound, path+"?"+q.Encode())
-}
-
-// isUniqueViolation reports whether err is a Postgres unique-constraint
-// violation (SQLSTATE 23505). Used to translate duplicate-key errors into
-// 409 Conflict responses instead of a raw 500.
-func isUniqueViolation(err error) bool {
-	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
 func NewHandler(
