@@ -468,3 +468,45 @@ func TestCheckTMS_DoesNotStampStaleGeneration(t *testing.T) {
 		t.Fatal("stale check result was stamped onto the new generation (want nil)")
 	}
 }
+
+// CheckTenants returns a basic (CPI) tier for every tenant and a cas extension
+// only for tenants that have a CAS engine destination.
+func TestCheckTenants_TiersBasicAndCasExtension(t *testing.T) {
+	database := newTestDB(t)
+	withCas := db.CpiTenant{Name: "with-cas", PirApiDestinationName: "pir-a", CasEngineDestinationName: "cas-a", CfApiEndpoint: "a", CfOrg: "oa"}
+	noCas := db.CpiTenant{Name: "no-cas", PirApiDestinationName: "pir-b", CfApiEndpoint: "b", CfOrg: "ob"}
+	database.Create(&withCas)
+	database.Create(&noCas)
+
+	svc := &Service{
+		DB:  database,
+		CPI: &mockCpiProvider{getFunc: func(_ context.Context, _ uint) (cpi.IntegrationService, error) { return &mockCPIClient{}, nil }},
+		CAS: &mockCasProvider{client: &mockCasClient{}},
+	}
+
+	results := svc.CheckTenants(context.Background())
+	if len(results) != 2 {
+		t.Fatalf("got %d tenant results, want 2", len(results))
+	}
+
+	byName := map[string]TenantConnectivity{}
+	for _, r := range results {
+		byName[r.TenantName] = r
+	}
+
+	wc := byName["with-cas"]
+	if wc.Basic.Status != "ok" {
+		t.Errorf("with-cas basic = %q, want ok", wc.Basic.Status)
+	}
+	if _, ok := wc.Extensions["cas"]; !ok {
+		t.Error("with-cas missing cas extension")
+	}
+
+	nc := byName["no-cas"]
+	if nc.Basic.Status != "ok" {
+		t.Errorf("no-cas basic = %q, want ok", nc.Basic.Status)
+	}
+	if _, ok := nc.Extensions["cas"]; ok {
+		t.Error("no-cas should not have a cas extension")
+	}
+}

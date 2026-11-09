@@ -19,6 +19,18 @@ type ConnectivityStatus struct {
 	Message string `json:"message,omitempty"`
 }
 
+// TenantConnectivity is a tenant's check result in two tiers: Basic (CPI, a
+// prerequisite for every onboarded tenant) and Extensions (capabilities present
+// only once enabled — currently "cas", later e.g. "github_branch"). Extensions
+// contains only the capabilities this tenant actually has, so the frontend can
+// render them as a secondary tier without a dedicated "warn" status.
+type TenantConnectivity struct {
+	TenantID   uint                          `json:"tenantId"`
+	TenantName string                        `json:"tenantName"`
+	Basic      ConnectivityStatus            `json:"basic"`
+	Extensions map[string]ConnectivityStatus `json:"extensions,omitempty"`
+}
+
 // CheckDatabase verifies database connectivity via SQL ping.
 func (s *Service) CheckDatabase() ConnectivityStatus {
 	sqlDB, err := s.DB.DB()
@@ -55,35 +67,26 @@ func (s *Service) CheckTMS(ctx context.Context) ConnectivityStatus {
 	return ConnectivityStatus{Name: "TMS", Type: "tms", Status: "ok"}
 }
 
-// CheckTenants verifies basic connectivity for every tenant: it resolves the
-// tenant's CPI client through the CPI manager (the same client business code
-// uses) and authenticates it. This is the "basic" tier — CPI is a prerequisite
-// for every onboarded tenant.
-func (s *Service) CheckTenants(ctx context.Context) []ConnectivityStatus {
+// CheckTenants verifies connectivity for every tenant in two tiers: Basic is
+// the tenant's CPI client (resolved via the manager and authenticated, i.e. the
+// same client business code uses); Extensions holds capability checks that only
+// apply once provisioned — currently CAS, included only when the tenant has a
+// CAS engine destination.
+func (s *Service) CheckTenants(ctx context.Context) []TenantConnectivity {
 	var tenants []db.CpiTenant
 	s.DB.Find(&tenants)
 
-	var results []ConnectivityStatus
+	results := make([]TenantConnectivity, 0, len(tenants))
 	for _, t := range tenants {
-		results = append(results, s.checkTenantCPI(ctx, t))
-	}
-	return results
-}
-
-// CheckCasTenants verifies CAS connectivity for tenants that have a CAS engine
-// destination (i.e. the TMS extension provisioned one). Tenants without it are
-// skipped — CAS is an extension capability, not part of basic readiness. Uses
-// the CAS manager's client (business-same) and authenticates it.
-func (s *Service) CheckCasTenants(ctx context.Context) []ConnectivityStatus {
-	var tenants []db.CpiTenant
-	s.DB.Find(&tenants)
-
-	var results []ConnectivityStatus
-	for _, t := range tenants {
-		if t.CasEngineDestinationName == "" {
-			continue
+		tc := TenantConnectivity{
+			TenantID:   t.ID,
+			TenantName: t.Name,
+			Basic:      s.checkTenantCPI(ctx, t),
 		}
-		results = append(results, s.checkTenantCAS(ctx, t))
+		if t.CasEngineDestinationName != "" {
+			tc.Extensions = map[string]ConnectivityStatus{"cas": s.checkTenantCAS(ctx, t)}
+		}
+		results = append(results, tc)
 	}
 	return results
 }
