@@ -124,3 +124,67 @@ func TestDo_401RetryPreservesBody(t *testing.T) {
 		t.Fatalf("expected 2 attempts, got %d", attempt.Load())
 	}
 }
+
+// fetchToken (via Authenticate) must reject a non-2xx token response instead of
+// treating it as a successful empty-token auth.
+func TestAuthenticate_RejectsNon2xxTokenResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"invalid_client"}`))
+	}))
+	defer server.Close()
+
+	c, err := NewClient(context.Background(), "cid", "sec", server.URL, server.URL)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	if err := c.Authenticate(context.Background()); err == nil {
+		t.Fatal("expected error for 401 token response, got nil")
+	}
+	if c.AccessToken != "" {
+		t.Fatalf("expected no token stored after failed auth, got %q", c.AccessToken)
+	}
+}
+
+// A 2xx token response with an empty access_token is not a usable auth.
+func TestAuthenticate_RejectsEmptyAccessToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"","expires_in":3600}`))
+	}))
+	defer server.Close()
+
+	c, err := NewClient(context.Background(), "cid", "sec", server.URL, server.URL)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	if err := c.Authenticate(context.Background()); err == nil {
+		t.Fatal("expected error for empty access_token, got nil")
+	}
+}
+
+// Authenticate succeeds on a valid token response and reuses the token (no
+// second fetch) while it is still valid.
+func TestAuthenticate_SucceedsAndReuses(t *testing.T) {
+	var fetches atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fetches.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"tok","expires_in":3600}`))
+	}))
+	defer server.Close()
+
+	c, err := NewClient(context.Background(), "cid", "sec", server.URL, server.URL)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	if err := c.Authenticate(context.Background()); err != nil {
+		t.Fatalf("first authenticate: %v", err)
+	}
+	if err := c.Authenticate(context.Background()); err != nil {
+		t.Fatalf("second authenticate: %v", err)
+	}
+	if n := fetches.Load(); n != 1 {
+		t.Fatalf("token fetched %d times, want 1 (second reused)", n)
+	}
+}

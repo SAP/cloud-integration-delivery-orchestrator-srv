@@ -122,6 +122,12 @@ func (h *Handler) CheckConnectivityTenants(ctx *gin.Context) {
 	OK(ctx, results)
 }
 
+// GET /api/v1/system/connectivity/cas-tenants
+func (h *Handler) CheckConnectivityCasTenants(ctx *gin.Context) {
+	results := h.svc.CheckCasTenants(ctx.Request.Context())
+	OK(ctx, results)
+}
+
 // --- Git Repository Config ---
 
 // GET /api/v1/system/gitRepoConfig/providers

@@ -324,6 +324,7 @@ func (h *Handler) SetupRoutes(v1 *gin.RouterGroup, v2 *gin.RouterGroup, requireS
 		system.GET("/connectivity/database", h.CheckConnectivityDatabase)
 		system.GET("/connectivity/tms", h.CheckConnectivityTMS)
 		system.GET("/connectivity/tenants", h.CheckConnectivityTenants)
+		system.GET("/connectivity/cas-tenants", h.CheckConnectivityCasTenants)
 	}
 
 	// --- v2 API (DeliveryRequest.Operate) ---

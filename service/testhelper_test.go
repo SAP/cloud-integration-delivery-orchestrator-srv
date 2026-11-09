@@ -294,6 +294,7 @@ func (m *mockCPIClient) GetDesignTimeArtifact(ctx context.Context, artifactID, v
 func (m *mockCPIClient) DownloadArtifactZip(ctx context.Context, artifactID, version string, artifactType consts.ArtifactType) ([]byte, error) {
 	return nil, nil
 }
+func (m *mockCPIClient) Authenticate(ctx context.Context) error { return nil }
 
 // mockCPIClientWithDesignTime extends the mock to return specific design-time versions.
 // Used by tests that exercise checkVersionDowngradeInTenant.
@@ -462,6 +463,10 @@ type mockTMSClient struct {
 	// widen the validate→commit window in concurrency tests.
 	getNodesWait time.Duration
 
+	// onGetNodes, when set, runs at the start of GetNodes. Lets a test mutate
+	// state (e.g. advance the config generation) mid-check.
+	onGetNodes func()
+
 	routes    []db.TransportRoute
 	routesErr error
 
@@ -478,6 +483,9 @@ type mockTMSClient struct {
 }
 
 func (m *mockTMSClient) GetNodes(ctx context.Context) ([]db.TransportNode, error) {
+	if m.onGetNodes != nil {
+		m.onGetNodes()
+	}
 	if m.getNodesWait > 0 {
 		time.Sleep(m.getNodesWait)
 	}
@@ -585,6 +593,7 @@ func (m *mockCasClient) PollOperation(_ context.Context, _ string) (*cas.Operati
 func (m *mockCasClient) GetOperationConfig(_ context.Context, _ string) (*cas.OperationConfig, error) {
 	return m.opConfig, m.opConfigErr
 }
+func (m *mockCasClient) Authenticate(_ context.Context) error { return nil }
 
 // --- Additional Seed Helpers ---
 

@@ -23,6 +23,9 @@ type IntegrationService interface {
 	GetPackageArtifactsByType(ctx context.Context, packageID string, artifactType consts.ArtifactType) ([]ArtifactCommonItem, error)
 	GetRuntimeArtifacts(ctx context.Context) ([]RuntimeArtifact, error)
 	DownloadArtifactZip(ctx context.Context, artifactID, version string, artifactType consts.ArtifactType) ([]byte, error)
+	// Authenticate verifies the client's credentials actually obtain a token
+	// (used by health checks). Satisfied by the embedded *env.HttpClient.
+	Authenticate(ctx context.Context) error
 }
 
 // ErrNoDestination is returned when a tenant has no PirApiDestinationName configured.

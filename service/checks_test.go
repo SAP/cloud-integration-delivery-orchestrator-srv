@@ -425,3 +425,46 @@ func TestParseCPIVersion(t *testing.T) {
 		})
 	}
 }
+
+// CheckTMS stamps last_validated_at only on the generation it actually checked.
+func TestCheckTMS_StampsValidatedAt(t *testing.T) {
+	database := newTestDB(t)
+	seedCentralTmsGen(t, database, 5)
+	mock := &mockTMSClient{nodes: []db.TransportNode{{ID: 1, Name: "N1"}}}
+	svc := &Service{DB: database, TMS: &mockTmsProvider{client: mock}}
+
+	if res := svc.CheckTMS(context.Background()); res.Status != "ok" {
+		t.Fatalf("CheckTMS status = %q, want ok (msg=%s)", res.Status, res.Message)
+	}
+	var cfg db.CentralTmsContext
+	database.First(&cfg)
+	if cfg.LastValidatedAt == nil {
+		t.Fatal("last_validated_at was not stamped on the checked generation")
+	}
+}
+
+// §7.2.4: if a Reconfigure advances the generation during the check, the stale
+// success must NOT be stamped onto the new config version.
+func TestCheckTMS_DoesNotStampStaleGeneration(t *testing.T) {
+	database := newTestDB(t)
+	seedCentralTmsGen(t, database, 5)
+	mock := &mockTMSClient{nodes: []db.TransportNode{{ID: 1, Name: "N1"}}}
+	// During GetNodes (after CheckTMS captured gen=5), a reconfigure bumps the
+	// row to gen=6. The version-scoped UPDATE (WHERE generation=5) then matches
+	// nothing.
+	mock.onGetNodes = func() {
+		database.Model(&db.CentralTmsContext{}).Where("generation = ?", 5).Update("generation", 6)
+	}
+	svc := &Service{DB: database, TMS: &mockTmsProvider{client: mock}}
+
+	svc.CheckTMS(context.Background())
+
+	var cfg db.CentralTmsContext
+	database.First(&cfg)
+	if cfg.Generation != 6 {
+		t.Fatalf("generation = %d, want 6 (reconfigure during check)", cfg.Generation)
+	}
+	if cfg.LastValidatedAt != nil {
+		t.Fatal("stale check result was stamped onto the new generation (want nil)")
+	}
+}

@@ -88,6 +88,14 @@ func (c *HttpClient) fetchToken(ctx context.Context) error {
 		return errIOReader
 	}
 
+	// Reject non-2xx token responses: the OAuth endpoint signals failed auth
+	// (bad client_id/secret, revoked credentials) with 4xx/5xx, which previously
+	// slipped through and produced an empty-token "success".
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		L(ctx).Errorw("token endpoint returned non-2xx", "status", res.StatusCode)
+		return &HttpResponseError{StatusCode: res.StatusCode, Body: body, URL: c.AuthUrl}
+	}
+
 	var oauthResp OauthResp
 	jsonUnmarshalErr := json.Unmarshal(body, &oauthResp)
 	if jsonUnmarshalErr != nil {
@@ -95,11 +103,31 @@ func (c *HttpClient) fetchToken(ctx context.Context) error {
 		return jsonUnmarshalErr
 	}
 
+	// A 2xx with no access_token is not a usable authentication.
+	if oauthResp.AccessToken == "" {
+		L(ctx).Errorw("token endpoint returned no access_token")
+		return fmt.Errorf("token endpoint %s returned no access_token", c.AuthUrl)
+	}
+
 	c.mu.Lock()
 	c.AccessToken = oauthResp.AccessToken
 	c.TokenExp = time.Now().Add(time.Duration(oauthResp.ExpiresIn-30) * time.Second)
 	c.mu.Unlock()
 	return nil
+}
+
+// Authenticate ensures the client holds a currently-valid token, fetching one
+// if absent or expired. It reuses a still-valid token (no network call). Health
+// checks use this to prove a destination's credentials actually authenticate —
+// unlike constructing the client, which does no token exchange.
+func (c *HttpClient) Authenticate(ctx context.Context) error {
+	c.mu.Lock()
+	valid := c.AccessToken != "" && time.Now().Before(c.TokenExp)
+	c.mu.Unlock()
+	if valid {
+		return nil
+	}
+	return c.fetchToken(ctx)
 }
 
 // Do executes an HTTP request with the given context and returns the response body.

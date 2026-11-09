@@ -18,6 +18,9 @@ type CasService interface {
 	TriggerExport(ctx context.Context, req ExportRequest) (*ExportResponse, error)
 	PollOperation(ctx context.Context, processID string) (*OperationStatus, error)
 	GetOperationConfig(ctx context.Context, processID string) (*OperationConfig, error)
+	// Authenticate verifies the client's credentials actually obtain a token
+	// (used by health checks). Satisfied by the embedded *env.HttpClient.
+	Authenticate(ctx context.Context) error
 }
 
 // Manager provides thread-safe, cached access to CAS clients.
