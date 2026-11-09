@@ -510,3 +510,36 @@ func TestCheckTenants_TiersBasicAndCasExtension(t *testing.T) {
 		t.Error("no-cas should not have a cas extension")
 	}
 }
+
+// A RELEASED TR whose Content is empty must be rejected with an error, not
+// panic on Content[0] (RFC 033 §8.4 defensive fix).
+func TestTrExist_RejectsEmptyContent(t *testing.T) {
+	source := &db.CpiTenant{TmsSourceNodeName: "SRC-NODE"}
+	op := db.ArtifactTenantOperation{
+		ArtifactTechID:         "artifact-tech",
+		ArtifactVersion:        "1.0.0",
+		ArtifactType:           consts.Artifact_Type_Iflow,
+		TransportRequestNumber: "TR-3000",
+	}
+
+	svc := newTestService(nil, testServiceOpts{
+		tms: &mockTMSClient{
+			transportRequests: map[string]*tms.TransportRequestV1{
+				op.TransportRequestNumber: {
+					ID:      1,
+					State:   "RELEASED",
+					Origin:  source.TmsSourceNodeName,
+					Content: nil, // no content → must not panic on Content[0]
+				},
+			},
+		},
+	})
+
+	ok, err := svc.TrExist(context.Background(), &op, source)
+	if err == nil {
+		t.Fatal("expected error for TR with empty content, got nil")
+	}
+	if ok {
+		t.Fatal("expected false for TR with empty content")
+	}
+}

@@ -212,6 +212,9 @@ func (s *Service) TrExist(ctx context.Context, op *db.ArtifactTenantOperation, s
 		return false, fmt.Errorf("artifact %s has transport request number %s not from source tenant node %s", op.ArtifactTechID, trNumber, sourceTenant.TmsSourceNodeName)
 	}
 	// check Content Field, should match techID, Version, Type
+	if len(trV1.Content) == 0 {
+		return false, fmt.Errorf("artifact %s, trNumber %s: transport request has no content", op.ArtifactTechID, trNumber)
+	}
 	index := -1
 	for i, md := range trV1.Content[0].Metadata {
 		// NOTE: tms response use Name, not tech ID
