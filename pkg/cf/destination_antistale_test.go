@@ -65,9 +65,9 @@ func TestGetDestination_InvalidateDuringFetch_NoStaleWriteBack(t *testing.T) {
 		close(done)
 	}()
 
-	<-entered           // GetDestination is parked mid-fetch (version captured)
-	c.Invalidate("d")   // bump gen while the fetch is in flight
-	close(release)      // let the fetch finish and attempt write-back
+	<-entered         // GetDestination is parked mid-fetch (version captured)
+	c.Invalidate("d") // bump gen while the fetch is in flight
+	close(release)    // let the fetch finish and attempt write-back
 	<-done
 
 	// The in-flight fetch must not have populated the cache.

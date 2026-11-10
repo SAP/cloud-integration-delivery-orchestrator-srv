@@ -38,7 +38,7 @@ type RuntimeInfo struct {
 //
 // The cached entry is the runtime source of truth for Central TMS — not the
 // DB row and not the BTP destination. It is written only by the first
-// successful lazy load after process start (ensureLoaded) and by a successful
+// successful lazy load after process start (load) and by a successful
 // Reconfigure; every other call reads the cache and never re-resolves the
 // destination. There is deliberately no Invalidate.
 //

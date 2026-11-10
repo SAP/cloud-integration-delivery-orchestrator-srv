@@ -19,17 +19,17 @@ import (
 
 // drTestSetup creates tenants, rule, DR for DR operation tests.
 type drTestSetup struct {
-	tc             *testCleanup
-	source         db.CpiTenant
-	target         db.CpiTenant
-	rule           db.DeliveryRule
-	dr             db.DeliveryRequest
-	artifactTechID string
+	tc              *testCleanup
+	source          db.CpiTenant
+	target          db.CpiTenant
+	rule            db.DeliveryRule
+	dr              db.DeliveryRequest
+	artifactTechID  string
 	artifactVersion string
-	artifactName   string
-	artifactType   consts.ArtifactType
-	packageID      string
-	cpiFactory     func(ctx context.Context, tenantID uint) (cpi.IntegrationService, error) // pre-configured mock: serves downgrade check
+	artifactName    string
+	artifactType    consts.ArtifactType
+	packageID       string
+	cpiFactory      func(ctx context.Context, tenantID uint) (cpi.IntegrationService, error) // pre-configured mock: serves downgrade check
 }
 
 func setupDRTest(t *testing.T) drTestSetup {

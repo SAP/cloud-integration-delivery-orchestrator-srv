@@ -70,11 +70,11 @@ func main() {
 
 	// --- Build service with all injected dependencies ---
 	svc := &service.Service{
-		DB:     database,
-		Logger: env.Logger(),
-		TMS:    tmsManager,
-		CPI:    cpiManager,
-		CAS:    casManager,
+		DB:           database,
+		Logger:       env.Logger(),
+		TMS:          tmsManager,
+		CPI:          cpiManager,
+		CAS:          casManager,
 		GetUserEmail: xsuaa.GetUserEmail,
 		Notifier: notify.NewCompositeNotifier(
 			func() string {

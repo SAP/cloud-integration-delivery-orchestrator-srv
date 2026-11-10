@@ -612,7 +612,7 @@ func TestTriggerVersionCompare_FirstTrigger(t *testing.T) {
 	rule := seedRule(t, tc, "trigger-rule", source, []db.CpiTenant{source}, true)
 
 	mockClient := &mockCPIClient{
-		packages: []cpi.CPIPackage{{ID: "pkg1"}},
+		packages:  []cpi.CPIPackage{{ID: "pkg1"}},
 		artifacts: map[string][]cpi.ArtifactCommonItem{"pkg1/" + string(consts.Artifact_Type_Iflow): {}},
 	}
 	factory := func(ctx context.Context, tenantID uint) (cpi.IntegrationService, error) {
@@ -708,7 +708,7 @@ func TestTriggerVersionCompare_CooldownExpired(t *testing.T) {
 	})
 
 	mockClient := &mockCPIClient{
-		packages: []cpi.CPIPackage{{ID: "pkg1"}},
+		packages:  []cpi.CPIPackage{{ID: "pkg1"}},
 		artifacts: map[string][]cpi.ArtifactCommonItem{"pkg1/" + string(consts.Artifact_Type_Iflow): {}},
 	}
 	factory := func(ctx context.Context, tenantID uint) (cpi.IntegrationService, error) {

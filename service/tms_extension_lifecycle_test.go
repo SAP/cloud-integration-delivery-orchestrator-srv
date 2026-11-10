@@ -136,9 +136,9 @@ func TestTmsTransitions_InvalidEdgesRejected(t *testing.T) {
 // (including a decrease, defensively) rejects.
 func TestTmsConfigChanged(t *testing.T) {
 	cases := []struct {
-		name               string
-		before, underLock  uint64
-		wantChanged        bool
+		name              string
+		before, underLock uint64
+		wantChanged       bool
 	}{
 		{"unchanged", 5, 5, false},
 		{"first-config (0→0)", 0, 0, false},

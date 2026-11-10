@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -62,8 +63,13 @@ func (h *Handler) UpsertCentralTmsContext(ctx *gin.Context) {
 		Fail(ctx, 400, err.Error())
 		return
 	}
+	destName := strings.TrimSpace(req.TmsApiDestinationName)
+	if destName == "" {
+		Fail(ctx, 400, "TmsApiDestinationName is required")
+		return
+	}
 
-	result, err := h.svc.UpsertCentralTmsContext(ctx.Request.Context(), req.TmsApiDestinationName)
+	result, err := h.svc.UpsertCentralTmsContext(ctx.Request.Context(), destName)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrTmsBootstrapInProgress):

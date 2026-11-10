@@ -12,7 +12,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-
 // resolveCpiClient parses the tenant ID from the query string, gets a CPI client
 // from the manager, and returns it. Writes an appropriate error response on failure.
 func (h *Handler) resolveCpiClient(ctx *gin.Context) (cpi.IntegrationService, bool) {
@@ -51,7 +50,6 @@ func (h *Handler) GetPackagesHandler(ctx *gin.Context) {
 	}
 	OK(ctx, packages)
 }
-
 
 // do not return entire destination instance, hide credentials
 type DestinationResp struct {
