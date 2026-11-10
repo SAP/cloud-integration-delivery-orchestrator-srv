@@ -307,7 +307,7 @@ func (s *Service) syncImportState(ctx context.Context, deliveryRequestID uint, u
 	tenantToOps := make(map[uint]map[string]db.ArtifactTenantOperation) // arTenantOp record in each node. cpi tenant ID - map[trNumber]ArtifactTenantOperation
 	conditions := make([]db.Condition, 0)
 
-	tmsClient, err := s.TMS.Get(ctx)
+	tmsClient, _, err := s.TMS.Get(ctx)
 	if err != nil {
 		return []db.Condition{{
 			DeliveryRequestID: deliveryRequestID,

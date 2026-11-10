@@ -20,10 +20,10 @@ import (
 // TmsProvider abstracts TMS manager capabilities needed by the service layer.
 // Production: *tms.Manager. Tests: mock in test files.
 type TmsProvider interface {
-	Get(ctx context.Context) (tms.TransportService, error)
+	Get(ctx context.Context) (tms.TransportService, uint64, error)
 	Destination(ctx context.Context) (cf.Destination, error)
 	RuntimeInfo(ctx context.Context) (tms.RuntimeInfo, error)
-	Reconfigure(ctx context.Context, destName string, commit func(validatedDest cf.Destination, validatedAt time.Time) error) (tms.RuntimeInfo, error)
+	Reconfigure(ctx context.Context, destName string, commit func(validatedDest cf.Destination, validatedAt time.Time) (uint64, error)) (tms.RuntimeInfo, error)
 }
 
 // CpiProvider abstracts CPI manager capabilities needed by the service layer.

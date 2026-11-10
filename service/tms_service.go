@@ -86,8 +86,9 @@ func (s *Service) UpsertCentralTmsContext(ctx context.Context, destName string) 
 	// the DB transaction: version compare-and-set + Rule 4 + save. validatedAt is
 	// the timestamp of the candidate's successful GetNodes validation; it is
 	// persisted so DB and the manager snapshot share one last-validated time.
-	commit := func(_ cf.Destination, validatedAt time.Time) error {
-		return s.DB.Transaction(func(tx *gorm.DB) error {
+	commit := func(_ cf.Destination, validatedAt time.Time) (uint64, error) {
+		var newGen uint64
+		err := s.DB.Transaction(func(tx *gorm.DB) error {
 			// Lock the single config row (if any) and re-check the version.
 			// The config is a singleton pinned to a fixed primary key, so a
 			// first-ever INSERT by two racing reconfigures collides on the PK
@@ -165,6 +166,7 @@ func (s *Service) UpsertCentralTmsContext(ctx context.Context, destName string) 
 					}
 					return err
 				}
+				newGen = input.Generation
 				return nil
 			}
 
@@ -176,6 +178,7 @@ func (s *Service) UpsertCentralTmsContext(ctx context.Context, destName string) 
 			input.ID = existing.ID
 			input.Generation = currentGen + 1
 			input.LastValidatedAt = &validatedAt
+			newGen = input.Generation
 			return tx.Unscoped().Model(&db.CentralTmsContext{}).Where("id = ?", existing.ID).
 				Updates(map[string]any{
 					"tms_api_destination_name": input.TmsApiDestinationName,
@@ -184,6 +187,7 @@ func (s *Service) UpsertCentralTmsContext(ctx context.Context, destName string) 
 					"deleted_at":               nil,
 				}).Error
 		})
+		return newGen, err
 	}
 
 	if _, err := s.TMS.Reconfigure(ctx, destName, commit); err != nil {

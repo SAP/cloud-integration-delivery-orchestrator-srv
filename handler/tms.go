@@ -9,7 +9,7 @@ import (
 )
 
 func (h *Handler) GetTmsNodesHandler(ctx *gin.Context) {
-	c, err := h.svc.TMS.Get(ctx)
+	c, _, err := h.svc.TMS.Get(ctx)
 	if err != nil {
 		Fail(ctx, http.StatusInternalServerError, fmt.Sprintf("Error resolving TMS client: %s", err))
 		return
@@ -23,7 +23,7 @@ func (h *Handler) GetTmsNodesHandler(ctx *gin.Context) {
 }
 
 func (h *Handler) GetRoutesHandler(ctx *gin.Context) {
-	c, err := h.svc.TMS.Get(ctx)
+	c, _, err := h.svc.TMS.Get(ctx)
 	if err != nil {
 		Fail(ctx, http.StatusInternalServerError, fmt.Sprintf("Error resolving TMS client: %s", err))
 		return
@@ -44,7 +44,7 @@ func (h *Handler) GetTranportRequestsHandler(ctx *gin.Context) {
 		return
 	}
 
-	c, err := h.svc.TMS.Get(ctx)
+	c, _, err := h.svc.TMS.Get(ctx)
 	if err != nil {
 		Fail(ctx, http.StatusInternalServerError, fmt.Sprintf("Error resolving TMS client: %s", err))
 		return

@@ -50,7 +50,7 @@ func (s *Service) CheckDatabase() ConnectivityStatus {
 // connection check stamp it would make the field diverge between memory and DB
 // across restarts (R3).
 func (s *Service) CheckTMS(ctx context.Context) ConnectivityStatus {
-	tmsClient, err := s.TMS.Get(ctx)
+	tmsClient, _, err := s.TMS.Get(ctx)
 	if err != nil {
 		return ConnectivityStatus{Name: "TMS", Type: "tms", Status: "error", Message: err.Error()}
 	}

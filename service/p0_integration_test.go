@@ -46,7 +46,7 @@ func TestSelectTmsNode_FromBootstrapped_ResetsToNodeConfirmed(t *testing.T) {
 	}
 	svc := &Service{
 		DB:     database,
-		TMS:    &mockTmsProvider{client: mock},
+		TMS:    &mockTmsProvider{client: mock, db: database},
 	}
 
 	tenant := db.CpiTenant{
@@ -94,7 +94,7 @@ func TestSelectTmsNode_FromNodeConfirmed_Succeeds(t *testing.T) {
 	}
 	svc := &Service{
 		DB:     database,
-		TMS:    &mockTmsProvider{client: mock},
+		TMS:    &mockTmsProvider{client: mock, db: database},
 	}
 
 	tenant := db.CpiTenant{
@@ -136,7 +136,7 @@ func TestSelectTmsNode_RejectsInvalidNode(t *testing.T) {
 	}
 	svc := &Service{
 		DB:     database,
-		TMS:    &mockTmsProvider{client: mock},
+		TMS:    &mockTmsProvider{client: mock, db: database},
 	}
 
 	tenant := db.CpiTenant{
@@ -195,7 +195,7 @@ func TestSelectTmsNode_ConcurrentReconfigure_Invariant(t *testing.T) {
 			nodes:        []db.TransportNode{{ID: 200, Name: "new-node"}},
 			getNodesWait: 200 * time.Microsecond,
 		}
-		svc := &Service{DB: database, TMS: &mockTmsProvider{client: mock}}
+		svc := &Service{DB: database, TMS: &mockTmsProvider{client: mock, db: database}}
 
 		tenant := db.CpiTenant{
 			Name:              fmt.Sprintf("inv-%d", i),
@@ -246,7 +246,7 @@ func TestUpsertCentralTms_ConcurrentReconfigure_Invariant(t *testing.T) {
 		database := newTestDB(t)
 		seedCentralTmsGen(t, database, 1)
 		mock := &mockTMSClient{nodes: []db.TransportNode{{ID: 1, Name: "N1"}}}
-		svc := &Service{DB: database, TMS: &mockTmsProvider{client: mock}}
+		svc := &Service{DB: database, TMS: &mockTmsProvider{client: mock, db: database}}
 
 		var wg sync.WaitGroup
 		wg.Add(2)
@@ -304,7 +304,7 @@ func TestUpsertCentralTms_ConcurrentFirstTime_SingleRow(t *testing.T) {
 	for i := 0; i < 50; i++ {
 		database := newTestDB(t) // empty: no CentralTmsContext seeded
 		mock := &mockTMSClient{nodes: []db.TransportNode{{ID: 1, Name: "N1"}}}
-		svc := &Service{DB: database, TMS: &mockTmsProvider{client: mock}}
+		svc := &Service{DB: database, TMS: &mockTmsProvider{client: mock, db: database}}
 
 		var wg sync.WaitGroup
 		wg.Add(2)
@@ -984,7 +984,7 @@ func TestSelectTmsNode_FromBootstrapped_SetsR2Fields(t *testing.T) {
 	}
 	svc := &Service{
 		DB:     database,
-		TMS:    &mockTmsProvider{client: mock},
+		TMS:    &mockTmsProvider{client: mock, db: database},
 	}
 
 	tenant := db.CpiTenant{
@@ -1180,7 +1180,7 @@ func TestUpsertCentralTms_PreservesCreatedAt(t *testing.T) {
 	origCreated := before.CreatedAt
 
 	mock := &mockTMSClient{nodes: []db.TransportNode{{ID: 1, Name: "N1"}}}
-	svc := &Service{DB: database, TMS: &mockTmsProvider{client: mock}}
+	svc := &Service{DB: database, TMS: &mockTmsProvider{client: mock, db: database}}
 	if _, err := svc.UpsertCentralTmsContext(context.Background(), "new-dest"); err != nil {
 		t.Fatalf("reconfigure: %v", err)
 	}

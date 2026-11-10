@@ -96,7 +96,7 @@ func (s *Service) BatchImportTenantOps(ctx context.Context, drID uint, opIDs []u
 			s.NotifyDrUpdated(drID)
 		}()
 
-		tmsClient, err := s.TMS.Get(ctx)
+		tmsClient, _, err := s.TMS.Get(ctx)
 		var actionID uint
 		if err == nil {
 			actionID, err = tmsClient.ImportTransportRequest(ctx, targetNodeID, trs)

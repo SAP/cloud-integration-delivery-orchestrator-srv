@@ -48,11 +48,24 @@ type RuntimeInfo struct {
 // would let an out-of-band BTP edit silently switch TMS without Rule 4, and
 // would let a Destination Service outage break a client that already works.
 //
-// The Manager does NOT own the configuration version. The authoritative version
-// is CentralTmsContext.Generation in the database; Reconfigure's commit callback
-// advances it transactionally and SelectTmsNode compares it transactionally. The
-// Manager only caches the active client/dest and swaps them atomically (under mu)
-// after a successful commit.
+// The Manager does NOT own the configuration version — the authoritative
+// version is CentralTmsContext.Generation in the database; Reconfigure's commit
+// callback advances it transactionally and SelectTmsNode compares it
+// transactionally under FOR UPDATE. The Manager caches a copy of that version
+// alongside the active client (see below) purely as a source tag, never as a
+// second authority.
+//
+// The Manager caches the active client/dest and the generation it was built
+// from. The authoritative version is still CentralTmsContext.Generation in the
+// database — the cached generation is a read-only "source tag" recording which
+// DB version the active client was built from, so that callers (SelectTmsNode)
+// can obtain client and generation from one atomic snapshot (under mu) instead
+// of reading the DB separately. Per the core decision "the cached entry is the
+// runtime source of truth for Central TMS", no path other than Reconfigure
+// reads db.CentralTmsContext for the active version; SelectTmsNode asks the
+// Manager, not the DB. Reconfigure's commit callback advances the DB generation
+// transactionally and returns the new value, which the Manager stores under mu
+// together with the swapped client/dest.
 //
 // Lock-ordering constraint: Reconfigure runs its commit callback (a DB
 // transaction) while holding mu. Callers must therefore NOT invoke Get /
@@ -67,6 +80,7 @@ type Manager struct {
 	client          TransportService
 	dest            *cf.Destination
 	destName        string
+	generation      uint64
 	lastValidatedAt *time.Time
 }
 
@@ -129,19 +143,29 @@ func (m *Manager) load(ctx context.Context) error {
 	m.client = client
 	m.dest = dest
 	m.destName = tmsCtx.TmsApiDestinationName
+	m.generation = tmsCtx.Generation
 	m.lastValidatedAt = tmsCtx.LastValidatedAt
 	return nil
 }
 
-// Get returns the cached TMS client, building one on first call from DB + resolver.
-// Concurrent callers share the same instance. Build failures are not cached.
-func (m *Manager) Get(ctx context.Context) (TransportService, error) {
+// Get returns the cached TMS client together with the DB generation it was
+// built from, building one on first call from DB + resolver. Concurrent callers
+// share the same instance; build failures are not cached. Client and generation
+// are one atomic snapshot taken under mu, so a caller that compares the active
+// client against a config version (SelectTmsNode's L20 optimistic check) gets
+// both from the same source of truth and they cannot drift apart due to call
+// ordering — callers never read db.CentralTmsContext for the active version.
+// The generation is the DB value captured at cold-load or last Reconfigure;
+// callers that need the version still re-read and compare it under FOR UPDATE
+// inside their own transaction (that persistent-layer optimistic lock is
+// unchanged). Callers that only need the client discard the generation.
+func (m *Manager) Get(ctx context.Context) (TransportService, uint64, error) {
 	if err := m.load(ctx); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.client, nil
+	return m.client, m.generation, nil
 }
 
 // Destination returns a copy of the destination snapshot used to build the
@@ -180,15 +204,16 @@ func (m *Manager) RuntimeInfo(ctx context.Context) (RuntimeInfo, error) {
 // save). It runs under the Manager lock and receives the validated destination
 // snapshot plus the validation timestamp, which it must persist to
 // CentralTmsContext.LastValidatedAt in the same transaction so the DB and the
-// Manager's in-memory snapshot agree. The optimistic version check lives in
-// commit, against the authoritative CentralTmsContext.Generation row (§6.3.2);
-// the Manager itself holds no version.
+// Manager's in-memory snapshot agree. It returns the new generation it wrote
+// (currentGen+1), which the Manager stores as the source tag of the swapped-in
+// client. The optimistic version check lives in commit, against the
+// authoritative CentralTmsContext.Generation row (§6.3.2).
 //
-// On commit success the active entry (client + dest) is replaced atomically
-// under mu, so no in-process reader observes "new DB config + old client"
-// (§6.3.3). On any failure — validation or commit (incl. version conflict) —
-// the old active entry and DB config are preserved.
-func (m *Manager) Reconfigure(ctx context.Context, destName string, commit func(validatedDest cf.Destination, validatedAt time.Time) error) (RuntimeInfo, error) {
+// On commit success the active entry (client + dest + generation) is replaced
+// atomically under mu, so no in-process reader observes "new DB config + old
+// client" (§6.3.3). On any failure — validation or commit (incl. version
+// conflict) — the old active entry and DB config are preserved.
+func (m *Manager) Reconfigure(ctx context.Context, destName string, commit func(validatedDest cf.Destination, validatedAt time.Time) (uint64, error)) (RuntimeInfo, error) {
 	if m.resolver == nil {
 		return RuntimeInfo{}, fmt.Errorf("destination resolver not injected")
 	}
@@ -227,13 +252,15 @@ func (m *Manager) Reconfigure(ctx context.Context, destName string, commit func(
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if err := commit(*dest, now); err != nil {
+	newGen, err := commit(*dest, now)
+	if err != nil {
 		return RuntimeInfo{}, err
 	}
 
 	m.client = client
 	m.dest = dest
 	m.destName = destName
+	m.generation = newGen
 	m.lastValidatedAt = &now
 
 	return RuntimeInfo{

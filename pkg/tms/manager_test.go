@@ -82,7 +82,7 @@ func newTmsTestDB(t *testing.T) *gorm.DB {
 	return d
 }
 
-func okCommit(cf.Destination, time.Time) error { return nil }
+func okCommit(cf.Destination, time.Time) (uint64, error) { return 1, nil }
 
 // A successful Reconfigure installs the validated candidate as the active
 // client; a second one replaces it with a fresh instance. (The config version
@@ -94,14 +94,14 @@ func TestReconfigure_InstallsValidatedCandidate(t *testing.T) {
 	if _, err := m.Reconfigure(context.Background(), "dest-a", okCommit); err != nil {
 		t.Fatalf("first reconfigure: %v", err)
 	}
-	c1, err := m.Get(context.Background())
+	c1, _, err := m.Get(context.Background())
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
 	if _, err := m.Reconfigure(context.Background(), "dest-b", okCommit); err != nil {
 		t.Fatalf("second reconfigure: %v", err)
 	}
-	c2, _ := m.Get(context.Background())
+	c2, _, _ := m.Get(context.Background())
 	if c1 == c2 {
 		t.Fatal("expected a new active client after the second reconfigure")
 	}
@@ -117,14 +117,14 @@ func TestReconfigure_ValidationFailurePreservesState(t *testing.T) {
 	if _, err := m.Reconfigure(context.Background(), "good", okCommit); err != nil {
 		t.Fatalf("seed reconfigure: %v", err)
 	}
-	active, _ := m.Get(context.Background())
+	active, _, _ := m.Get(context.Background())
 
 	// Now make GetNodes fail and attempt another reconfigure.
 	atomic.StoreInt32(&b.getNodesStatus, http.StatusInternalServerError)
 	committed := false
-	_, err := m.Reconfigure(context.Background(), "bad", func(cf.Destination, time.Time) error {
+	_, err := m.Reconfigure(context.Background(), "bad", func(cf.Destination, time.Time) (uint64, error) {
 		committed = true
-		return nil
+		return 0, nil
 	})
 	if err == nil {
 		t.Fatal("expected validation error, got nil")
@@ -132,7 +132,7 @@ func TestReconfigure_ValidationFailurePreservesState(t *testing.T) {
 	if committed {
 		t.Fatal("commit must not run when validation fails")
 	}
-	after, _ := m.Get(context.Background())
+	after, _, _ := m.Get(context.Background())
 	if after != active {
 		t.Fatal("active client must be preserved after failed reconfigure")
 	}
@@ -147,16 +147,16 @@ func TestReconfigure_CommitFailurePreservesState(t *testing.T) {
 	if _, err := m.Reconfigure(context.Background(), "good", okCommit); err != nil {
 		t.Fatalf("seed reconfigure: %v", err)
 	}
-	active, _ := m.Get(context.Background())
+	active, _, _ := m.Get(context.Background())
 
 	wantErr := "db boom"
-	_, err := m.Reconfigure(context.Background(), "next", func(cf.Destination, time.Time) error {
-		return errTest(wantErr)
+	_, err := m.Reconfigure(context.Background(), "next", func(cf.Destination, time.Time) (uint64, error) {
+		return 0, errTest(wantErr)
 	})
 	if err == nil || !strings.Contains(err.Error(), wantErr) {
 		t.Fatalf("expected commit error %q, got %v", wantErr, err)
 	}
-	after, _ := m.Get(context.Background())
+	after, _, _ := m.Get(context.Background())
 	if after != active {
 		t.Fatal("active client must be preserved after commit failure")
 	}
@@ -172,12 +172,48 @@ func TestEnsureLoaded_ColdStartBuildsClient(t *testing.T) {
 	}
 	m := NewManager(d, b.resolver(t))
 
-	c, err := m.Get(context.Background())
+	c, _, err := m.Get(context.Background())
 	if err != nil {
 		t.Fatalf("get (lazy build): %v", err)
 	}
 	if c == nil {
 		t.Fatal("expected a client after lazy build")
+	}
+}
+
+// Get returns the client together with the generation it was built from: on
+// cold-load, the generation of the seeded config row; after a Reconfigure, the
+// value that commit returned. Client and generation come from one atomic
+// snapshot (L2 fix — callers no longer read the DB separately).
+func TestGet_ReportsSourceGeneration(t *testing.T) {
+	b := newTmsBackend(t)
+	d := newTmsTestDB(t)
+	if err := d.Create(&db.CentralTmsContext{TmsApiDestinationName: "seeded", Generation: 7}).Error; err != nil {
+		t.Fatalf("seed ctx: %v", err)
+	}
+	m := NewManager(d, b.resolver(t))
+
+	// Cold-load reports the seeded row's generation.
+	_, gen, err := m.Get(context.Background())
+	if err != nil {
+		t.Fatalf("Get (cold): %v", err)
+	}
+	if gen != 7 {
+		t.Fatalf("cold-load generation = %d, want 7 (from seeded row)", gen)
+	}
+
+	// Reconfigure stores the generation its commit returns.
+	if _, err := m.Reconfigure(context.Background(), "next", func(cf.Destination, time.Time) (uint64, error) {
+		return 42, nil
+	}); err != nil {
+		t.Fatalf("reconfigure: %v", err)
+	}
+	_, gen, err = m.Get(context.Background())
+	if err != nil {
+		t.Fatalf("Get (post-reconfigure): %v", err)
+	}
+	if gen != 42 {
+		t.Fatalf("post-reconfigure generation = %d, want 42 (commit's return value)", gen)
 	}
 }
 

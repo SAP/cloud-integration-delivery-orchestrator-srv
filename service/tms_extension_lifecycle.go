@@ -101,22 +101,25 @@ func tmsConfigChanged(genBefore, genUnderLock uint64) bool {
 // preventing stale UI node lists from writing an invalid node after Central TMS
 // has been changed (R4-B). Requires TMS manager (Central TMS must be configured).
 func (s *Service) SelectTmsNode(ctx context.Context, tenantID uint, nodeID uint, nodeName string) error {
-	// Validate node against current TMS system before acquiring the DB lock.
+	// Obtain the active TMS client AND the generation it was built from as one
+	// atomic snapshot from the manager (the runtime source of truth). We do NOT
+	// read db.CentralTmsContext here: per the core decision, no path other than
+	// Reconfigure reads the config row for the active version — SelectTmsNode asks
+	// the manager. Because client and genBefore come from the same snapshot, they
+	// cannot drift apart due to call ordering.
+	//
+	// Invariant (L2): the only window of concern is here, OUTSIDE the transaction
+	// below — a Reconfigure could advance the generation (and swap the client)
+	// between this snapshot and the commit. That is caught by re-reading
+	// Generation under FOR UPDATE inside the transaction and rejecting on change
+	// (L20). Safety rests on that optimistic lock plus "genBefore and the client
+	// are the same snapshot"; a concurrent Reconfigure can at worst cause a
+	// conservative rejection ("reconfigured during node selection; re-select")
+	// that the caller retries — never a node validated against a superseded TMS.
 	if s.TMS == nil {
 		return fmt.Errorf("SelectTmsNode: TMS not configured")
 	}
-	// Capture the authoritative Central TMS config version the node list is
-	// validated against. If a Reconfigure advances it before we commit, the node
-	// we verified belongs to a now-superseded TMS system and must not be written
-	// (L20). The version lives in CentralTmsContext.Generation (DB), so the check
-	// and the node write share one transaction below.
-	var cfgBefore db.CentralTmsContext
-	if err := s.DB.WithContext(ctx).First(&cfgBefore).Error; err != nil {
-		return fmt.Errorf("SelectTmsNode: read central TMS version: %w", err)
-	}
-	genBefore := cfgBefore.Generation
-
-	tmsClient, err := s.TMS.Get(ctx)
+	tmsClient, genBefore, err := s.TMS.Get(ctx)
 	if err != nil {
 		return fmt.Errorf("SelectTmsNode: TMS not available: %w", err)
 	}
@@ -259,7 +262,7 @@ func (s *Service) GetCurrentNodeRoutes(ctx context.Context, tenantID uint) (*Get
 		return nil, ErrNodeNotRegistered
 	}
 
-	tmsClient, err := s.TMS.Get(ctx)
+	tmsClient, _, err := s.TMS.Get(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("GetCurrentNodeRoutes: get TMS client: %w", err)
 	}

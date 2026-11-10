@@ -29,8 +29,8 @@ import (
 // the handler can test the DB-level Rule 4 logic.
 type handlerMockTmsProvider struct{}
 
-func (m *handlerMockTmsProvider) Get(_ context.Context) (tms.TransportService, error) {
-	return nil, fmt.Errorf("not configured in handler test")
+func (m *handlerMockTmsProvider) Get(_ context.Context) (tms.TransportService, uint64, error) {
+	return nil, 0, fmt.Errorf("not configured in handler test")
 }
 func (m *handlerMockTmsProvider) Destination(_ context.Context) (cf.Destination, error) {
 	return cf.Destination{}, fmt.Errorf("not configured in handler test")
@@ -38,8 +38,8 @@ func (m *handlerMockTmsProvider) Destination(_ context.Context) (cf.Destination,
 func (m *handlerMockTmsProvider) RuntimeInfo(_ context.Context) (tms.RuntimeInfo, error) {
 	return tms.RuntimeInfo{}, fmt.Errorf("not configured in handler test")
 }
-func (m *handlerMockTmsProvider) Reconfigure(_ context.Context, destName string, commit func(cf.Destination, time.Time) error) (tms.RuntimeInfo, error) {
-	if err := commit(cf.Destination{Name: destName}, time.Now()); err != nil {
+func (m *handlerMockTmsProvider) Reconfigure(_ context.Context, destName string, commit func(cf.Destination, time.Time) (uint64, error)) (tms.RuntimeInfo, error) {
+	if _, err := commit(cf.Destination{Name: destName}, time.Now()); err != nil {
 		return tms.RuntimeInfo{}, err
 	}
 	return tms.RuntimeInfo{Loaded: true, DestinationName: destName}, nil

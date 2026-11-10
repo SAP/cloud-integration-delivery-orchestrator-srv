@@ -101,13 +101,26 @@ type testServiceOpts struct {
 type mockTmsProvider struct {
 	client         tms.TransportService
 	reconfigureErr error // when set, Reconfigure returns this without running commit
+
+	// db, when set, lets Get report the live CentralTmsContext generation —
+	// mirroring the real manager, whose cached generation equals the DB row it
+	// cold-loaded from. Tests that exercise the L20 version check wire this to the
+	// same DB the service uses; left nil, Get reports generation 0.
+	db *gorm.DB
 }
 
-func (m *mockTmsProvider) Get(_ context.Context) (tms.TransportService, error) {
+func (m *mockTmsProvider) Get(_ context.Context) (tms.TransportService, uint64, error) {
 	if m.client == nil {
-		return nil, fmt.Errorf("TMS not configured in test")
+		return nil, 0, fmt.Errorf("TMS not configured in test")
 	}
-	return m.client, nil
+	var gen uint64
+	if m.db != nil {
+		var row db.CentralTmsContext
+		if err := m.db.First(&row).Error; err == nil {
+			gen = row.Generation
+		}
+	}
+	return m.client, gen, nil
 }
 func (m *mockTmsProvider) Destination(_ context.Context) (cf.Destination, error) {
 	return cf.Destination{}, fmt.Errorf("Destination not configured in test")
@@ -119,11 +132,11 @@ func (m *mockTmsProvider) RuntimeInfo(_ context.Context) (tms.RuntimeInfo, error
 	return tms.RuntimeInfo{Loaded: true}, nil
 }
 
-func (m *mockTmsProvider) Reconfigure(_ context.Context, destName string, commit func(cf.Destination, time.Time) error) (tms.RuntimeInfo, error) {
+func (m *mockTmsProvider) Reconfigure(_ context.Context, destName string, commit func(cf.Destination, time.Time) (uint64, error)) (tms.RuntimeInfo, error) {
 	if m.reconfigureErr != nil {
 		return tms.RuntimeInfo{}, m.reconfigureErr
 	}
-	if err := commit(cf.Destination{Name: destName}, time.Now()); err != nil {
+	if _, err := commit(cf.Destination{Name: destName}, time.Now()); err != nil {
 		return tms.RuntimeInfo{}, err
 	}
 	return tms.RuntimeInfo{Loaded: true, DestinationName: destName}, nil
