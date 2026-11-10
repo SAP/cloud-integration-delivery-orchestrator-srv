@@ -27,6 +27,11 @@ import (
 // is not a valid transition from the tenant's current TmsState.
 var ErrTmsTransitionNotAllowed = errors.New("TMS transition not allowed")
 
+// ErrTmsDependencyUnavailable indicates the TMS system cannot be reached — the
+// manager is nil, cold-load failed, or GetNodes returned a network/auth error.
+// Handler maps this to 502, not 409.
+var ErrTmsDependencyUnavailable = errors.New("TMS dependency unavailable")
+
 // TmsEvent represents a trigger that causes a TmsExtensionState transition.
 type TmsEvent string
 
@@ -117,15 +122,15 @@ func (s *Service) SelectTmsNode(ctx context.Context, tenantID uint, nodeID uint,
 	// conservative rejection ("reconfigured during node selection; re-select")
 	// that the caller retries — never a node validated against a superseded TMS.
 	if s.TMS == nil {
-		return fmt.Errorf("SelectTmsNode: TMS not configured")
+		return fmt.Errorf("SelectTmsNode: %w: TMS not configured", ErrTmsDependencyUnavailable)
 	}
 	tmsClient, genBefore, err := s.TMS.Get(ctx)
 	if err != nil {
-		return fmt.Errorf("SelectTmsNode: TMS not available: %w", err)
+		return fmt.Errorf("SelectTmsNode: %w: %s", ErrTmsDependencyUnavailable, err)
 	}
 	nodes, err := tmsClient.GetNodes(ctx)
 	if err != nil {
-		return fmt.Errorf("SelectTmsNode: cannot verify node: %w", err)
+		return fmt.Errorf("SelectTmsNode: %w: %s", ErrTmsDependencyUnavailable, err)
 	}
 	found := false
 	for _, n := range nodes {

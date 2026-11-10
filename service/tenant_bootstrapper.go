@@ -306,35 +306,8 @@ func (s *Service) runBootstrap(tenant *db.CpiTenant, jobID uint, cfToken string,
 		markReady("pir_api_status")
 	}
 
-	// Rule 3 (RFC 032 §5.4): if PIR key was newly created (old key deleted externally),
-	// the subscriber-side CloudIntegration destination holds stale credentials.
-	// Attempt to invalidate TMS extension — the state machine (SELECT FOR UPDATE)
-	// checks the real current state; if it's not bootstrapped, no action is needed
-	// (no stale destination exists in earlier states).
-	pirKeyCreated := false
-	for _, a := range acts {
-		if a.ActionType == "created" {
-			pirKeyCreated = true
-			break
-		}
-	}
-	if pirKeyCreated {
-		if err := s.DB.Transaction(func(tx *gorm.DB) error {
-			if err := s.transitionTmsWithTx(tx, tenant.ID, TmsEventInvalidated); err != nil {
-				return err
-			}
-			return tx.Model(&db.CpiTenant{}).Where("id = ?", tenant.ID).
-				Update("tms_blocking_reason", lifecycle.TmsReasonPirKeyChanged).Error
-		}); err != nil {
-			// TmsEventInvalidated only has an edge from bootstrapped → node_confirmed.
-			// Other states (not_started, node_confirmed) are rejected by the state machine,
-			// meaning no stale CloudIntegration destination exists — safe to ignore.
-			// bootstrapping is impossible here due to mutual exclusion (Phase 1 checks).
-			// Rule 3 is a cross-layer notification; failure does NOT abort BASE bootstrap.
-			s.L(ctx).Debugw("rule 3: PIR key recreated but TMS invalidation not applicable",
-				"component", "bootstrap", "tenant_id", tenant.ID, "info", err)
-		}
-	}
+	// Rule 3 (RFC 032 §5.4).
+	s.invalidateTmsOnPirKeyChange(ctx, tenant.ID, acts)
 
 	// ENSURE_PIR_PROVIDER_DEST → write CPIDELIVERY_PIR_{id} into provider Destination Service
 	setStep(StepEnsurePirProviderDest)
@@ -642,6 +615,39 @@ func (s *Service) failPhase2(tenantID uint, reason string) {
 	}); err != nil {
 		s.Logger.Errorw("failPhase2: rollback failed; tenant may be stuck in readying until restart recovery",
 			"component", "bootstrap", "tenant_id", tenantID, "reason", reason, "error", err)
+	}
+}
+
+// invalidateTmsOnPirKeyChange implements Rule 3 (RFC 032 §5.4): if a PIR key
+// was newly created during bootstrap (old key deleted externally), the
+// subscriber-side CloudIntegration destination holds stale credentials. Attempt
+// to transition bootstrapped → node_confirmed with reason PIR_KEY_CHANGED. The
+// state machine rejects non-bootstrapped states, which is expected (no stale
+// destination in earlier states). Rule 3 never aborts BASE bootstrap.
+func (s *Service) invalidateTmsOnPirKeyChange(ctx context.Context, tenantID uint, acts []credentialAction) {
+	pirKeyCreated := false
+	for _, a := range acts {
+		if a.ActionType == "created" {
+			pirKeyCreated = true
+			break
+		}
+	}
+	if !pirKeyCreated {
+		return
+	}
+	if err := s.DB.Transaction(func(tx *gorm.DB) error {
+		if err := s.transitionTmsWithTx(tx, tenantID, TmsEventInvalidated); err != nil {
+			return err
+		}
+		return tx.Model(&db.CpiTenant{}).Where("id = ?", tenantID).
+			Update("tms_blocking_reason", lifecycle.TmsReasonPirKeyChanged).Error
+	}); err != nil {
+		// TmsEventInvalidated only has an edge from bootstrapped → node_confirmed.
+		// Other states (not_started, node_confirmed) are rejected by the state machine,
+		// meaning no stale CloudIntegration destination exists — safe to ignore.
+		// bootstrapping is impossible here due to mutual exclusion (Phase 1 checks).
+		s.L(ctx).Debugw("rule 3: PIR key recreated but TMS invalidation not applicable",
+			"component", "bootstrap", "tenant_id", tenantID, "info", err)
 	}
 }
 

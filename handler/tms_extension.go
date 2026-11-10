@@ -107,11 +107,14 @@ func (h *Handler) SelectTmsNode(ctx *gin.Context) {
 	}
 
 	if err := h.svc.SelectTmsNode(ctx.Request.Context(), tenantID, body.NodeId, body.NodeName); err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		switch {
+		case errors.Is(err, gorm.ErrRecordNotFound):
 			Fail(ctx, 404, "tenant not found")
-			return
+		case errors.Is(err, service.ErrTmsDependencyUnavailable):
+			Fail(ctx, 502, err.Error())
+		default:
+			Fail(ctx, 409, err.Error())
 		}
-		Fail(ctx, 409, err.Error())
 		return
 	}
 

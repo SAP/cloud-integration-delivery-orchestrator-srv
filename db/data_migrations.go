@@ -64,27 +64,34 @@ func RunDataMigrations(db *gorm.DB) error {
 //	everything else                                            → TmsNotStarted (column default)
 //	LifecycleState=not_ready                                   → configured
 func p0TmsStateBackfill(tx *gorm.DB) error {
-	// 1. ready lifecycle + ready node → bootstrapped
-	if err := tx.Model(&CpiTenant{}).
-		Where("lifecycle_state = ? AND tms_node_registration_status = ?",
-			lifecycle.TenantReady, lifecycle.PrereqReady).
-		Update("tms_extension_state", lifecycle.TmsBootstrapped).Error; err != nil {
-		return fmt.Errorf("backfill TmsBootstrapped: %w", err)
-	}
+	// Steps 1–3 read the legacy tms_node_registration_status column, which was
+	// removed from the CpiTenant struct in L19. On existing databases the column
+	// still exists (AutoMigrate never drops columns); on fresh databases it was
+	// never created. Skip steps 1–3 when the column is absent — a fresh DB has
+	// no legacy data to backfill. Steps 5–7 (state merges) run unconditionally.
+	if tx.Migrator().HasColumn(&CpiTenant{}, "tms_node_registration_status") {
+		// 1. ready lifecycle + ready node → bootstrapped
+		if err := tx.Model(&CpiTenant{}).
+			Where("lifecycle_state = ? AND tms_node_registration_status = ?",
+				lifecycle.TenantReady, lifecycle.PrereqReady).
+			Update("tms_extension_state", lifecycle.TmsBootstrapped).Error; err != nil {
+			return fmt.Errorf("backfill TmsBootstrapped: %w", err)
+		}
 
-	// 2. node ready but lifecycle not ready → node_confirmed
-	if err := tx.Model(&CpiTenant{}).
-		Where("lifecycle_state != ? AND tms_node_registration_status = ?",
-			lifecycle.TenantReady, lifecycle.PrereqReady).
-		Update("tms_extension_state", lifecycle.TmsNodeConfirmed).Error; err != nil {
-		return fmt.Errorf("backfill TmsNodeConfirmed: %w", err)
-	}
+		// 2. node ready but lifecycle not ready → node_confirmed
+		if err := tx.Model(&CpiTenant{}).
+			Where("lifecycle_state != ? AND tms_node_registration_status = ?",
+				lifecycle.TenantReady, lifecycle.PrereqReady).
+			Update("tms_extension_state", lifecycle.TmsNodeConfirmed).Error; err != nil {
+			return fmt.Errorf("backfill TmsNodeConfirmed: %w", err)
+		}
 
-	// 3. node registering → node_confirmed (node_pending removed)
-	if err := tx.Model(&CpiTenant{}).
-		Where("tms_node_registration_status = ?", lifecycle.PrereqRegistering).
-		Update("tms_extension_state", lifecycle.TmsNodeConfirmed).Error; err != nil {
-		return fmt.Errorf("backfill TmsNodeConfirmed (registering): %w", err)
+		// 3. node registering → node_confirmed (node_pending removed)
+		if err := tx.Model(&CpiTenant{}).
+			Where("tms_node_registration_status = ?", lifecycle.PrereqRegistering).
+			Update("tms_extension_state", lifecycle.TmsNodeConfirmed).Error; err != nil {
+			return fmt.Errorf("backfill TmsNodeConfirmed (registering): %w", err)
+		}
 	}
 
 	// 4. everything else: column default is 'not_started', no action needed.

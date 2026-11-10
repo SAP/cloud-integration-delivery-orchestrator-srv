@@ -13,6 +13,8 @@ import (
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/cf"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/lifecycle"
 
+	"go.uber.org/zap"
+
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -182,7 +184,8 @@ func TestTmsTransitions_BootstrappingBlocksReset(t *testing.T) {
 func newTestSvc(t *testing.T) (*Service, *gorm.DB) {
 	t.Helper()
 	database := newTestDB(t)
-	svc := &Service{DB: database, CPI: &mockCpiProvider{}, CAS: &mockCasProvider{}}
+	logger, _ := zap.NewDevelopment()
+	svc := &Service{DB: database, Logger: logger.Sugar(), CPI: &mockCpiProvider{}, CAS: &mockCasProvider{}}
 	return svc, database
 }
 

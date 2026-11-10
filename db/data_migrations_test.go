@@ -24,6 +24,7 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	}
 	// Add legacy columns that are no longer in the struct but still read by migrations.
 	// In production these columns already exist; AutoMigrate doesn't drop them.
+	// Fresh databases do NOT have these columns — see TestRunDataMigrations_FreshDB.
 	database.Exec("ALTER TABLE cpi_tenants ADD COLUMN tms_node_registration_status TEXT DEFAULT 'missing'")
 	database.Exec("ALTER TABLE cpi_tenants ADD COLUMN central_tms_context_id INTEGER")
 	return database
@@ -145,6 +146,28 @@ func TestRunDataMigrations_SkipsAlreadyApplied(t *testing.T) {
 	database.Model(&DataMigration{}).Count(&count2)
 	if count2 != count {
 		t.Errorf("migration count changed: %d → %d", count, count2)
+	}
+}
+
+// TestRunDataMigrations_FreshDB verifies that a brand-new database (only
+// AutoMigrate, no legacy columns) can start successfully. The R6 bug was that
+// p0TmsStateBackfill steps 1–3 referenced the removed tms_node_registration_status
+// column, panicking on fresh environments.
+func TestRunDataMigrations_FreshDB(t *testing.T) {
+	dsn := "file:" + t.Name() + "?mode=memory&cache=private"
+	database, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	// Only AutoMigrate — do NOT add legacy columns. This is what a fresh
+	// environment looks like.
+	if err := database.AutoMigrate(&CpiTenant{}, &TenantBootstrapJob{}, &DataMigration{}, &CentralTmsContext{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if err := RunDataMigrations(database); err != nil {
+		t.Fatalf("RunDataMigrations on fresh DB: %v", err)
 	}
 }
 

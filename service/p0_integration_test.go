@@ -1014,6 +1014,10 @@ func TestSelectTmsNode_FromBootstrapped_SetsR2Fields(t *testing.T) {
 
 // ── L18: Test gaps — Rule 3 (PIR key invalidation) ──────────────────────────
 
+// TestRule3_PirKeyInvalidation exercises the extracted invalidateTmsOnPirKeyChange
+// using production code (not a duplicated transaction). L21 fix: the test calls
+// the real function, so changes to its trigger condition or side effects are
+// caught automatically.
 func TestRule3_PirKeyInvalidation(t *testing.T) {
 	svc, database := newTestSvc(t)
 
@@ -1037,17 +1041,12 @@ func TestRule3_PirKeyInvalidation(t *testing.T) {
 	}
 	database.Create(&confirmed)
 
-	// Simulate Rule 3: transition bootstrapped → node_confirmed + PIR_KEY_CHANGED.
-	if err := svc.DB.Transaction(func(tx *gorm.DB) error {
-		if err := svc.transitionTmsWithTx(tx, bootstrapped.ID, TmsEventInvalidated); err != nil {
-			return err
-		}
-		return tx.Model(&db.CpiTenant{}).Where("id = ?", bootstrapped.ID).
-			Update("tms_blocking_reason", lifecycle.TmsReasonPirKeyChanged).Error
-	}); err != nil {
-		t.Fatalf("Rule 3 transition: %v", err)
-	}
+	ctx := context.Background()
 
+	// Case 1: "created" action on bootstrapped tenant → invalidated.
+	svc.invalidateTmsOnPirKeyChange(ctx, bootstrapped.ID, []credentialAction{
+		{ActionType: "created"},
+	})
 	var got db.CpiTenant
 	database.First(&got, bootstrapped.ID)
 	if got.TmsExtensionState != lifecycle.TmsNodeConfirmed {
@@ -1057,18 +1056,26 @@ func TestRule3_PirKeyInvalidation(t *testing.T) {
 		t.Errorf("bootstrapped: TmsBlockingReason = %q, want %q", got.TmsBlockingReason, lifecycle.TmsReasonPirKeyChanged)
 	}
 
-	// Rule 3 on node_confirmed should be rejected (no edge from node_confirmed for TmsEventInvalidated).
-	err := svc.DB.Transaction(func(tx *gorm.DB) error {
-		return svc.transitionTmsWithTx(tx, confirmed.ID, TmsEventInvalidated)
+	// Case 2: "created" action on node_confirmed tenant → no-op (state machine
+	// rejects TmsEventInvalidated from node_confirmed; function logs and swallows).
+	svc.invalidateTmsOnPirKeyChange(ctx, confirmed.ID, []credentialAction{
+		{ActionType: "created"},
 	})
-	if err == nil {
-		t.Fatal("Rule 3 should be rejected for node_confirmed, got nil")
-	}
-
-	// Verify node_confirmed tenant unchanged.
 	database.First(&got, confirmed.ID)
 	if got.TmsExtensionState != lifecycle.TmsNodeConfirmed {
 		t.Errorf("confirmed: TmsExtensionState = %q, want node_confirmed (unchanged)", got.TmsExtensionState)
+	}
+
+	// Case 3: no "created" action → no-op regardless of state.
+	// Reset bootstrapped tenant to bootstrapped to test the skip path.
+	database.Model(&db.CpiTenant{}).Where("id = ?", bootstrapped.ID).
+		Updates(map[string]any{"tms_extension_state": lifecycle.TmsBootstrapped, "tms_blocking_reason": ""})
+	svc.invalidateTmsOnPirKeyChange(ctx, bootstrapped.ID, []credentialAction{
+		{ActionType: "updated"},
+	})
+	database.First(&got, bootstrapped.ID)
+	if got.TmsExtensionState != lifecycle.TmsBootstrapped {
+		t.Errorf("no-created: TmsExtensionState = %q, want bootstrapped (unchanged)", got.TmsExtensionState)
 	}
 }
 
