@@ -53,6 +53,12 @@ type RuntimeInfo struct {
 // advances it transactionally and SelectTmsNode compares it transactionally. The
 // Manager only caches the active client/dest and swaps them atomically (under mu)
 // after a successful commit.
+//
+// Lock-ordering constraint: Reconfigure runs its commit callback (a DB
+// transaction) while holding mu. Callers must therefore NOT invoke Get /
+// Destination / RuntimeInfo / Reconfigure from inside a DB transaction that also
+// contends with that commit — doing so could wait on mu while holding a DB row
+// lock the commit needs, a deadlock the database cannot detect.
 type Manager struct {
 	mu       sync.Mutex
 	database *gorm.DB
@@ -70,23 +76,36 @@ func NewManager(database *gorm.DB, resolver *cf.DestinationServiceClient) *Manag
 	return &Manager{database: database, resolver: resolver}
 }
 
-// ensureLoaded builds the TMS client on first call. Caller must hold mu.
-func (m *Manager) ensureLoaded(ctx context.Context) error {
+// load builds the TMS client on first use. The slow work — reading the config
+// row, resolving the destination, building the client — runs OFF the lock, so a
+// slow or unavailable Destination Service does not serialise every TMS caller
+// behind one in-flight request (L1). The lock is held only to check/publish the
+// cached entry. Concurrent first callers each build, then the first to re-take
+// the lock publishes; the rest observe a non-nil client and discard their build.
+// Build failures are not cached, so the next call retries.
+func (m *Manager) load(ctx context.Context) error {
+	m.mu.Lock()
 	if m.client != nil {
+		m.mu.Unlock()
 		return nil
 	}
-	if m.database == nil {
+	db0 := m.database
+	resolver := m.resolver
+	m.mu.Unlock()
+
+	if db0 == nil {
 		return fmt.Errorf("TMS not configured")
 	}
-
-	var tmsCtx db.CentralTmsContext
-	if err := m.database.First(&tmsCtx).Error; err != nil {
-		return fmt.Errorf("central TMS context not configured: %w", err)
-	}
-	if m.resolver == nil {
+	if resolver == nil {
 		return fmt.Errorf("destination resolver not injected")
 	}
-	dest, err := m.resolver.GetDestination(ctx, tmsCtx.TmsApiDestinationName)
+
+	// ── Off-lock: read config + resolve + build ──────────────────────────
+	var tmsCtx db.CentralTmsContext
+	if err := db0.First(&tmsCtx).Error; err != nil {
+		return fmt.Errorf("central TMS context not configured: %w", err)
+	}
+	dest, err := resolver.GetDestination(ctx, tmsCtx.TmsApiDestinationName)
 	if err != nil {
 		return fmt.Errorf("get TMS API destination %q: %w", tmsCtx.TmsApiDestinationName, err)
 	}
@@ -96,12 +115,17 @@ func (m *Manager) ensureLoaded(ctx context.Context) error {
 	if dest.ClientId == "" || dest.ClientSecret == "" || dest.TokenServiceURL == "" {
 		return fmt.Errorf("TMS API destination %q missing OAuth credentials", tmsCtx.TmsApiDestinationName)
 	}
-
 	client, err := NewTmsClient(ctx, dest.URL, dest.TokenServiceURL, dest.ClientId, dest.ClientSecret)
 	if err != nil {
 		return fmt.Errorf("build TMS client: %w", err)
 	}
 
+	// ── Publish under the lock; a concurrent builder may have won ─────────
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.client != nil {
+		return nil
+	}
 	m.client = client
 	m.dest = dest
 	m.destName = tmsCtx.TmsApiDestinationName
@@ -112,33 +136,33 @@ func (m *Manager) ensureLoaded(ctx context.Context) error {
 // Get returns the cached TMS client, building one on first call from DB + resolver.
 // Concurrent callers share the same instance. Build failures are not cached.
 func (m *Manager) Get(ctx context.Context) (TransportService, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if err := m.ensureLoaded(ctx); err != nil {
+	if err := m.load(ctx); err != nil {
 		return nil, err
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return m.client, nil
 }
 
 // Destination returns a copy of the destination snapshot used to build the
 // current client, loading on first call if needed.
 func (m *Manager) Destination(ctx context.Context) (cf.Destination, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if err := m.ensureLoaded(ctx); err != nil {
+	if err := m.load(ctx); err != nil {
 		return cf.Destination{}, err
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return *m.dest, nil
 }
 
 // RuntimeInfo returns metadata about the currently loaded configuration,
 // loading on first call if needed.
 func (m *Manager) RuntimeInfo(ctx context.Context) (RuntimeInfo, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if err := m.ensureLoaded(ctx); err != nil {
+	if err := m.load(ctx); err != nil {
 		return RuntimeInfo{}, err
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return RuntimeInfo{
 		Loaded:          true,
 		DestinationName: m.destName,
