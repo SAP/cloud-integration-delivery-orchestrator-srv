@@ -2,6 +2,7 @@ package env
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -129,8 +130,8 @@ func TestDo_401RetryPreservesBody(t *testing.T) {
 // treating it as a successful empty-token auth.
 func TestAuthenticate_RejectsNon2xxTokenResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = w.Write([]byte(`{"error":"invalid_client"}`))
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":"not_found"}`))
 	}))
 	defer server.Close()
 
@@ -138,11 +139,21 @@ func TestAuthenticate_RejectsNon2xxTokenResponse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
-	if err := c.Authenticate(context.Background()); err == nil {
-		t.Fatal("expected error for 401 token response, got nil")
+	authErr := c.Authenticate(context.Background())
+	if authErr == nil {
+		t.Fatal("expected error for 404 token response, got nil")
 	}
 	if c.AccessToken != "" {
 		t.Fatalf("expected no token stored after failed auth, got %q", c.AccessToken)
+	}
+	// R2: a token-endpoint 404 must NOT be mistakable for a business-API 404.
+	var tokErr *TokenError
+	if !errors.As(authErr, &tokErr) {
+		t.Fatalf("expected *TokenError, got %T", authErr)
+	}
+	var httpErr *HttpResponseError
+	if errors.As(authErr, &httpErr) {
+		t.Fatal("token error must NOT match *HttpResponseError (would be read as object-not-found)")
 	}
 }
 

@@ -29,6 +29,25 @@ func (e *HttpResponseError) Error() string {
 	return fmt.Sprintf("HTTP %d from %s: %s", e.StatusCode, e.URL, preview)
 }
 
+// TokenError represents a failed OAuth token fetch (non-2xx from the token
+// endpoint). It is deliberately a DISTINCT type from HttpResponseError so a
+// token-endpoint status (e.g. 404 from a wrong token URL) is never mistaken by
+// business-API callers that use errors.As(&HttpResponseError) to interpret a
+// 404 as "object not found" — which would silently skip checks (R2).
+type TokenError struct {
+	StatusCode int
+	Body       []byte
+	URL        string
+}
+
+func (e *TokenError) Error() string {
+	preview := string(e.Body)
+	if len(preview) > 200 {
+		preview = preview[:200]
+	}
+	return fmt.Sprintf("token endpoint HTTP %d from %s: %s", e.StatusCode, e.URL, preview)
+}
+
 type HttpClient struct {
 	HttpClient   *http.Client
 	AccessToken  string
@@ -93,7 +112,7 @@ func (c *HttpClient) fetchToken(ctx context.Context) error {
 	// slipped through and produced an empty-token "success".
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		L(ctx).Errorw("token endpoint returned non-2xx", "status", res.StatusCode)
-		return &HttpResponseError{StatusCode: res.StatusCode, Body: body, URL: c.AuthUrl}
+		return &TokenError{StatusCode: res.StatusCode, Body: body, URL: c.AuthUrl}
 	}
 
 	var oauthResp OauthResp

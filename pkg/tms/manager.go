@@ -36,9 +36,17 @@ type RuntimeInfo struct {
 // Manager provides thread-safe, cached access to the Central TMS client and
 // the destination snapshot used to build it.
 //
-// There are exactly two writers of the active entry: lazy build (ensureLoaded,
-// cold start only) and Reconfigure (the single entry point for configuration
-// changes). Normal reads reuse the active client and never reload.
+// The cached entry is the runtime source of truth for Central TMS — not the
+// DB row and not the BTP destination. It is written only by the first
+// successful lazy load after process start (ensureLoaded) and by a successful
+// Reconfigure; every other call reads the cache and never re-resolves the
+// destination. There is deliberately no Invalidate.
+//
+// Why: switching Central TMS also invalidates every tenant's node selection
+// and subscriber-side copy (Rule 4), so a change may only take effect through
+// Reconfigure, which runs Rule 4 in the same commit. Re-reading the destination
+// would let an out-of-band BTP edit silently switch TMS without Rule 4, and
+// would let a Destination Service outage break a client that already works.
 //
 // The Manager does NOT own the configuration version. The authoritative version
 // is CentralTmsContext.Generation in the database; Reconfigure's commit callback

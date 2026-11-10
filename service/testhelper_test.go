@@ -130,7 +130,8 @@ func (m *mockTmsProvider) Reconfigure(_ context.Context, destName string, commit
 }
 
 type mockCpiProvider struct {
-	getFunc func(ctx context.Context, tenantID uint) (cpi.IntegrationService, error)
+	getFunc     func(ctx context.Context, tenantID uint) (cpi.IntegrationService, error)
+	invalidated []uint // tenant IDs passed to Invalidate, in order
 }
 
 func (m *mockCpiProvider) Get(ctx context.Context, tenantID uint) (cpi.IntegrationService, error) {
@@ -140,10 +141,11 @@ func (m *mockCpiProvider) Get(ctx context.Context, tenantID uint) (cpi.Integrati
 	return m.getFunc(ctx, tenantID)
 }
 
-func (m *mockCpiProvider) Invalidate(_ uint) {}
+func (m *mockCpiProvider) Invalidate(tenantID uint) { m.invalidated = append(m.invalidated, tenantID) }
 
 type mockCasProvider struct {
-	client cas.CasService
+	client      cas.CasService
+	invalidated []uint
 }
 
 func (m *mockCasProvider) Get(_ context.Context, _ uint) (cas.CasService, error) {
@@ -153,7 +155,7 @@ func (m *mockCasProvider) Get(_ context.Context, _ uint) (cas.CasService, error)
 	return m.client, nil
 }
 
-func (m *mockCasProvider) Invalidate(_ uint) {}
+func (m *mockCasProvider) Invalidate(tenantID uint) { m.invalidated = append(m.invalidated, tenantID) }
 
 // newTestService creates a Service wired to testDB with a given mock CPI factory function.
 // It sets sensible defaults for TMS/Notifier/GetUserEmail (no-op mocks) so that

@@ -27,20 +27,21 @@ type upsertCentralTmsResponse struct {
 	AffectedTenants int64 `json:"affectedTenants"`
 }
 
-// UpsertCentralTmsContext creates or fully replaces the CentralTmsContext.
-// v1 supports a single record; subsequent PUT calls overwrite it in place.
-//
-// Rule 4 (RFC 032 §5.4): if TmsApiDestinationName is changed and tenants exist
-// with TmsExtensionState=bootstrapped, they are invalidated to not_started.
-// If any tenant is in TmsExtensionState=bootstrapping, the modification is rejected (409).
+// UpsertCentralTmsContext creates or re-applies the Central TMS configuration.
+// The request carries only the destination name; every save is a full
+// reconfigure that re-reads/validates the destination and runs Rule 4 (reset
+// affected tenants), even when the name is unchanged. A concurrent reconfigure
+// yields 409 TMS_CONFIG_CHANGED; a bootstrapping tenant yields 409.
 func (h *Handler) UpsertCentralTmsContext(ctx *gin.Context) {
-	var input db.CentralTmsContext
-	if err := ctx.ShouldBindJSON(&input); err != nil {
+	var req struct {
+		TmsApiDestinationName string `json:"TmsApiDestinationName"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil {
 		Fail(ctx, 400, err.Error())
 		return
 	}
 
-	result, err := h.svc.UpsertCentralTmsContext(ctx.Request.Context(), input)
+	result, err := h.svc.UpsertCentralTmsContext(ctx.Request.Context(), req.TmsApiDestinationName)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrTmsBootstrapInProgress):

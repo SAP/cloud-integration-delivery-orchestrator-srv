@@ -63,13 +63,19 @@ type UpsertCentralTmsContextResult struct {
 // SelectTmsNode (RFC 032 L20). Every call triggers Rule 4, not just when the
 // destination name changes. Validation or commit failure preserves the old
 // active client and DB config.
-func (s *Service) UpsertCentralTmsContext(ctx context.Context, input db.CentralTmsContext) (*UpsertCentralTmsContextResult, error) {
+func (s *Service) UpsertCentralTmsContext(ctx context.Context, destName string) (*UpsertCentralTmsContextResult, error) {
+	// Build the row ourselves from the single caller-supplied field. The handler
+	// no longer binds the request straight onto db.CentralTmsContext, so a client
+	// cannot set ID / CreatedAt / DeletedAt (L3).
+	input := db.CentralTmsContext{TmsApiDestinationName: destName}
+
 	// Version observed at the start of this call (outside the commit tx). The
 	// commit compares the locked row against this to detect a concurrent
 	// Reconfigure. 0 when no config exists yet (first-time configuration).
+	// Unscoped so a soft-deleted singleton row is still seen (defensive).
 	var genAtStart uint64
 	var startRow db.CentralTmsContext
-	if err := s.DB.First(&startRow).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+	if err := s.DB.Unscoped().First(&startRow).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, fmt.Errorf("read current central TMS version: %w", err)
 	}
 	genAtStart = startRow.Generation
@@ -88,18 +94,15 @@ func (s *Service) UpsertCentralTmsContext(ctx context.Context, input db.CentralT
 			// (FOR UPDATE cannot lock a not-yet-existing row); the loser's Save
 			// fails with a duplicate-key error, which we map to a conflict.
 			var existing db.CentralTmsContext
-			err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&existing).Error
+			err := tx.Unscoped().Clauses(clause.Locking{Strength: "UPDATE"}).First(&existing).Error
 			firstTime := errors.Is(err, gorm.ErrRecordNotFound)
 			if err != nil && !firstTime {
 				return fmt.Errorf("lock existing context: %w", err)
 			}
 
 			currentGen := uint64(0)
-			if firstTime {
-				input.ID = singletonTmsContextID
-			} else {
+			if !firstTime {
 				currentGen = existing.Generation
-				input.ID = existing.ID
 			}
 			if tmsConfigChanged(genAtStart, currentGen) {
 				return fmt.Errorf("%w: version %d → %d", ErrTmsConfigConflict, genAtStart, currentGen)
@@ -143,11 +146,6 @@ func (s *Service) UpsertCentralTmsContext(ctx context.Context, input db.CentralT
 			}
 			affectedCount = result.RowsAffected
 
-			// Advance the authoritative version and record the validation time as
-			// part of the same transaction.
-			input.Generation = currentGen + 1
-			input.LastValidatedAt = &validatedAt
-
 			// First-ever config (no row to lock, version compare is 0==0 for every
 			// racer): the ONLY guard against a concurrent first reconfigure is the
 			// primary key. Use Create, not Save: Create is a pure INSERT, so a racer
@@ -157,11 +155,10 @@ func (s *Service) UpsertCentralTmsContext(ctx context.Context, input db.CentralT
 			// — reintroducing the lost-update bug this fix closes. The PK-collision
 			// error is mapped to ErrTmsConfigConflict so the loser gets a 409, not
 			// a raw 500 (same contract as the steady-state version conflict).
-			//
-			// Steady state (row exists): the FOR UPDATE lock + version compare above
-			// already serialise racers and reject the stale one, so Save's UPDATE is
-			// safe here.
 			if firstTime {
+				input.ID = singletonTmsContextID
+				input.Generation = currentGen + 1
+				input.LastValidatedAt = &validatedAt
 				if err := tx.Create(&input).Error; err != nil {
 					if db.IsUniqueViolation(err) {
 						return fmt.Errorf("%w: concurrent first-time configuration", ErrTmsConfigConflict)
@@ -170,11 +167,26 @@ func (s *Service) UpsertCentralTmsContext(ctx context.Context, input db.CentralT
 				}
 				return nil
 			}
-			return tx.Save(&input).Error
+
+			// Steady state (row exists): the FOR UPDATE lock + version compare above
+			// already serialise racers. Update only the columns we own — never a
+			// full-row Save, which would zero created_at and let a client-supplied
+			// DeletedAt through (L3). Unscoped + deleted_at=NULL defensively revives
+			// a row that was somehow soft-deleted.
+			input.ID = existing.ID
+			input.Generation = currentGen + 1
+			input.LastValidatedAt = &validatedAt
+			return tx.Unscoped().Model(&db.CentralTmsContext{}).Where("id = ?", existing.ID).
+				Updates(map[string]any{
+					"tms_api_destination_name": input.TmsApiDestinationName,
+					"generation":               input.Generation,
+					"last_validated_at":        input.LastValidatedAt,
+					"deleted_at":               nil,
+				}).Error
 		})
 	}
 
-	if _, err := s.TMS.Reconfigure(ctx, input.TmsApiDestinationName, commit); err != nil {
+	if _, err := s.TMS.Reconfigure(ctx, destName, commit); err != nil {
 		return nil, fmt.Errorf("reconfigure: %w", err)
 	}
 

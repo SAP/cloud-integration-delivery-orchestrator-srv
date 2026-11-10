@@ -142,5 +142,11 @@ func (s *Service) SaveCfIdentity(ctx context.Context, tenantID uint, input CfIde
 		return fmt.Errorf("SaveCfIdentity: reset and configure: %w", err)
 	}
 
+	// Rule 1 cleared the PIR/CAS bindings; invalidate the cached clients so a
+	// stale client cannot keep reaching the old subaccount (§5.2 controlled
+	// invalidation). Mirrors ResetBootstrap / ResetTmsExtension.
+	s.CPI.Invalidate(tenantID)
+	s.CAS.Invalidate(tenantID)
+
 	return nil
 }

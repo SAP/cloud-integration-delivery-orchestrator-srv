@@ -217,7 +217,7 @@ func TestSelectTmsNode_ConcurrentReconfigure_Invariant(t *testing.T) {
 		}()
 		go func() {
 			defer wg.Done()
-			_, _ = svc.UpsertCentralTmsContext(context.Background(), db.CentralTmsContext{TmsApiDestinationName: "reconfigured"})
+			_, _ = svc.UpsertCentralTmsContext(context.Background(), "reconfigured")
 		}()
 		wg.Wait()
 
@@ -255,7 +255,7 @@ func TestUpsertCentralTms_ConcurrentReconfigure_Invariant(t *testing.T) {
 		for j := 0; j < 2; j++ {
 			go func(j int) {
 				defer wg.Done()
-				_, errs[j] = svc.UpsertCentralTmsContext(context.Background(), db.CentralTmsContext{TmsApiDestinationName: names[j]})
+				_, errs[j] = svc.UpsertCentralTmsContext(context.Background(), names[j])
 			}(j)
 		}
 		wg.Wait()
@@ -313,7 +313,7 @@ func TestUpsertCentralTms_ConcurrentFirstTime_SingleRow(t *testing.T) {
 		for j := 0; j < 2; j++ {
 			go func(j int) {
 				defer wg.Done()
-				_, errs[j] = svc.UpsertCentralTmsContext(context.Background(), db.CentralTmsContext{TmsApiDestinationName: names[j]})
+				_, errs[j] = svc.UpsertCentralTmsContext(context.Background(), names[j])
 			}(j)
 		}
 		wg.Wait()
@@ -1120,7 +1120,7 @@ func TestRule4_UpsertCentralTms_InvalidatesNodeConfirmed(t *testing.T) {
 	database.Create(&notStarted)
 
 	// Change Central TMS destination.
-	result, err := svc.UpsertCentralTmsContext(t.Context(), db.CentralTmsContext{TmsApiDestinationName: "new-dest"})
+	result, err := svc.UpsertCentralTmsContext(t.Context(), "new-dest")
 	if err != nil {
 		t.Fatalf("UpsertCentralTmsContext: %v", err)
 	}
@@ -1167,5 +1167,36 @@ func TestRule4_UpsertCentralTms_InvalidatesNodeConfirmed(t *testing.T) {
 	database.First(&got, notStarted.ID)
 	if got.TmsExtensionState != lifecycle.TmsNotStarted {
 		t.Errorf("notstarted: TmsExtensionState = %q, want not_started", got.TmsExtensionState)
+	}
+}
+
+// L3: a steady-state reconfigure updates only the columns we own; it must not
+// zero created_at (which a full-row Save would) nor let the row be soft-deleted.
+func TestUpsertCentralTms_PreservesCreatedAt(t *testing.T) {
+	database := newTestDB(t)
+	seedCentralTmsGen(t, database, 1)
+	var before db.CentralTmsContext
+	database.First(&before)
+	origCreated := before.CreatedAt
+
+	mock := &mockTMSClient{nodes: []db.TransportNode{{ID: 1, Name: "N1"}}}
+	svc := &Service{DB: database, TMS: &mockTmsProvider{client: mock}}
+	if _, err := svc.UpsertCentralTmsContext(context.Background(), "new-dest"); err != nil {
+		t.Fatalf("reconfigure: %v", err)
+	}
+
+	var after db.CentralTmsContext
+	database.First(&after)
+	if !after.CreatedAt.Equal(origCreated) {
+		t.Fatalf("created_at changed: %v → %v (steady-state update must not touch it)", origCreated, after.CreatedAt)
+	}
+	if after.TmsApiDestinationName != "new-dest" {
+		t.Fatalf("destination = %q, want new-dest", after.TmsApiDestinationName)
+	}
+	if after.Generation != 2 {
+		t.Fatalf("generation = %d, want 2", after.Generation)
+	}
+	if !after.DeletedAt.Time.IsZero() {
+		t.Fatal("row must not be soft-deleted after a normal reconfigure")
 	}
 }
