@@ -208,7 +208,85 @@ func TestRule4_UpsertCentralTms_SameDestStillInvalidates(t *testing.T) {
 	}
 }
 
-// ── §6.1: Upsert whitelist — TMS fields in request body are ignored ─────────
+// ── §6.1: Same-name same-content PUT triggers Rule 4 + advances generation ───
+
+// TestRule4_UpsertCentralTms_SameNameSameContent_AdvancesGenerationAndClearsNode
+// demonstrates the core §6.1 rule: every call to UpsertCentralTmsContext is a
+// full Reconfigure that runs Rule 4 and advances the config generation — even
+// when the destination name AND content are identical to what is already stored.
+// This ensures that same-name credential rotation or any silent content change
+// also resets tenant node selections (which point to the now-potentially-changed
+// TMS system). The generation advance is the observable proof that a new logical
+// version was committed, not a no-op.
+func TestRule4_UpsertCentralTms_SameNameSameContent_AdvancesGenerationAndClearsNode(t *testing.T) {
+	h, database := newTestHandlerWithTms(t)
+
+	// Seed Central TMS context with the destination name we will re-submit.
+	if err := database.Create(&db.CentralTmsContext{TmsApiDestinationName: "same-dest"}).Error; err != nil {
+		t.Fatalf("seed CentralTmsContext: %v", err)
+	}
+
+	// Seed a bootstrapped tenant with a registered node.
+	bootstrapped := db.CpiTenant{
+		Name:              "tenant-same-content",
+		LifecycleState:    lifecycle.TenantReady,
+		TmsExtensionState: lifecycle.TmsBootstrapped,
+		TmsSourceNodeName: "my-node",
+		TmsSourceNodeID:   42,
+		CfApiEndpoint:     "https://api.cf.eu10.example.com",
+		CfOrg:             "org-same",
+	}
+	if err := database.Create(&bootstrapped).Error; err != nil {
+		t.Fatalf("seed tenant: %v", err)
+	}
+
+	// PUT with the EXACT SAME destination name (same content too — no change).
+	// Rule 4 must still fire: every save is a full Reconfigure (RFC 033 §6.1).
+	w := postJSON(t, h.UpsertCentralTmsContext, map[string]string{
+		"TmsApiDestinationName": "same-dest",
+	})
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Data struct {
+			TmsApiDestinationName string `json:"TmsApiDestinationName"`
+			AffectedTenants       int64  `json:"affectedTenants"`
+		} `json:"Data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resp.Data.AffectedTenants != 1 {
+		t.Errorf("affectedTenants = %d, want 1", resp.Data.AffectedTenants)
+	}
+
+	// Tenant must be reset: state → not_started, node fields cleared.
+	var got db.CpiTenant
+	database.First(&got, bootstrapped.ID)
+	if got.TmsExtensionState != lifecycle.TmsNotStarted {
+		t.Errorf("TmsExtensionState = %q, want %q", got.TmsExtensionState, lifecycle.TmsNotStarted)
+	}
+	if got.TmsSourceNodeName != "" {
+		t.Errorf("TmsSourceNodeName = %q, want empty", got.TmsSourceNodeName)
+	}
+	if got.TmsSourceNodeID != 0 {
+		t.Errorf("TmsSourceNodeID = %d, want 0", got.TmsSourceNodeID)
+	}
+
+	// Config generation must have advanced from 0 → 1 (a new logical version was
+	// committed, not a no-op). LastValidatedAt must be persisted in the same tx.
+	var savedCfg db.CentralTmsContext
+	database.First(&savedCfg)
+	if savedCfg.Generation != 1 {
+		t.Errorf("Generation = %d, want 1 (same-content PUT still commits a new version)", savedCfg.Generation)
+	}
+	if savedCfg.LastValidatedAt == nil {
+		t.Error("LastValidatedAt was not persisted by same-content Reconfigure")
+	}
+}
 
 func TestUpsertCpiTenant_Update_IgnoresTmsFields(t *testing.T) {
 	h, database := newTestHandler(t)

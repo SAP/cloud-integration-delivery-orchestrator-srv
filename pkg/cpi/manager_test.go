@@ -3,6 +3,7 @@ package cpi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -76,6 +77,126 @@ func TestManagerGet_InvalidateDuringBuild_NoStaleCache(t *testing.T) {
 	m.mu.RUnlock()
 	if cached {
 		t.Fatal("stale client was cached after Invalidate during build")
+	}
+}
+
+// ── §4 error matrix (RFC 033 §4.3) ──────────────────────────────────────────
+//
+// CPI Manager.Get must return clear errors for every bad-binding scenario and
+// must never panic. Tests cover: tenant not found, empty destination name,
+// destination not found in BTP (404 → nil,nil), missing OAuth credentials.
+
+// TestManagerGet_TenantNotFound verifies that Get wraps gorm.ErrRecordNotFound
+// when the tenant row does not exist.
+func TestManagerGet_TenantNotFound(t *testing.T) {
+	database := newManagerTestDB(t)
+	m := NewManager(database, nil) // resolver never reached
+	_, err := m.Get(context.Background(), 999)
+	if err == nil {
+		t.Fatal("expected error for missing tenant, got nil")
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Errorf("error = %v; want to wrap gorm.ErrRecordNotFound", err)
+	}
+}
+
+// TestManagerGet_EmptyDestinationName verifies that Get returns ErrNoDestination
+// when the tenant's PirApiDestinationName is empty.
+func TestManagerGet_EmptyDestinationName(t *testing.T) {
+	database := newManagerTestDB(t)
+	tenant := db.CpiTenant{Name: "no-dest", PirApiDestinationName: "", CfApiEndpoint: "x", CfOrg: "o"}
+	database.Create(&tenant)
+
+	m := NewManager(database, nil) // resolver never reached for empty name
+	_, err := m.Get(context.Background(), tenant.ID)
+	if err == nil {
+		t.Fatal("expected ErrNoDestination, got nil")
+	}
+	if !errors.Is(err, ErrNoDestination) {
+		t.Errorf("error = %v; want to wrap ErrNoDestination", err)
+	}
+}
+
+// TestManagerGet_DestinationNotFound verifies that Get returns an error (no panic)
+// when the BTP Destination Service returns 404 for the tenant's destination name.
+// cf.GetDestination maps a 404 to (nil, nil); the manager must handle it.
+func TestManagerGet_DestinationNotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/oauth/token") {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "tok", "expires_in": 3600})
+			return
+		}
+		if strings.Contains(r.URL.Path, "/subaccountDestinations/") {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	resolver, err := cf.NewDestinationServiceClient(context.Background(), map[string]any{
+		"clientid": "p", "clientsecret": "s", "url": server.URL, "uri": server.URL,
+	})
+	if err != nil {
+		t.Fatalf("resolver: %v", err)
+	}
+
+	database := newManagerTestDB(t)
+	tenant := db.CpiTenant{Name: "t", PirApiDestinationName: "missing-dest", CfApiEndpoint: "x", CfOrg: "o"}
+	database.Create(&tenant)
+
+	m := NewManager(database, resolver)
+	_, err = m.Get(context.Background(), tenant.ID)
+	if err == nil {
+		t.Fatal("expected error for missing destination, got nil")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("error = %q; want to contain %q", err.Error(), "not found")
+	}
+}
+
+// TestManagerGet_MissingOAuthCredentials verifies that Get returns an error (no panic)
+// when the resolved destination has empty OAuth credentials.
+func TestManagerGet_MissingOAuthCredentials(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/oauth/token") {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "tok", "expires_in": 3600})
+			return
+		}
+		if strings.Contains(r.URL.Path, "/subaccountDestinations/") {
+			// Return a destination with no OAuth credentials.
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(cf.Destination{
+				Name: "no-creds-dest", URL: "https://cpi.example.com",
+				Authentication: "OAuth2ClientCredentials",
+				// ClientId, ClientSecret, TokenServiceURL intentionally empty
+			})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	resolver, err := cf.NewDestinationServiceClient(context.Background(), map[string]any{
+		"clientid": "p", "clientsecret": "s", "url": server.URL, "uri": server.URL,
+	})
+	if err != nil {
+		t.Fatalf("resolver: %v", err)
+	}
+
+	database := newManagerTestDB(t)
+	tenant := db.CpiTenant{Name: "t", PirApiDestinationName: "no-creds-dest", CfApiEndpoint: "x", CfOrg: "o"}
+	database.Create(&tenant)
+
+	m := NewManager(database, resolver)
+	_, err = m.Get(context.Background(), tenant.ID)
+	if err == nil {
+		t.Fatal("expected error for missing OAuth credentials, got nil")
+	}
+	if !strings.Contains(err.Error(), "missing OAuth credentials") {
+		t.Errorf("error = %q; want to contain %q", err.Error(), "missing OAuth credentials")
 	}
 }
 

@@ -1200,3 +1200,169 @@ func TestUpsertCentralTms_PreservesCreatedAt(t *testing.T) {
 		t.Fatal("row must not be soft-deleted after a normal reconfigure")
 	}
 }
+
+// RFC 033 §6.2: Reconfigure resets tenant TMS state (Rule 4) but does NOT
+// write subscriber destinations. The TransportManagementService destination in
+// the subscriber's CF space is NOT updated by Reconfigure. The operator must
+// re-select a TMS node and run Apply, which copies the new TMS snapshot to the
+// subscriber. This test asserts the Rule 4 reset AND documents that no
+// destination copy occurs during Reconfigure.
+func TestReconfigure_DoesNotAutoRewriteSubscriberCopy(t *testing.T) {
+	database := newTestDB(t)
+
+	// Seed Central TMS config row (required by UpsertCentralTmsContext).
+	if err := database.Create(&db.CentralTmsContext{
+		TmsApiDestinationName: "tms-dest",
+	}).Error; err != nil {
+		t.Fatalf("seed CentralTmsContext: %v", err)
+	}
+
+	// Seed a bootstrapped tenant — represents one that has already had Apply run
+	// (TmsSourceNodeName/ID are set, meaning its subscriber CF space holds a
+	// TransportManagementService destination copied during a prior Apply).
+	tenant := db.CpiTenant{
+		Name:              "subscriber-copy-tenant",
+		CfApiEndpoint:     "https://api.cf.eu10.example.com",
+		CfOrg:             "org-1",
+		LifecycleState:    lifecycle.TenantReady,
+		TmsExtensionState: lifecycle.TmsBootstrapped,
+		TmsSourceNodeName: "source-node",
+		TmsSourceNodeID:   42,
+	}
+	if err := database.Create(&tenant).Error; err != nil {
+		t.Fatalf("seed tenant: %v", err)
+	}
+
+	svc := &Service{DB: database, TMS: &mockTmsProvider{}}
+
+	result, err := svc.UpsertCentralTmsContext(t.Context(), "new-tms-dest")
+	if err != nil {
+		t.Fatalf("UpsertCentralTmsContext: %v", err)
+	}
+	if result.AffectedTenants != 1 {
+		t.Errorf("AffectedTenants = %d, want 1", result.AffectedTenants)
+	}
+
+	// Reconfigure resets the tenant state (Rule 4) but does NOT write subscriber
+	// destinations — the TransportManagementService destination in the subscriber's
+	// CF space is NOT updated here. The operator must re-select a TMS node and run
+	// Apply, which copies the new TMS snapshot to the subscriber (RFC 033 §6.2).
+	// Asserting here that TmsExtensionState is not_started — meaning the tenant
+	// must go through the full re-select + Apply flow to get its subscriber
+	// destination updated with the new TMS credentials/URL.
+	var got db.CpiTenant
+	if err := database.First(&got, tenant.ID).Error; err != nil {
+		t.Fatalf("load tenant: %v", err)
+	}
+
+	if got.TmsExtensionState != lifecycle.TmsNotStarted {
+		t.Errorf("TmsExtensionState = %q, want %q (Rule 4 reset)", got.TmsExtensionState, lifecycle.TmsNotStarted)
+	}
+	if got.TmsSourceNodeName != "" {
+		t.Errorf("TmsSourceNodeName = %q, want empty (Rule 4 cleared node)", got.TmsSourceNodeName)
+	}
+	if got.TmsSourceNodeID != 0 {
+		t.Errorf("TmsSourceNodeID = %d, want 0 (Rule 4 cleared node)", got.TmsSourceNodeID)
+	}
+	if got.TmsBlockingReason != lifecycle.TmsReasonCentralTmsChanged {
+		t.Errorf("TmsBlockingReason = %q, want %q", got.TmsBlockingReason, lifecycle.TmsReasonCentralTmsChanged)
+	}
+}
+
+// ── §5.2 R1: Binding-cleared paths call Invalidate ──────────────────────────
+
+// ResetBootstrap clears the PIR binding; the CPI client for that tenant must
+// be invalidated so the next Get does not return a stale client pointing at
+// the old subaccount (§5.2, R1 fix in b002c71).
+func TestResetBootstrap_InvalidatesCpiClientOnSuccess(t *testing.T) {
+	database := newTestDB(t)
+
+	tenant := db.CpiTenant{
+		Name:              "reset-cpi",
+		LifecycleState:    lifecycle.TenantReady,
+		TmsExtensionState: lifecycle.TmsNotStarted,
+		CfApiEndpoint:     "https://api.cf.example.com",
+		CfOrg:             "org-reset-cpi",
+	}
+	if err := database.Create(&tenant).Error; err != nil {
+		t.Fatalf("create tenant: %v", err)
+	}
+
+	// A running BASE job so ResetBootstrap has something to mark failed.
+	job := db.TenantBootstrapJob{
+		CpiTenantID: tenant.ID,
+		Layer:       lifecycle.LayerBase,
+		State:       lifecycle.JobRunning,
+	}
+	if err := database.Create(&job).Error; err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+
+	cpiMock := &mockCpiProvider{}
+	svc := &Service{
+		DB:     database,
+		CPI:    cpiMock,
+		TMS:    &mockTmsProvider{},
+		Logger: zap.NewNop().Sugar(),
+	}
+
+	if err := svc.ResetBootstrap(tenant.ID); err != nil {
+		t.Fatalf("ResetBootstrap: %v", err)
+	}
+
+	// CPI client must be invalidated after PIR binding is cleared (§5.2 R1).
+	if len(cpiMock.invalidated) != 1 {
+		t.Fatalf("Invalidate call count = %d, want 1", len(cpiMock.invalidated))
+	}
+	if cpiMock.invalidated[0] != tenant.ID {
+		t.Errorf("Invalidate tenant ID = %d, want %d", cpiMock.invalidated[0], tenant.ID)
+	}
+}
+
+// ResetTmsExtension clears the CAS binding; the CAS client for that tenant
+// must be invalidated so the next Get does not return a stale client (§5.2,
+// R1 fix in b002c71).
+func TestResetTmsExtension_InvalidatesCasClientOnSuccess(t *testing.T) {
+	database := newTestDB(t)
+
+	tenant := db.CpiTenant{
+		Name:              "reset-cas",
+		LifecycleState:    lifecycle.TenantReady,
+		TmsExtensionState: lifecycle.TmsNotStarted,
+		CfApiEndpoint:     "https://api.cf.example.com",
+		CfOrg:             "org-reset-cas",
+	}
+	if err := database.Create(&tenant).Error; err != nil {
+		t.Fatalf("create tenant: %v", err)
+	}
+
+	// A running TMS job so ResetTmsExtension has something to mark failed.
+	job := db.TenantBootstrapJob{
+		CpiTenantID: tenant.ID,
+		Layer:       lifecycle.LayerTMS,
+		State:       lifecycle.JobRunning,
+	}
+	if err := database.Create(&job).Error; err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+
+	casMock := &mockCasProvider{}
+	svc := &Service{
+		DB:     database,
+		CAS:    casMock,
+		TMS:    &mockTmsProvider{},
+		Logger: zap.NewNop().Sugar(),
+	}
+
+	if err := svc.ResetTmsExtension(tenant.ID); err != nil {
+		t.Fatalf("ResetTmsExtension: %v", err)
+	}
+
+	// CAS client must be invalidated after CAS binding is cleared (§5.2 R1).
+	if len(casMock.invalidated) != 1 {
+		t.Fatalf("Invalidate call count = %d, want 1", len(casMock.invalidated))
+	}
+	if casMock.invalidated[0] != tenant.ID {
+		t.Errorf("Invalidate tenant ID = %d, want %d", casMock.invalidated[0], tenant.ID)
+	}
+}

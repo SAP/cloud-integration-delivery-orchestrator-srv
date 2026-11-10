@@ -217,6 +217,51 @@ func TestGet_ReportsSourceGeneration(t *testing.T) {
 	}
 }
 
+// A caller that already obtained a TransportService reference before a
+// Reconfigure can continue using it after the swap — the old client is not
+// invalidated, only unreachable through subsequent Get calls. Both clients
+// reference the same test backend, so GetNodes succeeds on both.
+//
+// Once a caller has obtained a reference to a TransportService, the swap does
+// not invalidate it — the old client is still usable for in-flight work
+// (§5.3). This is sequential, not concurrent: both clients point at the same
+// test backend.
+func TestReconfigure_OldClientRemainsUsableAfterSwap(t *testing.T) {
+	b := newTmsBackend(t)
+	m := NewManager(newTmsTestDB(t), b.resolver(t))
+
+	if _, err := m.Reconfigure(context.Background(), "dest-a", okCommit); err != nil {
+		t.Fatalf("first reconfigure: %v", err)
+	}
+	c1, _, err := m.Get(context.Background())
+	if err != nil {
+		t.Fatalf("get c1: %v", err)
+	}
+
+	if _, err := m.Reconfigure(context.Background(), "dest-b", okCommit); err != nil {
+		t.Fatalf("second reconfigure: %v", err)
+	}
+	c2, _, err := m.Get(context.Background())
+	if err != nil {
+		t.Fatalf("get c2: %v", err)
+	}
+
+	if c1 == c2 {
+		t.Fatal("expected a new active client after the second reconfigure")
+	}
+
+	// Old client (c1) is still usable — calling GetNodes must succeed even
+	// though the manager's active entry has been replaced by c2.
+	if _, err := c1.GetNodes(context.Background()); err != nil {
+		t.Fatalf("old client GetNodes after swap: %v (expected usable)", err)
+	}
+
+	// New client (c2) is also fully functional.
+	if _, err := c2.GetNodes(context.Background()); err != nil {
+		t.Fatalf("new client GetNodes: %v", err)
+	}
+}
+
 type errTest string
 
 func (e errTest) Error() string { return string(e) }
