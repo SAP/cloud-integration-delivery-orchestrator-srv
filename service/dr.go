@@ -276,7 +276,6 @@ func (s *Service) DeleteTenantOps(drID uint, opIDs []uint) error {
 	return nil
 }
 
-
 func (s *Service) InsertTenantOps(ctx context.Context, drID uint, ops []db.ArtifactTenantOperation, user string) ([]db.ArtifactTenantOperation, error) {
 	if len(ops) == 0 {
 		return nil, nil

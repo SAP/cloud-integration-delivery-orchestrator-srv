@@ -67,7 +67,7 @@ func TestManagerGet_InvalidateDuringBuild_NoStaleCache(t *testing.T) {
 		close(done)
 	}()
 
-	<-entered              // Get is parked building off-lock (version captured)
+	<-entered               // Get is parked building off-lock (version captured)
 	m.Invalidate(tenant.ID) // bump gen during the build
 	close(release)
 	<-done

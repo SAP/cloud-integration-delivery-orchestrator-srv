@@ -48,24 +48,14 @@ type RuntimeInfo struct {
 // would let an out-of-band BTP edit silently switch TMS without Rule 4, and
 // would let a Destination Service outage break a client that already works.
 //
-// The Manager does NOT own the configuration version — the authoritative
-// version is CentralTmsContext.Generation in the database; Reconfigure's commit
-// callback advances it transactionally and SelectTmsNode compares it
-// transactionally under FOR UPDATE. The Manager caches a copy of that version
-// alongside the active client (see below) purely as a source tag, never as a
-// second authority.
-//
-// The Manager caches the active client/dest and the generation it was built
-// from. The authoritative version is still CentralTmsContext.Generation in the
-// database — the cached generation is a read-only "source tag" recording which
-// DB version the active client was built from, so that callers (SelectTmsNode)
-// can obtain client and generation from one atomic snapshot (under mu) instead
-// of reading the DB separately. Per the core decision "the cached entry is the
-// runtime source of truth for Central TMS", no path other than Reconfigure
-// reads db.CentralTmsContext for the active version; SelectTmsNode asks the
-// Manager, not the DB. Reconfigure's commit callback advances the DB generation
-// transactionally and returns the new value, which the Manager stores under mu
-// together with the swapped client/dest.
+// The authoritative configuration version is CentralTmsContext.Generation in
+// the database; Reconfigure's commit callback advances it transactionally. The
+// Manager caches a read-only copy ("source tag") recording which DB version the
+// active client was built from, so callers (SelectTmsNode) obtain client and
+// generation from one atomic snapshot under mu — business callers never read
+// db.CentralTmsContext directly for the active version. Cold-load and the GET
+// handler's fallback read the config row for initialisation / display purposes,
+// not for runtime version decisions.
 //
 // Lock-ordering constraint: Reconfigure runs its commit callback (a DB
 // transaction) while holding mu. Callers must therefore NOT invoke Get /

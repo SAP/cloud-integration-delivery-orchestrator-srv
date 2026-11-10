@@ -288,6 +288,53 @@ func TestRule4_UpsertCentralTms_SameNameSameContent_AdvancesGenerationAndClearsN
 	}
 }
 
+// ── R3: GetCentralTmsContext fallback behaviour ────────────────────────────────
+
+func TestGetCentralTmsContext_ColdLoadFail_ReturnsDBRow(t *testing.T) {
+	// RuntimeInfo fails (cold-load failure), but a config row exists in the DB.
+	// The handler should return 200 with Loaded=false and the persisted name,
+	// not a misleading 404 "not configured".
+	h, database := newTestHandlerWithTms(t)
+
+	now := time.Now()
+	database.Create(&db.CentralTmsContext{
+		Model:                 gorm.Model{ID: 1},
+		TmsApiDestinationName: "COLD_FAIL_DEST",
+		LastValidatedAt:       &now,
+	})
+
+	w := doGET(t, h.GetCentralTmsContext)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", w.Code, w.Body.String())
+	}
+	var envelope struct {
+		Data tms.RuntimeInfo `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	info := envelope.Data
+	if info.Loaded {
+		t.Error("Loaded = true, want false (cold-load failed)")
+	}
+	if info.DestinationName != "COLD_FAIL_DEST" {
+		t.Errorf("DestinationName = %q, want %q", info.DestinationName, "COLD_FAIL_DEST")
+	}
+	if info.LastValidatedAt == nil {
+		t.Error("LastValidatedAt should be returned from DB")
+	}
+}
+
+func TestGetCentralTmsContext_NeverConfigured_Returns404(t *testing.T) {
+	// No config row in the DB at all → genuine 404.
+	h, _ := newTestHandlerWithTms(t)
+
+	w := doGET(t, h.GetCentralTmsContext)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body = %s", w.Code, w.Body.String())
+	}
+}
+
 func TestUpsertCpiTenant_Update_IgnoresTmsFields(t *testing.T) {
 	h, database := newTestHandler(t)
 

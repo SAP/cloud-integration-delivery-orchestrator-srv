@@ -194,6 +194,7 @@ const (
 const (
 	TmsReasonBaseNotReady            = "BASE_NOT_READY"
 	TmsReasonCentralTmsNotConfigured = "CENTRAL_TMS_NOT_CONFIGURED"
+	TmsReasonCentralTmsNotLoaded     = "CENTRAL_TMS_NOT_LOADED"
 	TmsReasonNodeChanged             = "TMS_NODE_CHANGED"
 	TmsReasonPirKeyChanged           = "PIR_KEY_CHANGED"
 	TmsReasonCentralTmsChanged       = "CENTRAL_TMS_CHANGED"

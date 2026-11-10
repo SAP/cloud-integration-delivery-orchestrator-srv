@@ -53,7 +53,14 @@ func (h *Handler) GetTmsExtension(ctx *gin.Context) {
 	} else {
 		if _, err := h.svc.TMS.RuntimeInfo(ctx.Request.Context()); err != nil {
 			available = false
-			availabilityReason = lifecycle.TmsReasonCentralTmsNotConfigured
+			// Distinguish "never configured" from "configured but runtime not
+			// loaded yet" (R3): check the persisted config row.
+			var cfg db.CentralTmsContext
+			if dbErr := h.db.First(&cfg).Error; dbErr != nil || cfg.TmsApiDestinationName == "" {
+				availabilityReason = lifecycle.TmsReasonCentralTmsNotConfigured
+			} else {
+				availabilityReason = lifecycle.TmsReasonCentralTmsNotLoaded
+			}
 		}
 	}
 

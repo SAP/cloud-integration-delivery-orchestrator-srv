@@ -34,6 +34,16 @@ func newTestHandler(t *testing.T) (*Handler, *gorm.DB) {
 
 // postJSON fires a POST request with body against the given gin handler func and returns the recorder.
 // It injects a minimal UaaClaims so that service.UserID() does not panic.
+func doGET(t *testing.T, handlerFunc gin.HandlerFunc) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request, _ = http.NewRequest(http.MethodGet, "/", nil)
+	handlerFunc(c)
+	return w
+}
+
 func postJSON(t *testing.T, handlerFunc gin.HandlerFunc, body any) *httptest.ResponseRecorder {
 	t.Helper()
 	gin.SetMode(gin.TestMode)

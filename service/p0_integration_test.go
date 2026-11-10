@@ -45,8 +45,8 @@ func TestSelectTmsNode_FromBootstrapped_ResetsToNodeConfirmed(t *testing.T) {
 		},
 	}
 	svc := &Service{
-		DB:     database,
-		TMS:    &mockTmsProvider{client: mock, db: database},
+		DB:  database,
+		TMS: &mockTmsProvider{client: mock, db: database},
 	}
 
 	tenant := db.CpiTenant{
@@ -93,8 +93,8 @@ func TestSelectTmsNode_FromNodeConfirmed_Succeeds(t *testing.T) {
 		},
 	}
 	svc := &Service{
-		DB:     database,
-		TMS:    &mockTmsProvider{client: mock, db: database},
+		DB:  database,
+		TMS: &mockTmsProvider{client: mock, db: database},
 	}
 
 	tenant := db.CpiTenant{
@@ -135,8 +135,8 @@ func TestSelectTmsNode_RejectsInvalidNode(t *testing.T) {
 		},
 	}
 	svc := &Service{
-		DB:     database,
-		TMS:    &mockTmsProvider{client: mock, db: database},
+		DB:  database,
+		TMS: &mockTmsProvider{client: mock, db: database},
 	}
 
 	tenant := db.CpiTenant{
@@ -983,8 +983,8 @@ func TestSelectTmsNode_FromBootstrapped_SetsR2Fields(t *testing.T) {
 		nodes: []db.TransportNode{{ID: 200, Name: "new-node"}},
 	}
 	svc := &Service{
-		DB:     database,
-		TMS:    &mockTmsProvider{client: mock, db: database},
+		DB:  database,
+		TMS: &mockTmsProvider{client: mock, db: database},
 	}
 
 	tenant := db.CpiTenant{

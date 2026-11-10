@@ -51,11 +51,11 @@ type UpsertCentralTmsContextResult struct {
 //  1. Force-read destination from BTP, build and validate candidate TMS client.
 //  2. DB transaction (the commit callback, under the Manager lock):
 //     a. Lock the CentralTmsContext row (FOR UPDATE) and compare its Generation
-//        against the version observed when this call began — reject on mismatch
-//        (ErrTmsConfigConflict). This serialises concurrent Reconfigures on the
-//        config row and surfaces conflicts instead of silently overwriting.
+//     against the version observed when this call began — reject on mismatch
+//     (ErrTmsConfigConflict). This serialises concurrent Reconfigures on the
+//     config row and surfaces conflicts instead of silently overwriting.
 //     b. Reject if any tenant is bootstrapping; execute Rule 4 (reset
-//        node_confirmed + bootstrapped tenants to not_started).
+//     node_confirmed + bootstrapped tenants to not_started).
 //     c. Save the config with Generation incremented by 1.
 //  3. The Manager swaps the active client/dest after the commit succeeds.
 //
