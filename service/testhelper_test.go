@@ -465,10 +465,6 @@ type mockTMSClient struct {
 	// widen the validate→commit window in concurrency tests.
 	getNodesWait time.Duration
 
-	// onGetNodes, when set, runs at the start of GetNodes. Lets a test mutate
-	// state (e.g. advance the config generation) mid-check.
-	onGetNodes func()
-
 	routes    []db.TransportRoute
 	routesErr error
 
@@ -485,9 +481,6 @@ type mockTMSClient struct {
 }
 
 func (m *mockTMSClient) GetNodes(ctx context.Context) ([]db.TransportNode, error) {
-	if m.onGetNodes != nil {
-		m.onGetNodes()
-	}
 	if m.getNodesWait > 0 {
 		time.Sleep(m.getNodesWait)
 	}

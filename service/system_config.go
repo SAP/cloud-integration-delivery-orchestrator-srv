@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/env"
@@ -44,17 +43,13 @@ func (s *Service) CheckDatabase() ConnectivityStatus {
 }
 
 // CheckTMS verifies TMS API connectivity by calling GetNodes on the active
-// client. last_validated_at is stamped only onto the config version that was
-// checked: if a Reconfigure advances the generation during the check, the
-// version-scoped UPDATE matches nothing and the stale result is not recorded
-// against the new config (§7.2.4).
+// client. It is an online probe whose result is returned to the caller in real
+// time; it deliberately does NOT write last_validated_at. That field means
+// "when the active config was validated at Reconfigure time" and is written
+// (version-consistent) only by the Reconfigure commit — letting an ad-hoc
+// connection check stamp it would make the field diverge between memory and DB
+// across restarts (R3).
 func (s *Service) CheckTMS(ctx context.Context) ConnectivityStatus {
-	var cfg db.CentralTmsContext
-	if err := s.DB.First(&cfg).Error; err != nil {
-		return ConnectivityStatus{Name: "TMS", Type: "tms", Status: "error", Message: "central TMS not configured"}
-	}
-	checkedGen := cfg.Generation
-
 	tmsClient, err := s.TMS.Get(ctx)
 	if err != nil {
 		return ConnectivityStatus{Name: "TMS", Type: "tms", Status: "error", Message: err.Error()}
@@ -62,8 +57,6 @@ func (s *Service) CheckTMS(ctx context.Context) ConnectivityStatus {
 	if _, err = tmsClient.GetNodes(ctx); err != nil {
 		return ConnectivityStatus{Name: "TMS", Type: "tms", Status: "error", Message: err.Error()}
 	}
-	now := time.Now()
-	s.DB.Model(&db.CentralTmsContext{}).Where("generation = ?", checkedGen).Update("last_validated_at", now)
 	return ConnectivityStatus{Name: "TMS", Type: "tms", Status: "ok"}
 }
 

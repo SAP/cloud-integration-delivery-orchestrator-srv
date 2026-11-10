@@ -4,20 +4,42 @@ import (
 	"errors"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/db"
+	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/pkg/tms"
 	"github.com/SAP/cloud-integration-delivery-orchestrator-srv/service"
 )
 
-// GetCentralTmsContext returns the current Central TMS configuration.
-// All data is read from the TMS manager's cached snapshot.
+// GetCentralTmsContext returns the current Central TMS configuration from the
+// TMS manager's cached snapshot. If the client has not loaded yet (cold start)
+// and the first load fails (e.g. BTP destination temporarily unavailable), the
+// config still EXISTS — report it from the DB row with Loaded=false rather than
+// a misleading 404 "not configured" that would send operators down the wrong
+// path (R3). A true 404 is only for when no config row exists at all.
 func (h *Handler) GetCentralTmsContext(ctx *gin.Context) {
 	info, err := h.svc.TMS.RuntimeInfo(ctx.Request.Context())
-	if err != nil {
-		Fail(ctx, 404, "central TMS context not configured")
+	if err == nil {
+		OK(ctx, info)
 		return
 	}
-	OK(ctx, info)
+
+	// RuntimeInfo failed — distinguish "never configured" from "configured but
+	// not loaded yet" by consulting the persisted config.
+	var cfg db.CentralTmsContext
+	if dbErr := h.db.First(&cfg).Error; dbErr != nil {
+		if errors.Is(dbErr, gorm.ErrRecordNotFound) {
+			Fail(ctx, 404, "central TMS context not configured")
+		} else {
+			Fail(ctx, 500, dbErr.Error())
+		}
+		return
+	}
+	OK(ctx, tms.RuntimeInfo{
+		Loaded:          false,
+		DestinationName: cfg.TmsApiDestinationName,
+		LastValidatedAt: cfg.LastValidatedAt,
+	})
 }
 
 // upsertCentralTmsResponse extends the saved record with the count of tenants

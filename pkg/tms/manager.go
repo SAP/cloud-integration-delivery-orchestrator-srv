@@ -170,10 +170,9 @@ func (m *Manager) Reconfigure(ctx context.Context, destName string, commit func(
 	}
 
 	// ── Prepare (lock-free): force-read, build, validate ──────────────────
-	// TODO(stage 2b, §5.3): a concurrent in-flight read can refill the resolver
-	// cache with the stale snapshot between Invalidate and GetDestination.
-	// Generation-based anti-stale protection at the resolver layer still needs
-	// to cover this window.
+	// Invalidate + GetDestination force-reads the latest destination. The
+	// resolver's per-name version guard (stage 2b, §5.3) prevents a concurrent
+	// in-flight read from refilling the cache with the stale snapshot.
 	m.resolver.Invalidate(destName)
 	dest, err := m.resolver.GetDestination(ctx, destName)
 	if err != nil {
